@@ -348,6 +348,12 @@ function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat =
       env 
     });
 
+    let timeoutId = setTimeout(() => {
+      console.error("[LibreOffice] 转换超时，正在杀死进程...");
+      child.kill("SIGKILL");
+      reject(new Error("LibreOffice 转换超时 (超过 60 秒)"));
+    }, 60000);
+
     child.stdout.on("data", (data) => {
       stdoutOutput += data.toString();
     });
@@ -357,11 +363,13 @@ function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat =
     });
 
     child.on("error", (err) => {
+      clearTimeout(timeoutId);
       console.error("[LibreOffice] 启动错误:", err);
       reject(err);
     });
 
     child.on("close", (code) => {
+      clearTimeout(timeoutId);
       console.log("[LibreOffice] 进程退出, code:", code);
       if (code !== 0) {
         console.error("[LibreOffice] stdout:", stdoutOutput);
@@ -1453,25 +1461,34 @@ app.post("/api/pdf/to-word", async (req, res) => {
 
     const fileBuffer = decodeBase64File(file);
     console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
-    fs.writeFileSync(inputPath, fileBuffer);
-    console.log("[PDF to Word] 输入文件已写入:", inputPath);
+    fs.writeFileSync(inputPath, decodeBase64File(file));
     
     const outputExt = format === "DOC" ? "doc" : "docx";
-    const outputFormat = format === "DOC" ? "doc" : "docx";
+    let outputFormat;
+    if (format === "DOC") {
+      outputFormat = "doc:Microsoft Word 97-2003";
+    } else {
+      outputFormat = "docx:Microsoft Word 2007-365";
+    }
     console.log("[PDF to Word] 使用格式:", outputFormat);
     await runSofficeConvert(sofficePath, inputPath, tempDir, outputFormat);
 
-    const outputFileName = `input-${randomId}.${outputExt}`;
-    const outputPath = path.join(tempDir, outputFileName);
-    console.log("[PDF to Word] 等待输出文件:", outputPath);
-    
     const tempFiles = fs.readdirSync(tempDir);
     console.log("[PDF to Word] 临时目录内容:", tempFiles);
     
-    if (!fs.existsSync(outputPath)) {
-      throw new Error(`输出文件不存在: ${outputPath}, 目录内容: ${tempFiles.join(", ")}`);
+    let outputPath = "";
+    for (const f of tempFiles) {
+      if (f.endsWith(`.${outputExt}`)) {
+        outputPath = path.join(tempDir, f);
+        break;
+      }
     }
     
+    if (!outputPath || !fs.existsSync(outputPath)) {
+      throw new Error(`输出文件不存在, 目录内容: ${tempFiles.join(", ")}`);
+    }
+    
+    console.log("[PDF to Word] 找到输出文件:", outputPath);
     const bytes = fs.readFileSync(outputPath);
     console.log("[PDF to Word] 输出文件大小:", bytes.length, "bytes");
     
@@ -1578,11 +1595,50 @@ async function closeResources() {
   await clientStateRepository.close();
 }
 
+function cleanupOldTempDirs() {
+  try {
+    if (!fs.existsSync(config.tempDir)) {
+      return 0;
+    }
+
+    const items = fs.readdirSync(config.tempDir);
+    let deletedCount = 0;
+    const now = Date.now();
+    const oneHourAgo = now - 60 * 60 * 1000;
+
+    for (const item of items) {
+      const itemPath = path.join(config.tempDir, item);
+      try {
+        const stats = fs.statSync(itemPath);
+        if (stats.isDirectory() && stats.mtimeMs < oneHourAgo) {
+          fs.rmSync(itemPath, { recursive: true, force: true });
+          deletedCount++;
+        }
+      } catch (e) {
+        console.error("[Temp Cleanup] 无法删除", itemPath, ":", e.message);
+      }
+    }
+
+    return deletedCount;
+  } catch (e) {
+    console.error("[Temp Cleanup] 清理失败:", e);
+    return 0;
+  }
+}
+
 server.once("listening", () => {
-  const deletedCount = storage.cleanupExpiredLocalOutputs();
+  const outputDeletedCount = storage.cleanupExpiredLocalOutputs();
+  const tempDeletedCount = cleanupOldTempDirs();
   console.log(
-    `sky-toolbox-backend running at http://${config.host}:${config.port} (cleaned ${deletedCount} local files)`
+    `sky-toolbox-backend running at http://${config.host}:${config.port} (cleaned ${outputDeletedCount} outputs, ${tempDeletedCount} temp dirs)`
   );
+
+  setInterval(() => {
+    const count = cleanupOldTempDirs();
+    if (count > 0) {
+      console.log(`[Temp Cleanup] 清理了 ${count} 个旧临时目录`);
+    }
+  }, 30 * 60 * 1000);
 });
 
 server.once("error", async (error) => {
