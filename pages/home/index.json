@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "晴空工具箱",
+  "usingComponents": {
+    "tool-card": "/components/tool-card/index"
+  }
+}

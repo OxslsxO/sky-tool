@@ -1,0 +1,14 @@
+services:
+  sky-toolbox-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sky-toolbox-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3100}:3100"
+    volumes:
+      - ./backend/storage:/app/backend/storage
+

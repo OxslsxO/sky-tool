@@ -1,0 +1,25 @@
+.profile-edit-hero {
+  background: linear-gradient(145deg, #e8e0d5 0%, #f8f4ee 58%, #ffffff 100%);
+}
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.form-label {
+  font-size: 24rpx;
+  color: #6b7068;
+}
+
+.field-input {
+  min-height: 84rpx;
+  padding: 0 24rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.9);
+  font-size: 26rpx;
+  line-height: 84rpx;
+  color: #1d2421;
+  box-sizing: border-box;
+}

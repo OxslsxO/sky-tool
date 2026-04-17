@@ -1,0 +1,123 @@
+.service-hero {
+  background: linear-gradient(145deg, #e3ebe5 0%, #f6faf7 58%, #ffffff 100%);
+}
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.field-input {
+  min-height: 84rpx;
+  padding: 0 24rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.88);
+  font-size: 26rpx;
+  line-height: 84rpx;
+  color: #1d2421;
+  box-sizing: border-box;
+}
+
+.status-card__title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1f2b28;
+}
+
+.status-pill {
+  padding: 10rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+}
+
+.status-pill--neutral {
+  background: rgba(120, 120, 120, 0.12);
+  color: #666b64;
+}
+
+.status-pill--success {
+  background: rgba(29, 92, 75, 0.12);
+  color: #1d5c4b;
+}
+
+.status-pill--danger {
+  background: rgba(214, 106, 77, 0.12);
+  color: #b95f43;
+}
+
+.status-card__copy {
+  display: block;
+  margin-top: 14rpx;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #666b64;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.status-grid__item {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding: 20rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.92);
+}
+
+.status-grid__label {
+  font-size: 22rpx;
+  color: #7d7a72;
+}
+
+.status-grid__value {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1f2b28;
+}
+
+.status-grid__meta {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: #666b64;
+  word-break: break-all;
+}
+
+.status-card__capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 22rpx;
+}
+
+.status-capability {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 20rpx;
+  background: rgba(244, 240, 233, 0.92);
+}
+
+.status-capability__name {
+  font-size: 24rpx;
+  color: #1f2b28;
+}
+
+.status-capability__value {
+  font-size: 22rpx;
+}
+
+.status-capability__value--on {
+  color: #1d5c4b;
+}
+
+.status-capability__value--off {
+  color: #b95f43;
+}

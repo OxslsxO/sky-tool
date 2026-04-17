@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log
+backend/storage
+.git
+.gitignore
+project.private.config.json

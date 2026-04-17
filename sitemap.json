@@ -1,0 +1,9 @@
+{
+  "desc": "晴空工具箱 sitemap",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+.mine-hero {
+  background: linear-gradient(145deg, #ece5d6 0%, #f7f4ee 58%, #ffffff 100%);
+}
+
+.profile-card {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(244, 240, 233, 0.96));
+}
+
+.profile-card__head {
+  align-items: flex-start;
+}
+
+.profile-card__title {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #1f2b28;
+}
+
+.profile-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  margin-top: 20rpx;
+}
+
+.profile-card__line {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #666b64;
+  word-break: break-all;
+}
+
+.profile-card__actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.profile-card__button {
+  flex: 1;
+}

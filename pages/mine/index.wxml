@@ -1,0 +1,95 @@
+<view class="container">
+  <view class="hero mine-hero">
+    <text class="eyebrow">Profile</text>
+    <text class="hero-title">{{user.nickname || 'Toolbox User'}}</text>
+    <text class="hero-copy">
+      Your account, task sync status, favorites and recent tools are managed here.
+    </text>
+
+    <view class="hero-stat-row">
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{user.points}}</text>
+        <text class="hero-stat-label">Points</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{user.freeQuota}}</text>
+        <text class="hero-stat-label">Free Uses</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{taskCount}}</text>
+        <text class="hero-stat-label">Tasks</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card profile-card">
+      <view class="row space-between profile-card__head">
+        <view>
+          <text class="eyebrow">Account</text>
+          <text class="profile-card__title">{{authModeText}} Account</text>
+        </view>
+        <text class="pill">{{backendConfigured ? 'Cloud Ready' : 'Local Only'}}</text>
+      </view>
+
+      <view class="profile-card__meta">
+        <text class="profile-card__line">Account ID: {{shortUserId}}</text>
+        <text class="profile-card__line">Sync: {{syncHint}}</text>
+      </view>
+
+      <view class="profile-card__actions">
+        <view class="btn-primary profile-card__button" bindtap="syncNow">
+          {{syncBusy ? 'Syncing...' : 'Sync Now'}}
+        </view>
+        <view class="btn-ghost profile-card__button" bindtap="openProfileEdit">Edit Profile</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="metric-grid">
+      <view class="metric-card" wx:if="{{canConfigureBackend}}" bindtap="openServiceConfig">
+        <text class="metric-label">Cloud Service</text>
+        <text class="metric-value">{{backendConfigured ? 'Configured' : 'Setup'}}</text>
+      </view>
+      <view class="metric-card" bindtap="openProfileEdit">
+        <text class="metric-label">Profile</text>
+        <text class="metric-value">Editable</text>
+      </view>
+      <view class="metric-card" bindtap="syncNow">
+        <text class="metric-label">State Sync</text>
+        <text class="metric-value">{{backendConfigured ? 'Available' : 'Pending'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{favorites.length}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Favorites</text>
+        <text class="section-title">My Favorites</text>
+      </view>
+    </view>
+
+    <view class="grid-two">
+      <view class="grid-item" wx:for="{{favorites}}" wx:key="id">
+        <tool-card tool="{{item}}" compact="{{true}}" bindselect="handleToolSelect" />
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{recents.length}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Recent</text>
+        <text class="section-title">Recently Used</text>
+      </view>
+    </view>
+
+    <view class="grid-two">
+      <view class="grid-item" wx:for="{{recents}}" wx:key="id">
+        <tool-card tool="{{item}}" compact="{{true}}" bindselect="handleToolSelect" />
+      </view>
+    </view>
+  </view>
+</view>

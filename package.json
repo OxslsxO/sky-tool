@@ -1,0 +1,24 @@
+{
+  "name": "sky-toolbox-miniapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "晴空工具箱微信小程序",
+  "license": "UNLICENSED",
+  "scripts": {
+    "backend:start": "node backend/server.js",
+    "backend:start:prod": "node backend/server.js",
+    "backend:cleanup": "node backend/cleanup.js",
+    "check:miniapp-imports": "node scripts/check-miniapp-imports.js"
+  },
+  "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "mongodb": "^7.1.1",
+    "pdf-lib": "^1.17.1",
+    "qiniu": "^7.15.1",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0"
+  }
+}

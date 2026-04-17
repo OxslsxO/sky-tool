@@ -1,0 +1,42 @@
+<view class="container">
+  <view class="hero category-hero">
+    <text class="eyebrow">Categories</text>
+    <text class="hero-title">先按场景分层，再慢慢扩全。</text>
+    <text class="hero-copy">这里把工具按图片、PDF、识别和日常效率拆开，后面继续加功能时不容易把入口做乱。</text>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Tabs</text>
+        <text class="section-title">选择功能域</text>
+      </view>
+    </view>
+
+    <view class="chips-wrap">
+      <view class="chip {{activeCategoryId === item.id ? 'chip-active' : ''}}" wx:for="{{categories}}" wx:key="id" data-id="{{item.id}}" bindtap="handleCategoryTap">{{item.name}}</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card category-focus" style="border-top: 8rpx solid {{activeCategory.accent}};">
+      <text class="category-focus__title">{{activeCategory.name}}</text>
+      <text class="category-focus__desc">{{activeCategory.description}}</text>
+      <text class="category-focus__banner">{{activeCategory.banner}}</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Tools</text>
+        <text class="section-title">{{activeCategory.name}}</text>
+        <text class="section-copy">当前分类下已收录 {{categoryTools.length}} 个工具。</text>
+      </view>
+    </view>
+
+    <view class="tool-list">
+      <tool-card wx:for="{{categoryTools}}" wx:key="id" tool="{{item}}" bindselect="handleToolSelect" />
+    </view>
+  </view>
+</view>

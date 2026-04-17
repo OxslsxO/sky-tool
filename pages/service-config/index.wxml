@@ -1,0 +1,78 @@
+<view class="container">
+  <view class="hero service-hero">
+    <text class="eyebrow">Service</text>
+    <text class="hero-title">Cloud service access for remote tools</text>
+    <text class="hero-copy">
+      OCR, Office to PDF and advanced PDF tools run through the backend. Save the service URL here, run a health check, and review the current storage and persistence setup.
+    </text>
+  </view>
+
+  <view class="section">
+    <view class="card form-card">
+      <input
+        class="field-input"
+        value="{{baseUrl}}"
+        data-field="baseUrl"
+        bindinput="handleInput"
+        placeholder="Service URL, for example https://api.example.com"
+      />
+      <input
+        class="field-input"
+        value="{{token}}"
+        data-field="token"
+        bindinput="handleInput"
+        password="true"
+        placeholder="Optional Bearer token"
+      />
+      <view class="btn-primary" bindtap="saveConfig">Save config</view>
+      <view class="btn-ghost" bindtap="testConfig">{{testing ? 'Checking...' : 'Health check'}}</view>
+      <view class="btn-secondary" bindtap="clearConfig">Clear config</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card status-card">
+      <view class="row space-between">
+        <text class="status-card__title">Status</text>
+        <text class="status-pill status-pill--{{statusTone}}">{{statusText}}</text>
+      </view>
+
+      <text class="status-card__copy" wx:if="{{publicBaseUrl}}">Public base URL: {{publicBaseUrl}}</text>
+      <text class="status-card__copy" wx:if="{{fileTtlHours}}">File retention: {{fileTtlHours}} hours</text>
+      <text class="status-card__copy" wx:if="{{authRequired}}">This backend requires an access token.</text>
+
+      <view class="status-grid" wx:if="{{storageProvider || repositoryProvider || clientStateProvider || officePath}}">
+        <view class="status-grid__item" wx:if="{{storageProvider}}">
+          <text class="status-grid__label">File storage</text>
+          <text class="status-grid__value">{{storageProvider}}</text>
+          <text class="status-grid__meta" wx:if="{{storageBucket}}">{{storageBucket}}</text>
+        </view>
+
+        <view class="status-grid__item" wx:if="{{repositoryProvider}}">
+          <text class="status-grid__label">Task logs</text>
+          <text class="status-grid__value">{{repositoryProvider}}</text>
+        </view>
+
+        <view class="status-grid__item" wx:if="{{clientStateProvider}}">
+          <text class="status-grid__label">User/task sync</text>
+          <text class="status-grid__value">{{clientStateProvider}}</text>
+        </view>
+
+        <view class="status-grid__item" wx:if="{{officePath}}">
+          <text class="status-grid__label">Office converter</text>
+          <text class="status-grid__value">{{officeAvailable ? 'Enabled' : 'Disabled'}}</text>
+          <text class="status-grid__meta">{{officePath}}</text>
+        </view>
+      </view>
+
+      <view class="status-card__capabilities" wx:if="{{capabilities.length}}">
+        <view class="status-capability" wx:for="{{capabilities}}" wx:key="key">
+          <text class="status-capability__name">{{item.label}}</text>
+          <text class="status-capability__value {{item.enabled ? 'status-capability__value--on' : 'status-capability__value--off'}}">
+            {{item.enabled ? 'Enabled' : 'Disabled'}}
+          </text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

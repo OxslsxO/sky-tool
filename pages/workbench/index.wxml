@@ -1,0 +1,156 @@
+<view class="container" wx:if="{{tool}}">
+  <view class="hero workbench-hero">
+    <text class="eyebrow">Workbench</text>
+    <text class="hero-title">{{tool.name}}</text>
+    <text class="hero-copy">{{helperCopy}}</text>
+
+    <view class="hero-stat-row">
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{isClientTool ? '本地可用' : '需云处理'}}</text>
+        <text class="hero-stat-label">执行方式</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{tool.formatText}}</text>
+        <text class="hero-stat-label">输入类型</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card summary-card">
+      <text class="summary-card__title">{{helperTitle}}</text>
+      <view class="chips-wrap">
+        <text class="chip-static" wx:for="{{tool.params}}" wx:key="key">{{item.label}} · {{selections[item.key]}}</text>
+      </view>
+      <view class="summary-card__link" bindtap="goBackToTool">返回上一步修改参数</view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showImageUpload}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">{{tool.id === 'ocr-text' ? '选择待识别图片' : '选择图片'}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '选择图片（可多选）' : (tool.id === 'ocr-text' ? '选择识别图片' : '选择图片')}}</view>
+
+      <view class="image-preview" wx:if="{{imageInput}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
+        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+      </view>
+
+      <view class="image-preview__list" wx:if="{{tool.id === 'image-to-pdf' && imageInputs.length}}">
+        <text class="image-preview__meta">已选择 {{imageInputs.length}} 张图片</text>
+        <view class="chips-wrap">
+          <text class="chip-static" wx:for="{{imageInputs}}" wx:key="path">第 {{index + 1}} 张 · {{item.width}} × {{item.height}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showBackendFilePicker}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Files</text>
+        <text class="section-title">{{backendPickerTitle}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles">{{backendPickerButtonText}}</view>
+      <view class="file-list" wx:if="{{backendFiles.length}}">
+        <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
+          <text class="file-item__name">{{item.name}}</text>
+          <text class="file-item__meta">{{item.sizeText}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showBackendRangeInput}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Range</text>
+        <text class="section-title">输入页码范围</text>
+      </view>
+    </view>
+
+    <view class="card form-card">
+      <input class="field-input" value="{{pageRange}}" bindinput="handlePageRangeInput" placeholder="例如 1-3,5,8-10" />
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showCustomSize}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Custom</text>
+        <text class="section-title">自定义尺寸</text>
+      </view>
+    </view>
+
+    <view class="card form-card">
+      <input class="field-input" type="number" value="{{customWidth}}" bindinput="handleCustomWidth" placeholder="宽度" />
+      <input class="field-input" type="number" value="{{customHeight}}" bindinput="handleCustomHeight" placeholder="高度" />
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showTextInput}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Content</text>
+        <text class="section-title">输入二维码内容</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <textarea class="text-area" maxlength="-1" value="{{textInput}}" bindinput="handleTextInput" placeholder="输入链接、文本、联系方式..." />
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{showUnitConverter}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Convert</text>
+        <text class="section-title">输入换算值</text>
+      </view>
+    </view>
+
+    <view class="card form-card">
+      <input class="field-input" type="digit" value="{{numberInput}}" bindinput="handleNumberInput" placeholder="输入数值" />
+      <picker range="{{unitOptions}}" bindchange="handleUnitChange" data-field="fromUnit">
+        <view class="picker-line">从：{{fromUnit}}</view>
+      </picker>
+      <picker range="{{unitOptions}}" bindchange="handleUnitChange" data-field="toUnit">
+        <view class="picker-line">到：{{toUnit}}</view>
+      </picker>
+      <view class="btn-ghost picker-button" bindtap="swapUnits">交换单位</view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{isBackendTool}}">
+    <view class="card backend-card">
+      <text class="backend-card__title">当前能力依赖云端处理</text>
+      <text class="backend-card__copy">这类工具需要文件上传、异步任务和服务端转换引擎配合。当前这一轮我先把真正能在小程序端直接落地的工具做成可用，下一轮会继续把文档/OCR 类能力接成可部署版本。</text>
+      <text class="backend-card__copy">当前云服务状态：{{backendConfigured ? '已配置地址' : '未配置地址'}}</text>
+      <view class="btn-ghost picker-button" bindtap="openServiceConfig">去配置云服务</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card action-card">
+      <text class="action-card__title">{{isClientTool ? '开始生成真实结果' : (backendConfigured ? '开始提交云处理任务' : '先配置云服务地址')}}</text>
+      <text class="action-card__copy">{{isClientTool ? '生成后的结果会直接进入任务详情页，可继续保存、复制或再次处理。' : (backendConfigured ? '上传文件后会调用你的后端服务，完成后直接生成可用结果。' : '先在云服务配置页填写服务地址，之后这里就能真正执行文档和 OCR 能力。')}}</text>
+      <view class="btn-primary" bindtap="handleExecute">{{isWorking ? '处理中...' : (isClientTool ? '开始处理' : (backendConfigured ? '提交处理' : '了解现状'))}}</view>
+    </view>
+  </view>
+
+  <canvas
+    canvas-id="toolCanvas"
+    class="tool-canvas"
+    style="width: {{canvasWidth}}px; height: {{canvasHeight}}px;"
+  ></canvas>
+</view>

@@ -1,0 +1,17 @@
+<view class="{{cardClass}}" style="background: {{tool.cardBackground}};" bindtap="handleTap">
+  <view class="tool-card__top">
+    <view class="tool-card__badge-row">
+      <text class="tool-card__badge" wx:if="{{tool.badge}}">{{tool.badge}}</text>
+      <text class="tool-card__member" wx:if="{{tool.memberFree}}">会员内</text>
+    </view>
+    <text class="tool-card__points">{{tool.points}} 积分</text>
+  </view>
+
+  <text class="tool-card__name">{{tool.name}}</text>
+  <text class="tool-card__tagline">{{taglineText}}</text>
+
+  <view class="tool-card__footer">
+    <text class="tool-card__format">{{tool.formatText}}</text>
+    <text class="tool-card__link">进入</text>
+  </view>
+</view>

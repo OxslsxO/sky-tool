@@ -1,0 +1,34 @@
+<view class="container">
+  <view class="hero profile-edit-hero">
+    <text class="eyebrow">Profile</text>
+    <text class="hero-title">Edit account profile</text>
+    <text class="hero-copy">
+      Update the nickname shown in the app. If cloud sync is enabled, the change will also be pushed to the backend.
+    </text>
+  </view>
+
+  <view class="section">
+    <view class="card form-card">
+      <text class="form-label">Nickname</text>
+      <input
+        class="field-input"
+        value="{{nickname}}"
+        data-field="nickname"
+        bindinput="handleInput"
+        maxlength="24"
+        placeholder="Enter nickname"
+      />
+
+      <text class="form-label">Avatar URL</text>
+      <input
+        class="field-input"
+        value="{{avatarUrl}}"
+        data-field="avatarUrl"
+        bindinput="handleInput"
+        placeholder="Optional image URL"
+      />
+
+      <view class="btn-primary" bindtap="saveProfile">{{saving ? 'Saving...' : 'Save Profile'}}</view>
+    </view>
+  </view>
+</view>

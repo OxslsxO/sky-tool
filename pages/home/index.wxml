@@ -1,0 +1,254 @@
+<view class="container">
+  <view class="search-section">
+    <view class="search-header">
+      <text class="search-greeting">{{greeting}}</text>
+      <view class="search-avatar" bindtap="goProfile">
+        <image wx:if="{{user.avatarUrl}}" class="avatar-img" src="{{user.avatarUrl}}" mode="aspectFill" />
+        <text wx:else class="avatar-text">{{user.nickname[0]}}</text>
+      </view>
+    </view>
+
+    <view class="search-shell search-shell--primary">
+      <view class="search-icon">
+        <text class="search-icon-text">🔍</text>
+      </view>
+      <input
+        class="search-input search-input--large"
+        placeholder="搜索证件照、PDF、OCR、二维码..."
+        placeholder-class="search-placeholder"
+        value="{{keyword}}"
+        bindinput="handleSearchInput"
+        confirm-type="search"
+      />
+      <view class="search-clear-shell" wx:if="{{keyword}}" bindtap="clearKeyword">
+        <text class="search-clear">✕</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section tools-section">
+    <view class="tools-header">
+      <view class="tools-title-group">
+        <text class="section-title">{{keyword ? '搜索结果' : '全部工具'}}</text>
+        <text class="tools-count" wx:if="{{!keyword}}">{{displayTools.length}} 个工具</text>
+      </view>
+      <view class="view-toggle">
+        <view
+          class="view-toggle-btn {{viewMode === 'grid' ? 'view-toggle-btn--active' : ''}}"
+          data-mode="grid"
+          bindtap="switchViewMode"
+        >
+          <text class="view-toggle-icon">⊞</text>
+        </view>
+        <view
+          class="view-toggle-btn {{viewMode === 'list' ? 'view-toggle-btn--active' : ''}}"
+          data-mode="list"
+          bindtap="switchViewMode"
+        >
+          <text class="view-toggle-icon">☰</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="category-filter" wx:if="{{!keyword}}">
+      <scroll-view class="category-scroll" scroll-x show-scrollbar="{{false}}">
+        <view class="category-list">
+          <view
+            class="category-chip {{selectedCategory === 'all' ? 'category-chip--active' : ''}}"
+            data-category="all"
+            bindtap="selectCategory"
+          >
+            <text class="category-chip-text">全部</text>
+          </view>
+          <view
+            class="category-chip {{selectedCategory === item.id ? 'category-chip--active' : ''}}"
+            wx:for="{{categories}}"
+            wx:key="id"
+            data-category="{{item.id}}"
+            bindtap="selectCategory"
+          >
+            <text class="category-chip-icon" style="color: {{item.accent}}">●</text>
+            <text class="category-chip-text">{{item.name}}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="tools-content">
+      <view class="tools-grid" wx:if="{{viewMode === 'grid' && displayTools.length}}">
+        <view
+          class="tool-grid-item {{item.isHot ? 'tool-grid-item--hot' : ''}}"
+          wx:for="{{displayTools}}"
+          wx:key="id"
+          style="background: {{item.cardBackground}};"
+          data-id="{{item.id}}"
+          bindtap="handleToolSelect"
+        >
+          <view class="tool-grid-badge" wx:if="{{item.badge}}">{{item.badge}}</view>
+          <view class="tool-grid-icon">{{item.icon || '🔧'}}</view>
+          <text class="tool-grid-name">{{item.name}}</text>
+          <text class="tool-grid-desc">{{item.shortDescription}}</text>
+          <view class="tool-grid-footer">
+            <text class="tool-grid-points">{{item.points}} 积分</text>
+            <text class="tool-grid-arrow">→</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="tools-list" wx:if="{{viewMode === 'list' && displayTools.length}}">
+        <view
+          class="tool-list-item"
+          wx:for="{{displayTools}}"
+          wx:key="id"
+          data-id="{{item.id}}"
+          bindtap="handleToolSelect"
+        >
+          <view class="tool-list-icon-shell" style="background: {{item.accent}}20;">
+            <text class="tool-list-icon">{{item.icon || '🔧'}}</text>
+          </view>
+          <view class="tool-list-content">
+            <view class="tool-list-header">
+              <text class="tool-list-name">{{item.name}}</text>
+              <view class="tool-list-badges">
+                <text class="tool-list-badge" wx:if="{{item.badge}}">{{item.badge}}</text>
+                <text class="tool-list-member" wx:if="{{item.memberFree}}">会员</text>
+              </view>
+            </view>
+            <text class="tool-list-desc">{{item.shortDescription}}</text>
+            <view class="tool-list-meta">
+              <text class="tool-list-format">{{item.formatText}}</text>
+              <text class="tool-list-points">{{item.points}} 积分</text>
+            </view>
+          </view>
+          <view class="tool-list-action">
+            <text class="tool-list-arrow">›</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="card empty-state" wx:if="{{!displayTools.length}}">
+        <text class="empty-title">没找到匹配工具</text>
+        <text class="empty-copy">可以试试搜索"证件照""PDF""OCR""二维码"等关键词。</text>
+        <view class="empty-suggestions">
+          <text class="empty-suggestion-title">热门搜索：</text>
+          <view class="empty-suggestion-tags">
+            <text
+              class="empty-suggestion-tag"
+              wx:for="{{hotSearches}}"
+              wx:key="*this"
+              data-keyword="{{item}}"
+              bindtap="applyHotSearch"
+            >{{item}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section task-mini-section" wx:if="{{dashboard.processingCount > 0}}">
+    <view class="task-mini-card" bindtap="goTasks">
+      <view class="task-mini-info">
+        <text class="task-mini-dot task-mini-dot--pulse"></text>
+        <text class="task-mini-text">{{dashboard.processingCount}} 个任务处理中</text>
+      </view>
+      <text class="task-mini-arrow">›</text>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{recentTools.length && !keyword}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Recent</text>
+        <text class="section-title">最近使用</text>
+      </view>
+      <text class="section-link" bindtap="clearRecent">清空</text>
+    </view>
+
+    <view class="recent-tools-scroll">
+      <scroll-view scroll-x show-scrollbar="{{false}}">
+        <view class="recent-tools-row">
+          <view
+            class="recent-tool-mini"
+            wx:for="{{recentTools}}"
+            wx:key="id"
+            data-id="{{item.id}}"
+            bindtap="handleToolSelect"
+          >
+            <view class="recent-tool-mini-icon" style="background: {{item.accent}}20;">
+              <text>{{item.icon || '🔧'}}</text>
+            </view>
+            <text class="recent-tool-mini-name">{{item.name}}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{!keyword}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Packs</text>
+        <text class="section-title">专题推荐</text>
+      </view>
+    </view>
+
+    <view class="bundle-list">
+      <view
+        class="card bundle-card"
+        wx:for="{{bundles}}"
+        wx:key="id"
+        data-id="{{item.id}}"
+        bindtap="goBundleDetail"
+      >
+        <view class="bundle-header">
+          <view class="bundle-icon-group">
+            <text class="bundle-icon" wx:for="{{item.toolIcons}}" wx:for-item="icon" wx:key="*this">{{icon}}</text>
+          </view>
+          <text class="bundle-tag">{{item.toolCount}} 个工具</text>
+        </view>
+        <text class="bundle-title">{{item.title}}</text>
+        <text class="bundle-desc">{{item.description}}</text>
+        <view class="bundle-footer">
+          <text class="bundle-tools">{{item.toolNames}}</text>
+          <text class="bundle-action">使用套装 →</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card member-card">
+      <view class="member-header">
+        <view class="member-avatar-shell">
+          <image wx:if="{{user.avatarUrl}}" class="member-avatar" src="{{user.avatarUrl}}" mode="aspectFill" />
+          <text wx:else class="member-avatar-text">{{user.nickname[0]}}</text>
+        </view>
+        <view class="member-info">
+          <text class="member-name">{{user.nickname}}</text>
+          <text class="member-plan">{{user.memberPlan}}</text>
+        </view>
+        <view class="member-points-shell">
+          <text class="member-points-value">{{user.points}}</text>
+          <text class="member-points-label">积分</text>
+        </view>
+      </view>
+
+      <view class="member-stats">
+        <view class="member-stat">
+          <text class="member-stat-value">{{user.freeQuota}}</text>
+          <text class="member-stat-label">剩余免费</text>
+        </view>
+        <view class="member-stat-divider"></view>
+        <view class="member-stat">
+          <text class="member-stat-value">{{memberExpireText}}</text>
+          <text class="member-stat-label">会员到期</text>
+        </view>
+      </view>
+
+      <view class="member-actions">
+        <view class="btn-ghost member-button" bindtap="goTasks">任务中心</view>
+        <view class="btn-secondary member-button" bindtap="goVip">升级会员</view>
+      </view>
+    </view>
+  </view>
+</view>

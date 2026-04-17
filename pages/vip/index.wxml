@@ -1,0 +1,71 @@
+<view class="container">
+  <view class="hero vip-hero">
+    <text class="eyebrow">Member</text>
+    <text class="hero-title">免费次数、积分和会员三层结构都已经预留。</text>
+    <text class="hero-copy">当前账户状态：{{user.memberPlan}}，积分 {{user.points}}，免费体验 {{user.freeQuota}} 次。后续可以在这里接支付、订单和权益明细。</text>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Benefits</text>
+        <text class="section-title">会员权益方向</text>
+      </view>
+    </view>
+
+    <view class="metric-grid">
+      <view class="metric-card">
+        <text class="metric-label">高频工具</text>
+        <text class="metric-value">更多免积分</text>
+      </view>
+      <view class="metric-card">
+        <text class="metric-label">导出结果</text>
+        <text class="metric-value">高清无水印</text>
+      </view>
+      <view class="metric-card">
+        <text class="metric-label">任务历史</text>
+        <text class="metric-value">保留更久</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Plans</text>
+        <text class="section-title">会员方案</text>
+      </view>
+    </view>
+
+    <view class="plan-list">
+      <view class="card plan-card {{item.recommended ? 'plan-card--recommended' : ''}}" wx:for="{{memberPlans}}" wx:key="id" data-name="{{item.name}}" bindtap="handlePlanTap">
+        <view class="row space-between">
+          <text class="plan-card__name">{{item.name}}</text>
+          <text class="plan-card__badge" wx:if="{{item.recommended}}">主推</text>
+        </view>
+        <text class="plan-card__price">¥{{item.price}}</text>
+        <text class="plan-card__period">{{item.period}}</text>
+        <text class="plan-card__copy">{{item.highlight}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Points</text>
+        <text class="section-title">积分包</text>
+      </view>
+    </view>
+
+    <view class="plan-list">
+      <view class="card points-card" wx:for="{{pointPackages}}" wx:key="id" data-points="{{item.points}}" bindtap="handlePointTap">
+        <view class="row space-between">
+          <text class="plan-card__name">{{item.points}} 积分</text>
+          <text class="plan-card__price">¥{{item.price}}</text>
+        </view>
+        <text class="plan-card__copy">{{item.bonus}}</text>
+      </view>
+    </view>
+  </view>
+</view>

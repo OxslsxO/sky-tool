@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "工具分类",
+  "usingComponents": {
+    "tool-card": "/components/tool-card/index"
+  }
+}

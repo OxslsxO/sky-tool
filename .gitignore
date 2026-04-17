@@ -1,0 +1,14 @@
+node_modules/
+backend/storage/outputs/
+backend/storage/temp/
+backend/storage/operations.ndjson
+backend/storage/models/
+backend/chi_sim.traineddata
+backend/eng.traineddata
+.env
+.env.local
+.env.production
+*.log
+dist/
+project.private.config.json
+backend/storage/client-state.json

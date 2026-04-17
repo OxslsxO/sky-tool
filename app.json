@@ -1,0 +1,52 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/category/index",
+    "pages/tasks/index",
+    "pages/vip/index",
+    "pages/mine/index",
+    "pages/workbench/index",
+    "pages/service-config/index",
+    "pages/profile-edit/index",
+    "pages/tool-detail/index",
+    "pages/task-detail/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "晴空工具箱",
+    "navigationBarBackgroundColor": "#f7f3ea",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f3ea",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#7d7a70",
+    "selectedColor": "#1d5c4b",
+    "backgroundColor": "#fbfaf6",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/category/index",
+        "text": "分类"
+      },
+      {
+        "pagePath": "pages/tasks/index",
+        "text": "任务"
+      },
+      {
+        "pagePath": "pages/vip/index",
+        "text": "会员"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

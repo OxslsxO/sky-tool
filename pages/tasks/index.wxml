@@ -1,0 +1,69 @@
+<view class="container">
+  <view class="hero tasks-hero">
+    <text class="eyebrow">Task Center</text>
+    <text class="hero-title">处理过程与结果都能回来继续。</text>
+    <text class="hero-copy">重处理类工具统一走任务流，后续接入真实后端时这里就是核心中枢。</text>
+
+    <view class="hero-stat-row">
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{dashboard.processingCount}}</text>
+        <text class="hero-stat-label">处理中</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{dashboard.successCount}}</text>
+        <text class="hero-stat-label">已完成</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{dashboard.savedTotalText}}</text>
+        <text class="hero-stat-label">累计节省体积</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="chips-wrap">
+      <view class="chip {{filter === 'all' ? 'chip-active' : ''}}" data-filter="all" bindtap="handleFilterTap">全部</view>
+      <view class="chip {{filter === 'processing' ? 'chip-active' : ''}}" data-filter="processing" bindtap="handleFilterTap">处理中</view>
+      <view class="chip {{filter === 'success' ? 'chip-active' : ''}}" data-filter="success" bindtap="handleFilterTap">已完成</view>
+      <view class="chip {{filter === 'failed' ? 'chip-active' : ''}}" data-filter="failed" bindtap="handleFilterTap">失败</view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{visibleTasks.length}}">
+    <view class="task-list">
+      <view class="card task-card" wx:for="{{visibleTasks}}" wx:key="id" data-id="{{item.id}}" bindtap="handleTaskTap">
+        <view class="row space-between">
+          <view class="task-card__left">
+            <text class="task-card__tool">{{item.tool.name}}</text>
+            <text class="task-card__time">{{item.createdLabel}}</text>
+          </view>
+          <text class="task-card__status task-card__status--{{item.status}}">{{item.statusText}}</text>
+        </view>
+
+        <text class="task-card__headline">{{item.resultHeadline}}</text>
+        <text class="task-card__detail">{{item.finalDetail}}</text>
+
+        <view class="progress-shell" wx:if="{{item.status === 'processing'}}">
+          <view class="progress-track">
+            <view class="progress-fill" style="width: {{item.progress}}%;"></view>
+          </view>
+          <text class="progress-text">当前进度 {{item.progress}}%</text>
+        </view>
+
+        <view class="task-card__metrics" wx:if="{{item.status !== 'failed'}}">
+          <text>原始 {{item.beforeSizeText}}</text>
+          <text>结果 {{item.afterSizeText}}</text>
+          <text>节省 {{item.savedSizeText}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:else>
+    <view class="card empty-state">
+      <text class="empty-title">这里还没有任务</text>
+      <text class="empty-copy">先去首页试一个工具，任务创建后就会在这里自动出现。</text>
+      <view class="btn-primary empty-button" bindtap="goHome">去首页挑工具</view>
+    </view>
+  </view>
+</view>

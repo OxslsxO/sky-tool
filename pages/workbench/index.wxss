@@ -1,0 +1,126 @@
+.workbench-hero {
+  background: linear-gradient(145deg, #e9e2d6 0%, #f8f5ef 58%, #ffffff 100%);
+}
+
+.summary-card {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(244, 240, 233, 0.95));
+}
+
+.summary-card__title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1f2b28;
+}
+
+.summary-card__link {
+  margin-top: 18rpx;
+  font-size: 24rpx;
+  color: #1d5c4b;
+}
+
+.picker-button {
+  margin-bottom: 20rpx;
+}
+
+.image-preview {
+  display: flex;
+  flex-direction: column;
+}
+
+.image-preview__image {
+  width: 100%;
+  height: 420rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.9);
+}
+
+.image-preview__meta {
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: #6a6f66;
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 20rpx;
+  background: rgba(244, 240, 233, 0.9);
+}
+
+.file-item__name {
+  flex: 1;
+  font-size: 24rpx;
+  color: #1f2b28;
+}
+
+.file-item__meta {
+  font-size: 22rpx;
+  color: #6a6f66;
+}
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.field-input,
+.picker-line {
+  min-height: 84rpx;
+  padding: 0 24rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.88);
+  font-size: 26rpx;
+  line-height: 84rpx;
+  color: #1d2421;
+  box-sizing: border-box;
+}
+
+.text-area {
+  width: 100%;
+  min-height: 260rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.88);
+  font-size: 26rpx;
+  line-height: 1.7;
+  color: #1d2421;
+  box-sizing: border-box;
+}
+
+.backend-card {
+  background: linear-gradient(145deg, #f1e1da 0%, #fbf3ef 64%, #ffffff 100%);
+}
+
+.backend-card__title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1f2b28;
+}
+
+.backend-card__copy {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #666b64;
+}
+
+.tool-canvas {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  opacity: 0;
+  pointer-events: none;
+}

@@ -1,0 +1,764 @@
+const { getToolById, getToolsByIds } = require("../data/mock");
+const {
+  formatRelativeTime,
+  formatMegabytes,
+  formatDateTime,
+  bytesToMegabytesValue,
+} = require("./format");
+
+const STORAGE_KEYS = {
+  tasks: "sky_tools_tasks",
+  favorites: "sky_tools_favorites",
+  recent: "sky_tools_recent",
+  user: "sky_tools_user",
+  syncDirty: "sky_tools_sync_dirty",
+};
+
+const DEFAULT_USER = {
+  nickname: "微信用户",
+  points: 58,
+  freeQuota: 3,
+  memberPlan: "体验会员",
+  memberExpire: "2026-04-30",
+  memberActive: true,
+  userId: "",
+  deviceId: "",
+  authMode: "guest",
+  avatarUrl: "",
+  lastSyncedAt: "",
+  syncStatus: "local",
+  createdAt: "",
+  updatedAt: "",
+};
+
+function readStorage(key, fallback) {
+  const value = wx.getStorageSync(key);
+  return value || fallback;
+}
+
+function writeStorage(key, value) {
+  wx.setStorageSync(key, value);
+}
+
+function makeLocalId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function markSyncDirty() {
+  writeStorage(STORAGE_KEYS.syncDirty, nowIso());
+}
+
+function clearSyncDirty() {
+  wx.removeStorageSync(STORAGE_KEYS.syncDirty);
+}
+
+function hasDirtySyncState() {
+  return !!wx.getStorageSync(STORAGE_KEYS.syncDirty);
+}
+
+function normalizeUserState(user) {
+  const next = {
+    ...DEFAULT_USER,
+    ...(user || {}),
+  };
+
+  if (!next.deviceId) {
+    next.deviceId = makeLocalId("device");
+  }
+
+  if (!next.createdAt) {
+    next.createdAt = nowIso();
+  }
+
+  if (!next.updatedAt) {
+    next.updatedAt = next.createdAt;
+  }
+
+  return next;
+}
+
+function stampTask(task) {
+  const createdAt = task && task.createdAt ? task.createdAt : Date.now();
+  return {
+    ...task,
+    createdAt,
+    updatedAt: task && task.updatedAt ? task.updatedAt : createdAt,
+  };
+}
+
+function setFavorites(favorites, options = {}) {
+  const next = Array.from(new Set((favorites || []).filter(Boolean))).slice(0, 12);
+  writeStorage(STORAGE_KEYS.favorites, next);
+
+  if (!options.silent) {
+    markSyncDirty();
+  }
+
+  return next;
+}
+
+function setRecentToolIds(toolIds, options = {}) {
+  const next = Array.from(new Set((toolIds || []).filter(Boolean))).slice(0, 8);
+  writeStorage(STORAGE_KEYS.recent, next);
+
+  if (!options.silent) {
+    markSyncDirty();
+  }
+
+  return next;
+}
+
+function triggerBackgroundSync() {
+  try {
+    setTimeout(() => {
+      try {
+        require("./sync-manager").syncCloudState().catch(() => {});
+      } catch (error) {
+        // Ignore sync bootstrap failures from local-only usage.
+      }
+    }, 0);
+  } catch (error) {
+    // Ignore environments without timers.
+  }
+}
+
+function seedUserState() {
+  const current = wx.getStorageSync(STORAGE_KEYS.user);
+  const next = normalizeUserState(current || DEFAULT_USER);
+
+  if (!current || JSON.stringify(current) !== JSON.stringify(next)) {
+    writeStorage(STORAGE_KEYS.user, next);
+  }
+
+  return next;
+}
+
+function getUserState() {
+  return normalizeUserState(readStorage(STORAGE_KEYS.user, DEFAULT_USER));
+}
+
+function updateUserState(patch, options = {}) {
+  const next = normalizeUserState({
+    ...getUserState(),
+    ...patch,
+    updatedAt: nowIso(),
+  });
+
+  writeStorage(STORAGE_KEYS.user, next);
+
+  if (!options.silent) {
+    markSyncDirty();
+  }
+
+  return next;
+}
+
+function getFavorites() {
+  return readStorage(STORAGE_KEYS.favorites, []);
+}
+
+function isFavoriteTool(toolId) {
+  return getFavorites().includes(toolId);
+}
+
+function toggleFavorite(toolId) {
+  const favorites = getFavorites();
+  const exists = favorites.includes(toolId);
+  const next = exists
+    ? favorites.filter((item) => item !== toolId)
+    : [toolId].concat(favorites);
+
+  setFavorites(next);
+  return !exists;
+}
+
+function listFavoriteTools() {
+  return getToolsByIds(getFavorites());
+}
+
+function getRecentToolIds() {
+  return readStorage(STORAGE_KEYS.recent, []);
+}
+
+function touchRecentTool(toolId, options = {}) {
+  const next = [toolId]
+    .concat(getRecentToolIds().filter((item) => item !== toolId))
+    .slice(0, 8);
+
+  setRecentToolIds(next, options);
+}
+
+function getRecentTools() {
+  return getToolsByIds(getRecentToolIds());
+}
+
+function getRawTasks() {
+  return refreshStoredTasks();
+}
+
+function saveTasks(tasks, options = {}) {
+  const next = (tasks || []).map(stampTask);
+  writeStorage(STORAGE_KEYS.tasks, next);
+
+  if (!options.silent) {
+    markSyncDirty();
+  }
+
+  return next;
+}
+
+function refreshStoredTasks() {
+  const tasks = readStorage(STORAGE_KEYS.tasks, []).map(stampTask);
+  let changed = false;
+
+  const next = tasks.map((task) => {
+    if (
+      task.status === "processing" &&
+      task.duration &&
+      Date.now() - task.createdAt >= task.duration
+    ) {
+      changed = true;
+      return {
+        ...task,
+        status: "success",
+        updatedAt: Date.now(),
+      };
+    }
+
+    return task;
+  });
+
+  if (changed) {
+    saveTasks(next);
+    return next;
+  }
+
+  return tasks;
+}
+
+function getBillingPreview(tool) {
+  const user = getUserState();
+
+  if (tool.memberFree && user.memberActive) {
+    return {
+      usable: true,
+      mode: "member",
+      text: "本次使用体验会员权益",
+      costText: "会员内可用",
+    };
+  }
+
+  if (user.freeQuota > 0) {
+    return {
+      usable: true,
+      mode: "free",
+      text: `本次将消耗 1 次免费体验，剩余 ${user.freeQuota} 次`,
+      costText: "消耗 1 次免费体验",
+    };
+  }
+
+  if (user.points >= tool.points) {
+    return {
+      usable: true,
+      mode: "points",
+      text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
+      costText: `消耗 ${tool.points} 积分`,
+    };
+  }
+
+  return {
+    usable: false,
+    mode: "locked",
+    text: "积分不足，可先开通会员或购买积分包",
+    costText: "积分不足",
+  };
+}
+
+function commitUsage(tool) {
+  const preview = getBillingPreview(tool);
+  const user = getUserState();
+
+  if (!preview.usable) {
+    return preview;
+  }
+
+  if (preview.mode === "free") {
+    updateUserState({
+      freeQuota: Math.max(user.freeQuota - 1, 0),
+    });
+  }
+
+  if (preview.mode === "points") {
+    updateUserState({
+      points: Math.max(user.points - tool.points, 0),
+    });
+  }
+
+  return preview;
+}
+
+function toMegabytes(value, bytes) {
+  if (value !== undefined && value !== null) {
+    return value;
+  }
+
+  if (bytes !== undefined && bytes !== null) {
+    return bytesToMegabytesValue(bytes);
+  }
+
+  return null;
+}
+
+function buildTaskPayload(tool, selections) {
+  const now = Date.now();
+  const presets = {
+    "photo-id": {
+      inputName: "自拍原图.jpg",
+      outputName: "报名照_蓝底.png",
+      beforeSize: 4.6,
+      afterSize: 1.2,
+      duration: 7000,
+      headline: "证件照已进入标准化处理",
+      detail: "会自动校准边距与底色，并生成电子版与冲印版。",
+    },
+    "image-compress": {
+      inputName: "商品主图.png",
+      outputName: "商品主图_压缩版.png",
+      beforeSize: 6.4,
+      afterSize: 1.9,
+      duration: 5200,
+      headline: "图片已进入压缩队列",
+      detail: "处理完成后会展示体积变化和清晰度建议。",
+    },
+    "image-convert": {
+      inputName: "设计稿.webp",
+      outputName: "设计稿_转换后.jpg",
+      beforeSize: 2.8,
+      afterSize: 2.1,
+      duration: 4200,
+      headline: "格式转换已提交",
+      detail: "目标格式会根据你的选择进行导出，并提示可能的特性变化。",
+    },
+    "resize-crop": {
+      inputName: "海报原图.png",
+      outputName: "海报_16x9.png",
+      beforeSize: 5.2,
+      afterSize: 3.6,
+      duration: 4600,
+      headline: "尺寸适配已开始",
+      detail: "会按目标比例处理主体区域和画布留白。",
+    },
+    "image-to-pdf": {
+      inputName: "票据合集.jpg",
+      outputName: "票据整理.pdf",
+      beforeSize: 3.8,
+      afterSize: 2.7,
+      duration: 6600,
+      headline: "图片正在合成为 PDF",
+      detail: "会统一页面规格和边距，方便后续提交。",
+    },
+    "pdf-compress": {
+      inputName: "项目材料.pdf",
+      outputName: "项目材料_压缩版.pdf",
+      beforeSize: 14.8,
+      afterSize: 6.2,
+      duration: 7800,
+      headline: "PDF 正在压缩",
+      detail: "处理完成后会标明体积收益与适合的使用场景。",
+    },
+    "pdf-merge": {
+      inputName: "报名资料.pdf",
+      outputName: "报名资料_合并版.pdf",
+      beforeSize: 5.6,
+      afterSize: 5.8,
+      duration: 5400,
+      headline: "PDF 合并任务已提交",
+      detail: "会按设定顺序整合为一个文件，适合继续压缩或发送。",
+    },
+    "pdf-split": {
+      inputName: "课程讲义.pdf",
+      outputName: "课程讲义_拆分包.zip",
+      beforeSize: 12.2,
+      afterSize: 12.4,
+      duration: 5600,
+      headline: "PDF 拆分处理中",
+      detail: "会按页码范围输出多个独立 PDF 文件。",
+    },
+    "office-to-pdf": {
+      inputName: "方案终稿.docx",
+      outputName: "方案终稿.pdf",
+      beforeSize: 8.6,
+      afterSize: 4.1,
+      duration: 9800,
+      headline: "Office 文件正在导出 PDF",
+      detail: "会优先保持版式稳定，适合正式发送和归档。",
+    },
+    "ocr-text": {
+      inputName: "会议截图.png",
+      outputName: "会议文字.txt",
+      beforeSize: 2.4,
+      afterSize: 0.2,
+      duration: 6300,
+      headline: "OCR 识别已开始",
+      detail: "识别完成后可复制文字，并查看版面兼容建议。",
+    },
+    "qr-maker": {
+      inputName: "活动链接",
+      outputName: "活动二维码.png",
+      beforeSize: 0.1,
+      afterSize: 0.3,
+      duration: 2600,
+      headline: "二维码生成中",
+      detail: "会按风格和边距配置导出可直接使用的二维码图片。",
+    },
+    "unit-convert": {
+      inputName: "长度换算",
+      outputName: "换算结果",
+      beforeSize: 0.1,
+      afterSize: 0.1,
+      duration: 1800,
+      headline: "换算结果已准备",
+      detail: "这类轻量工具处理很快，适合高频使用和收藏。",
+    },
+    "audio-convert": {
+      inputName: "原音频.mp3",
+      outputName: "转换后音频.wav",
+      beforeSize: 8.2,
+      afterSize: 12.4,
+      duration: 6000,
+      headline: "音频格式转换中",
+      detail: "会按目标格式和音质设置进行转换，适合不同设备使用。",
+    },
+  };
+
+  const preset = presets[tool.id];
+
+  return {
+    id: `task_${now}`,
+    toolId: tool.id,
+    selections,
+    createdAt: now,
+    status: "processing",
+    duration: preset.duration,
+    inputName: preset.inputName,
+    outputName: preset.outputName,
+    beforeSize: preset.beforeSize,
+    afterSize: preset.afterSize,
+    resultHeadline: preset.headline,
+    resultDetail: preset.detail,
+    resultType: "async",
+    outputPath: "",
+    remoteUrl: "",
+    previewPath: "",
+    copyText: "",
+    metaLines: [],
+    attachments: [],
+  };
+}
+
+function buildCompletedTaskPayload(tool, selections, options) {
+  const now = Date.now();
+
+  return {
+    id: `task_${now}`,
+    toolId: tool.id,
+    selections,
+    createdAt: now,
+    status: options.status || "success",
+    duration: options.duration || 0,
+    inputName: options.inputName || "即时输入",
+    outputName: options.outputName || tool.name,
+    beforeSize: toMegabytes(options.beforeSize, options.beforeBytes),
+    afterSize: toMegabytes(options.afterSize, options.afterBytes),
+    resultHeadline: options.resultHeadline || `${tool.name} 已完成`,
+    resultDetail: options.resultDetail || "",
+    resultType: options.resultType || "text",
+    resultText: options.resultText || "",
+    copyText: options.copyText || options.resultText || "",
+    outputPath: options.outputPath || "",
+    remoteUrl: options.remoteUrl || "",
+    previewPath: options.previewPath || options.outputPath || "",
+    sourcePath: options.sourcePath || "",
+    sourcePreviewPath: options.sourcePreviewPath || options.sourcePath || "",
+    metaLines: options.metaLines || [],
+    attachments: options.attachments || [],
+    requiresBackend: !!options.requiresBackend,
+    backendUnavailable: !!options.backendUnavailable,
+  };
+}
+
+function buildStatusText(status) {
+  return {
+    processing: "处理中",
+    success: "已完成",
+    failed: "处理失败",
+    expired: "已过期",
+  }[status] || "处理中";
+}
+
+function buildTaskResult(task, tool) {
+  const resultMap = {
+    "photo-id": "已生成基础版证件照，适合继续下载或重新调整底色。",
+    "image-compress": "压缩收益较明显，适合直接发送或继续转 PDF。",
+    "image-convert": "已输出目标格式，透明背景和压缩表现会同步提醒。",
+    "resize-crop": "已适配目标画布，适合继续加字或放入海报模板。",
+    "image-to-pdf": "图片已整理成单个 PDF，更方便提交和归档。",
+    "pdf-compress": "体积已降低，适合邮箱发送与系统上传场景。",
+    "pdf-merge": "多份文档已合并成一份，页序按设定保留。",
+    "pdf-split": "长文档已拆成多个文件，便于分发和局部上传。",
+    "office-to-pdf": "文档已导出为 PDF，版式更适合正式分享。",
+    "ocr-text": "识别出约 1268 字，可继续复制和校对。",
+    "qr-maker": "二维码已生成，适合直接保存到相册或继续排版。",
+    "unit-convert": "换算结果已生成，并附常见近似值供参考。",
+    "audio-convert": "音频格式已转换，适合不同设备和场景使用。",
+  };
+
+  return resultMap[tool.id] || task.resultDetail || task.resultText;
+}
+
+function normalizeTask(task) {
+  const tool = getToolById(task.toolId);
+  const now = Date.now();
+  let status = task.status;
+  let progress = 100;
+
+  if (task.status === "processing") {
+    const elapsed = now - task.createdAt;
+    progress = Math.min(100, Math.max(12, Math.round((elapsed / task.duration) * 100)));
+    status = elapsed >= task.duration ? "success" : "processing";
+  }
+
+  if (task.status === "failed") {
+    status = "failed";
+    progress = 100;
+  }
+
+  const savedSize = task.beforeSize && task.afterSize
+    ? Math.max(task.beforeSize - task.afterSize, 0)
+    : 0;
+
+  return {
+    ...task,
+    tool,
+    status,
+    progress,
+    statusText: buildStatusText(status),
+    createdLabel: formatRelativeTime(task.createdAt),
+    createdAtText: formatDateTime(task.createdAt),
+    beforeSizeText: formatMegabytes(task.beforeSize),
+    afterSizeText: formatMegabytes(task.afterSize),
+    savedSizeText: formatMegabytes(savedSize),
+    finalDetail: status === "success"
+      ? (task.resultDetail || task.resultText || buildTaskResult(task, tool))
+      : task.resultDetail,
+    hasOutputPath: !!task.outputPath,
+    hasRemoteUrl: !!task.remoteUrl,
+    hasPreviewPath: !!task.previewPath,
+    hasCopyText: !!task.copyText,
+    metaLines: task.metaLines || [],
+    attachments: task.attachments || [],
+  };
+}
+
+function listTasks() {
+  return getRawTasks()
+    .map(normalizeTask)
+    .sort((left, right) => right.createdAt - left.createdAt);
+}
+
+function getTaskById(taskId) {
+  const task = getRawTasks().find((item) => item.id === taskId);
+  return task ? normalizeTask(task) : null;
+}
+
+function saveTaskEntry(task) {
+  const tasks = [task].concat(getRawTasks());
+  saveTasks(tasks.slice(0, 40));
+  touchRecentTool(task.toolId);
+  const normalizedTask = normalizeTask(task);
+  return normalizedTask;
+}
+
+function createTask(tool, selections, options = {}) {
+  const usage = options.skipUsage
+    ? {
+        usable: true,
+        mode: "skipped",
+        text: "",
+        costText: "",
+      }
+    : commitUsage(tool);
+
+  if (!usage.usable) {
+    return {
+      task: null,
+      usage,
+    };
+  }
+
+  const task = options.instant
+    ? buildCompletedTaskPayload(tool, selections, options)
+    : buildTaskPayload(tool, selections);
+
+  return {
+    task: saveTaskEntry(task),
+    usage,
+  };
+}
+
+function seedMockTasks() {
+  if (getRawTasks().length) {
+    return;
+  }
+
+  const now = Date.now();
+  const seedTasks = [
+    {
+      id: "task_seed_1",
+      toolId: "pdf-compress",
+      selections: { mode: "均衡" },
+      createdAt: now - 2 * 60 * 60 * 1000,
+      status: "processing",
+      duration: 6000,
+      inputName: "项目资料.pdf",
+      outputName: "项目资料_压缩版.pdf",
+      beforeSize: 15.2,
+      afterSize: 6.8,
+      resultHeadline: "PDF 压缩已完成",
+      resultDetail: "体积明显下降，更适合发送和归档。",
+      resultType: "async",
+      outputPath: "",
+      remoteUrl: "",
+      previewPath: "",
+      copyText: "",
+      metaLines: [],
+      attachments: [],
+    },
+    {
+      id: "task_seed_2",
+      toolId: "ocr-text",
+      selections: { language: "中英混合", layout: "正文优先" },
+      createdAt: now - 90 * 1000,
+      status: "processing",
+      duration: 5800,
+      inputName: "会议纪要截图.png",
+      outputName: "会议纪要.txt",
+      beforeSize: 2.1,
+      afterSize: 0.2,
+      resultHeadline: "OCR 正在处理",
+      resultDetail: "识别完成后可直接复制文本。",
+      resultType: "async",
+      outputPath: "",
+      remoteUrl: "",
+      previewPath: "",
+      copyText: "",
+      metaLines: [],
+      attachments: [],
+    },
+    {
+      id: "task_seed_3",
+      toolId: "photo-id",
+      selections: { size: "考试报名", background: "蓝底", retouch: "自然" },
+      createdAt: now - 4 * 60 * 60 * 1000,
+      status: "failed",
+      duration: 5200,
+      inputName: "自拍照片.jpg",
+      outputName: "报名照.png",
+      beforeSize: 3.9,
+      afterSize: 1.1,
+      resultHeadline: "人像识别失败",
+      resultDetail: "检测到多人入镜，请上传单人正面半身照后重试。",
+      resultType: "async",
+      outputPath: "",
+      remoteUrl: "",
+      previewPath: "",
+      copyText: "",
+      metaLines: [],
+      attachments: [],
+    },
+  ];
+
+  saveTasks(seedTasks);
+  writeStorage(STORAGE_KEYS.recent, ["photo-id", "pdf-compress", "ocr-text", "image-compress"]);
+  writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "image-compress"]);
+}
+
+function getTaskDashboard() {
+  const tasks = listTasks();
+  const processingCount = tasks.filter((item) => item.status === "processing").length;
+  const successCount = tasks.filter((item) => item.status === "success").length;
+  const savedTotal = tasks.reduce((sum, item) => {
+    if (item.status !== "success") {
+      return sum;
+    }
+
+    const before = item.beforeSize || 0;
+    const after = item.afterSize || 0;
+    return sum + Math.max(before - after, 0);
+  }, 0);
+
+  return {
+    processingCount,
+    successCount,
+    savedTotalText: formatMegabytes(savedTotal),
+  };
+}
+
+function getSyncSnapshot() {
+  return {
+    user: getUserState(),
+    tasks: getRawTasks(),
+    favorites: getFavorites(),
+    recentToolIds: getRecentToolIds(),
+  };
+}
+
+function applyRemoteState(state) {
+  const snapshot = state || {};
+  const nextUser = normalizeUserState({
+    ...getUserState(),
+    ...(snapshot.user || {}),
+  });
+
+  writeStorage(STORAGE_KEYS.user, nextUser);
+
+  if (Array.isArray(snapshot.tasks)) {
+    saveTasks(snapshot.tasks, { silent: true });
+  }
+
+  if (Array.isArray(snapshot.favorites)) {
+    setFavorites(snapshot.favorites, { silent: true });
+  }
+
+  if (Array.isArray(snapshot.recentToolIds)) {
+    setRecentToolIds(snapshot.recentToolIds, { silent: true });
+  }
+
+  clearSyncDirty();
+  return getSyncSnapshot();
+}
+
+module.exports = {
+  seedMockTasks,
+  seedUserState,
+  getUserState,
+  updateUserState,
+  getBillingPreview,
+  createTask,
+  listTasks,
+  getTaskById,
+  getTaskDashboard,
+  toggleFavorite,
+  isFavoriteTool,
+  listFavoriteTools,
+  touchRecentTool,
+  getRecentTools,
+  hasDirtySyncState,
+  clearSyncDirty,
+  getSyncSnapshot,
+  applyRemoteState,
+};

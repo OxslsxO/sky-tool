@@ -1,0 +1,109 @@
+<view class="container" wx:if="{{task}}">
+  <view class="hero task-hero task-hero--{{task.status}}">
+    <text class="eyebrow">Task Detail</text>
+    <text class="hero-title">{{task.tool.name}}</text>
+    <text class="hero-copy">{{task.resultHeadline}}</text>
+
+    <view class="hero-stat-row">
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{task.statusText}}</text>
+        <text class="hero-stat-label">当前状态</text>
+      </view>
+      <view class="hero-stat">
+        <text class="hero-stat-value">{{task.createdAtText}}</text>
+        <text class="hero-stat-label">创建时间</text>
+      </view>
+    </view>
+
+    <view class="progress-shell" wx:if="{{task.status === 'processing'}}">
+      <view class="progress-track">
+        <view class="progress-fill" style="width: {{task.progress}}%;"></view>
+      </view>
+      <text class="progress-text">预计很快完成，当前进度 {{task.progress}}%</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card detail-card">
+      <text class="detail-card__title">本次结果</text>
+      <text class="detail-card__copy">{{task.finalDetail}}</text>
+      <image class="detail-card__preview" wx:if="{{task.previewPath}}" src="{{task.previewPath}}" mode="aspectFit" bindtap="previewResult"></image>
+      <view class="audio-player" wx:if="{{task.status === 'success' && isAudioTask}}" bindtap="toggleAudioPlay">
+        <view class="audio-cover">
+          <text class="audio-play-icon">{{isPlaying ? '⏸' : '▶'}}</text>
+        </view>
+        <view class="audio-info">
+          <view class="audio-name">{{task.outputName || '音频文件'}}</view>
+          <view class="audio-meta">{{audioMetaText}}</view>
+        </view>
+      </view>
+      <view class="detail-card__meta" wx:if="{{task.metaLines.length}}">
+        <text class="detail-card__meta-line" wx:for="{{task.metaLines}}" wx:key="*this">{{item}}</text>
+      </view>
+      <view class="detail-card__attachments" wx:if="{{task.attachments.length}}">
+        <view class="detail-card__attachment" wx:for="{{task.attachments}}" wx:key="url" data-url="{{item.url}}" bindtap="openAttachment">
+          <text class="detail-card__attachment-name">{{item.label || item.name}}</text>
+          <text class="detail-card__attachment-link">打开文件</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Config</text>
+        <text class="section-title">本次参数</text>
+      </view>
+    </view>
+
+    <view class="chips-wrap">
+      <text class="chip-static" wx:for="{{configEntries}}" wx:key="key">{{item.label}} · {{item.value}}</text>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{task.status !== 'failed'}}">
+    <view class="metric-grid">
+      <view class="metric-card">
+        <text class="metric-label">原始大小</text>
+        <text class="metric-value">{{task.beforeSizeText}}</text>
+      </view>
+      <view class="metric-card">
+        <text class="metric-label">结果大小</text>
+        <text class="metric-value">{{task.afterSizeText}}</text>
+      </view>
+      <view class="metric-card">
+        <text class="metric-label">节省体积</text>
+        <text class="metric-value">{{task.savedSizeText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card action-card">
+      <text class="action-card__title">下一步</text>
+      <text class="action-card__copy">现在可以继续保存图片结果、复制文本结果，或者回到工具工作台再次处理。</text>
+      <view class="action-card__buttons" wx:if="{{task.previewPath || task.copyText}}">
+        <view class="btn-ghost action-card__button" wx:if="{{task.previewPath}}" bindtap="previewResult">预览结果</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.outputPath}}" bindtap="saveResult">保存结果</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.copyText}}" bindtap="copyResult">复制结果</view>
+      </view>
+      <view class="action-card__buttons" wx:if="{{task.status === 'success' && isAudioTask}}">
+        <view class="btn-secondary action-card__button" bindtap="toggleAudioPlay">{{isPlaying ? '暂停播放' : '播放音频'}}</view>
+        <view class="btn-secondary action-card__button" bindtap="openAudioFile">打开文件</view>
+        <view class="btn-primary action-card__button" bindtap="saveAudioFile">保存到手机</view>
+      </view>
+      <view class="action-card__buttons" wx:if="{{task.status === 'success' && task.resultType === 'document' && !isAudioTask}}">
+        <view class="btn-secondary action-card__button" bindtap="openDocumentResult">打开文件</view>
+      </view>
+      <view class="action-card__buttons" wx:if="{{task.remoteUrl && !isAudioTask}}">
+        <view class="btn-ghost action-card__button" bindtap="copyDownloadLink">复制下载链接</view>
+      </view>
+      <view class="action-card__buttons">
+        <view class="btn-ghost action-card__button" bindtap="openTool">回到工具</view>
+        <view class="btn-secondary action-card__button" bindtap="handleRetry">再次处理</view>
+      </view>
+      <view class="btn-primary task-detail__main-button" bindtap="openTasks">返回任务中心</view>
+    </view>
+  </view>
+</view>
