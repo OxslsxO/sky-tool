@@ -1445,20 +1445,36 @@ app.post("/api/pdf/to-word", async (req, res) => {
   try {
     assertPdfFile(file);
     tempDir = fs.mkdtempSync(path.join(config.tempDir, "pdf-word-"));
+    console.log("[PDF to Word] 临时目录:", tempDir);
+    
     const randomId = makeId();
     const inputName = `input-${randomId}.pdf`;
     const inputPath = path.join(tempDir, inputName);
 
-    fs.writeFileSync(inputPath, decodeBase64File(file));
+    const fileBuffer = decodeBase64File(file);
+    console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
+    fs.writeFileSync(inputPath, fileBuffer);
+    console.log("[PDF to Word] 输入文件已写入:", inputPath);
     
     const outputExt = format === "DOC" ? "doc" : "docx";
-    const outputFormat = format === "DOC" ? "doc:Microsoft Word 97-2003" : "docx:Microsoft Word 2007-365";
+    const outputFormat = format === "DOC" ? "doc" : "docx";
     console.log("[PDF to Word] 使用格式:", outputFormat);
     await runSofficeConvert(sofficePath, inputPath, tempDir, outputFormat);
 
     const outputFileName = `input-${randomId}.${outputExt}`;
     const outputPath = path.join(tempDir, outputFileName);
+    console.log("[PDF to Word] 等待输出文件:", outputPath);
+    
+    const tempFiles = fs.readdirSync(tempDir);
+    console.log("[PDF to Word] 临时目录内容:", tempFiles);
+    
+    if (!fs.existsSync(outputPath)) {
+      throw new Error(`输出文件不存在: ${outputPath}, 目录内容: ${tempFiles.join(", ")}`);
+    }
+    
     const bytes = fs.readFileSync(outputPath);
+    console.log("[PDF to Word] 输出文件大小:", bytes.length, "bytes");
+    
     const output = await saveOutputFile(req, bytes, {
       extension: outputExt,
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
