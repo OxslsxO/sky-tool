@@ -288,6 +288,18 @@ function resolveSofficePath() {
     return process.env.SOFFICE_PATH;
   }
 
+  if (process.platform === "win32") {
+    const commonPaths = [
+      "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+      "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+    ];
+    for (const p of commonPaths) {
+      if (fs.existsSync(p)) {
+        return p;
+      }
+    }
+  }
+
   try {
     const command = process.platform === "win32" ? "where soffice" : "which soffice";
     const result = execSync(command, {
@@ -317,16 +329,44 @@ async function recognizeTextFromImage(file, languageLabel) {
 
 function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat = "pdf") {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      sofficePath,
-      ["--headless", "--convert-to", outputFormat, "--outdir", outputDir, inputFilePath],
-      { stdio: "ignore" }
-    );
+    const args = ["--headless", "--convert-to", outputFormat, "--outdir", outputDir, inputFilePath];
+    console.log("[LibreOffice] 开始转换, 命令:", sofficePath, args.join(" "));
+    
+    const env = { ...process.env };
+    
+    if (process.platform === "win32") {
+      const sofficeDir = path.dirname(sofficePath);
+      env.URE_BOOTSTRAP_PATH = path.join(sofficeDir, "fundamental.ini");
+      env.PATH = `${sofficeDir};${env.PATH || ""}`;
+      console.log("[LibreOffice] 设置环境变量, sofficeDir:", sofficeDir);
+    }
+    
+    let stderrOutput = "";
+    let stdoutOutput = "";
+    const child = spawn(sofficePath, args, { 
+      stdio: ["ignore", "pipe", "pipe"],
+      env 
+    });
 
-    child.on("error", reject);
+    child.stdout.on("data", (data) => {
+      stdoutOutput += data.toString();
+    });
+
+    child.stderr.on("data", (data) => {
+      stderrOutput += data.toString();
+    });
+
+    child.on("error", (err) => {
+      console.error("[LibreOffice] 启动错误:", err);
+      reject(err);
+    });
+
     child.on("close", (code) => {
+      console.log("[LibreOffice] 进程退出, code:", code);
       if (code !== 0) {
-        reject(new Error("LibreOffice 转换失败"));
+        console.error("[LibreOffice] stdout:", stdoutOutput);
+        console.error("[LibreOffice] stderr:", stderrOutput);
+        reject(new Error(`LibreOffice 转换失败 (code: ${code}): ${stderrOutput}`));
         return;
       }
 
@@ -1283,13 +1323,15 @@ app.post("/api/office/to-pdf", async (req, res) => {
 
   try {
     tempDir = fs.mkdtempSync(path.join(config.tempDir, "office-"));
-    const inputName = file && file.name ? file.name : `office-${makeId()}.docx`;
+    const randomId = makeId();
+    const inputExt = file && file.name ? path.extname(file.name) : ".docx";
+    const inputName = `input-${randomId}${inputExt}`;
     const inputPath = path.join(tempDir, inputName);
 
     fs.writeFileSync(inputPath, decodeBase64File(file));
     await runSofficeConvert(sofficePath, inputPath, tempDir);
 
-    const outputFileName = `${path.parse(inputPath).name}.pdf`;
+    const outputFileName = `input-${randomId}.pdf`;
     const outputPath = path.join(tempDir, outputFileName);
     const bytes = fs.readFileSync(outputPath);
     const output = await saveOutputFile(req, bytes, {
@@ -1403,19 +1445,22 @@ app.post("/api/pdf/to-word", async (req, res) => {
   try {
     assertPdfFile(file);
     tempDir = fs.mkdtempSync(path.join(config.tempDir, "pdf-word-"));
-    const inputName = file && file.name ? file.name : `pdf-${makeId()}.pdf`;
+    const randomId = makeId();
+    const inputName = `input-${randomId}.pdf`;
     const inputPath = path.join(tempDir, inputName);
 
     fs.writeFileSync(inputPath, decodeBase64File(file));
     
-    const outputFormat = format === "DOC" ? "doc" : "docx";
+    const outputExt = format === "DOC" ? "doc" : "docx";
+    const outputFormat = format === "DOC" ? "doc:Microsoft Word 97-2003" : "docx:Microsoft Word 2007-365";
+    console.log("[PDF to Word] 使用格式:", outputFormat);
     await runSofficeConvert(sofficePath, inputPath, tempDir, outputFormat);
 
-    const outputFileName = `${path.parse(inputPath).name}.${outputFormat}`;
+    const outputFileName = `input-${randomId}.${outputExt}`;
     const outputPath = path.join(tempDir, outputFileName);
     const bytes = fs.readFileSync(outputPath);
     const output = await saveOutputFile(req, bytes, {
-      extension: outputFormat,
+      extension: outputExt,
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       baseName: path.parse(inputName).name,
     });
