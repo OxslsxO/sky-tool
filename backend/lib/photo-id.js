@@ -40,9 +40,49 @@ const PHOTO_SIZE_MAP = {
     maxHeightRatio: 0.97,
     bottomInset: 0,
   },
+  "一寸": {
+    width: 295,
+    height: 413,
+    maxWidthRatio: 0.99,
+    maxHeightRatio: 0.97,
+    bottomInset: 0,
+  },
+  "二寸": {
+    width: 413,
+    height: 579,
+    maxWidthRatio: 0.99,
+    maxHeightRatio: 0.97,
+    bottomInset: 0,
+  },
+  "考试报名": {
+    width: 413,
+    height: 579,
+    maxWidthRatio: 0.99,
+    maxHeightRatio: 0.97,
+    bottomInset: 0,
+  },
+  "签证": {
+    width: 354,
+    height: 472,
+    maxWidthRatio: 0.99,
+    maxHeightRatio: 0.97,
+    bottomInset: 0,
+  },
 };
 
 const BACKGROUND_COLOR_MAP = {
+  "白底": "#ffffff",
+  "蓝底": "#2d6ec9",
+  "红底": "#cf5446",
+  "纯白": "#ffffff",
+  "淡蓝": "#87ceeb",
+  "天蓝": "#2d6ec9",
+  "藏蓝": "#1e3a5f",
+  "大红": "#cf5446",
+  "酒红": "#8b0000",
+  "浅灰": "#d3d3d3",
+  "淡粉": "#ffb6c1",
+  "淡绿": "#90ee90",
   "纯白": "#ffffff",
   "淡蓝": "#87ceeb",
   "天蓝": "#2d6ec9",
@@ -59,11 +99,13 @@ const MODEL_CANDIDATES = [
     key: "u2net-human-seg",
     url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx",
     fileName: "u2net_human_seg.onnx",
+    inputSize: 320,
   },
   {
     key: "birefnet-portrait",
     url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-portrait-epoch_150.onnx",
     fileName: "BiRefNet-portrait-epoch_150.onnx",
+    inputSize: 1024,
   },
 ];
 const MODEL_MEAN = [0.485, 0.456, 0.406];
@@ -216,7 +258,7 @@ function getMetadataEntry(metadataSource, name) {
   return metadataSource[name] || null;
 }
 
-function getInputShape(session) {
+function getInputShape(session, model) {
   const inputNames = getSessionInputNames(session);
   const inputName = inputNames[0];
   const metadata =
@@ -228,6 +270,14 @@ function getInputShape(session) {
     null;
 
   if (!metadata || !Array.isArray(dimensions) || dimensions.length !== 4) {
+    if (model && model.inputSize) {
+      return {
+        inputName,
+        width: model.inputSize,
+        height: model.inputSize,
+      };
+    }
+
     const error = new Error("Photo-id model input metadata is invalid");
     error.code = "PHOTO_ID_MODEL_INPUT_INVALID";
     throw error;
@@ -247,8 +297,8 @@ function getInputShape(session) {
   };
 }
 
-async function normalizeImageForModel(session, inputBuffer) {
-  const { width, height } = getInputShape(session);
+async function normalizeImageForModel(session, model, inputBuffer) {
+  const { width, height } = getInputShape(session, model);
   const { data, info } = await sharp(inputBuffer)
     .removeAlpha()
     .resize(width, height, { fit: "fill" })
@@ -844,12 +894,12 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   }
   console.log("[photo-id] removeBackgroundWithModel: 会话获取成功");
 
-  const { session } = sessionBundle;
+  const { session, model } = sessionBundle;
   console.log("[photo-id] removeBackgroundWithModel: 标准化图像");
-  const tensor = await normalizeImageForModel(session, inputBuffer);
+  const tensor = await normalizeImageForModel(session, model, inputBuffer);
 
   console.log("[photo-id] removeBackgroundWithModel: 运行模型推理");
-  const result = await session.run({ [getInputShape(session).inputName]: tensor });
+  const result = await session.run({ [getInputShape(session, model).inputName]: tensor });
   console.log("[photo-id] removeBackgroundWithModel: 模型推理完成");
 
   const outputTensor = getPrimaryOutputTensor(session, result);
@@ -979,7 +1029,28 @@ async function finalEdgeCleanup(subjectBuffer, newBackgroundColor) {
 
         // 检测白色/浅灰色（证件照白边核心）
         const isWhiteEdge = r > 150 && g > 150 && b > 150;
-        if (isWhiteEdge) {
+        let touchesTransparentEdge = false;
+        for (let dy = -1; dy <= 1 && !touchesTransparentEdge; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) {
+              continue;
+            }
+
+            const neighborX = x + dx;
+            const neighborY = y + dy;
+            if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) {
+              continue;
+            }
+
+            const neighborAlpha = data[(neighborY * width + neighborX) * channels + 3];
+            if (neighborAlpha <= 64) {
+              touchesTransparentEdge = true;
+              break;
+            }
+          }
+        }
+
+        if (isWhiteEdge && touchesTransparentEdge) {
           // 直接把白色改成人物肤色，彻底消灭白边
           data[idx] = Math.max(120, r - 40);
           data[idx + 1] = Math.max(100, g - 50);
@@ -1642,7 +1713,7 @@ async function finalEdgeRepairAfterComposite(imageBuffer, bgRgb, bgHex) {
 
       const isWhiteish = (r > 200 && g > 200 && b > 200);
 
-      if ((isEdge && distToBg > 15 && distToBg < 180) || (isWhiteish && distToBg > 15)) {
+      if (isEdge && ((distToBg > 15 && distToBg < 180) || (isWhiteish && distToBg > 15))) {
         edgePixelCount++;
 
         let blend = 0;

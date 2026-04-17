@@ -228,6 +228,24 @@ async function createPortraitWithEarBleedBackground() {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+async function createPortraitHoldingDocuments() {
+  const width = 520;
+  const height = 680;
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#f7f7f7"/>
+      <ellipse cx="260" cy="185" rx="82" ry="104" fill="#efc29d"/>
+      <ellipse cx="260" cy="126" rx="86" ry="44" fill="#202020"/>
+      <rect x="226" y="282" width="68" height="46" rx="20" fill="#efc29d"/>
+      <path d="M118 330 C172 306 348 306 402 330 L462 650 L58 650 Z" fill="#f4f4f4"/>
+      <rect x="34" y="420" width="180" height="190" fill="#fafafa" stroke="#eef3f4" stroke-width="4"/>
+      <rect x="304" y="456" width="145" height="180" fill="#fff9ef" stroke="#f4eadf" stroke-width="3"/>
+    </svg>
+  `;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
 test("photo-id replaces a plain background with the requested solid color", async () => {
   const input = await createSyntheticPortrait();
   const result = await buildPhotoIdImage(
@@ -306,6 +324,43 @@ test("photo-id suppresses source background spill around ear edges", async () =>
   assert.ok(
     blueishPixelCount < 18,
     `expected ear-edge background spill to stay low, got ${blueishPixelCount} blueish pixels`
+  );
+});
+
+test("photo-id does not gray out light foreground documents", async () => {
+  const input = await createPortraitHoldingDocuments();
+  const result = await buildPhotoIdImage(
+    { tempDir: __dirname },
+    input,
+    { size: "一寸", background: "红底", retouch: "自然" }
+  );
+
+  const image = await sharp(result.buffer)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let grayishPixels = 0;
+  const startX = Math.floor(image.info.width * 0.02);
+  const endX = Math.ceil(image.info.width * 0.44);
+  const startY = Math.floor(image.info.height * 0.62);
+  const endY = Math.ceil(image.info.height * 0.95);
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const offset = (y * image.info.width + x) * image.info.channels;
+      const r = image.data[offset];
+      const g = image.data[offset + 1];
+      const b = image.data[offset + 2];
+      const range = Math.max(r, g, b) - Math.min(r, g, b);
+      if (r >= 135 && r <= 215 && g >= 135 && g <= 215 && b >= 135 && b <= 215 && range < 45) {
+        grayishPixels += 1;
+      }
+    }
+  }
+
+  assert.ok(
+    grayishPixels < 300,
+    `expected light foreground documents to avoid gray cleanup patches, got ${grayishPixels} gray pixels`
   );
 });
 

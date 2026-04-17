@@ -3,7 +3,9 @@ const { PDFDocument } = require("../../utils/vendor/pdf-lib");
 const { getToolById, getCategoryById } = require("../../data/mock");
 
 const BACKGROUND_COLOR_MAP = {
-  "纯白": "#ffffff",
+  "白色": "#ffffff",
+  "蓝色": "#2d6ec9",
+  "红色": "#cf5446",
   "淡蓝": "#87ceeb",
   "天蓝": "#2d6ec9",
   "藏蓝": "#1e3a5f",
@@ -13,6 +15,8 @@ const BACKGROUND_COLOR_MAP = {
   "淡粉": "#ffb6c1",
   "淡绿": "#90ee90",
 };
+
+const DEFAULT_BACKGROUND_COLORS = ["白色", "蓝色", "红色"];
 const {
   createTask,
   getBillingPreview,
@@ -20,6 +24,9 @@ const {
   isFavoriteTool,
   touchRecentTool,
   listTasks,
+  getPhotoIdStats,
+  incrementPhotoIdUsage,
+  consumePoints,
 } = require("../../utils/task-store");
 const { isClientTool } = require("../../utils/tool-engine");
 const { getGroupUnits, convertValue } = require("../../utils/unit-converter");
@@ -204,7 +211,6 @@ function writePhotoIdSession(payload) {
       photoIdResultHeadline: payload.photoIdResultHeadline,
       photoIdResultDetail: payload.photoIdResultDetail,
       photoIdResultMetaLines: payload.photoIdResultMetaLines || [],
-      photoIdDiagnosticsLines: payload.photoIdDiagnosticsLines || [],
     };
     wx.setStorageSync(PHOTO_ID_SESSION_KEY, minimalPayload);
   } catch (error) {
@@ -222,41 +228,6 @@ function clearPhotoIdSession() {
   } catch (error) {
     // Ignore storage cleanup failures.
   }
-}
-
-function formatDurationText(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) {
-    return "";
-  }
-
-  return `${Math.round(number)} ms`;
-}
-
-function buildPhotoIdDiagnosticsLines(imageInput, diagnostics) {
-  const lines = [];
-  const sourceSizeText = imageInput && imageInput.sizeText
-    ? imageInput.sizeText
-    : formatFileSize(imageInput && imageInput.size);
-
-  if (imageInput && imageInput.width && imageInput.height) {
-    const sourceMeta = sourceSizeText && sourceSizeText !== "--"
-      ? `涓婁紶鍘熷浘 ${imageInput.width} 脳 ${imageInput.height} 路 ${sourceSizeText}`
-      : `涓婁紶鍘熷浘 ${imageInput.width} 脳 ${imageInput.height}`;
-    lines.push(sourceMeta);
-  }
-
-  const networkDurationText = formatDurationText(diagnostics && diagnostics.networkMs);
-  if (networkDurationText) {
-    lines.push(`缃戠粶鑰楁椂 ${networkDurationText}`);
-  }
-
-  const backendDurationText = formatDurationText(diagnostics && diagnostics.processingMs);
-  if (backendDurationText) {
-    lines.push(`鍚庣鎬昏€楁椂 ${backendDurationText}`);
-  }
-
-  return lines;
 }
 
 Page({
@@ -308,12 +279,12 @@ Page({
     photoIdResultHeadline: "",
     photoIdResultDetail: "",
     photoIdResultMetaLines: [],
-    photoIdDiagnosticsLines: [],
     photoIdIsProcessing: false,
     backgroundColorMap: BACKGROUND_COLOR_MAP,
     processingProgress: 0,
     processingStatus: "",
     showProcessingOverlay: false,
+    showMoreColors: false,
   },
 
   onLoad(options) {
@@ -333,6 +304,7 @@ Page({
       : this.buildDefaultSelections(tool);
     const viewState = this.buildViewState(tool, selections);
     const photoIdSession = tool.id === "photo-id" ? readPhotoIdSession() : null;
+    const photoIdStats = tool.id === "photo-id" ? getPhotoIdStats() : null;
     // 添加silent选项，避免触发同步操作导致页面刷新
     touchRecentTool(tool.id, { silent: true });
 
@@ -350,6 +322,7 @@ Page({
       backendPickerButtonText: this.getBackendPickerButtonText(tool.id),
       ...viewState,
       ...(photoIdSession || {}),
+      ...(photoIdStats || {}),
     };
 
     this.setData(nextState);
@@ -628,6 +601,10 @@ Page({
     }
   },
 
+  toggleMoreColors() {
+    this.setData({ showMoreColors: !this.data.showMoreColors });
+  },
+
   handleNumberInput(event) {
     this.setData({
       numberInput: event.detail.value,
@@ -712,6 +689,19 @@ Page({
       });
       return;
     }
+
+    const consumeResult = consumePoints(this.data.tool);
+    if (!consumeResult.success) {
+      wx.showToast({
+        title: consumeResult.billing.costText,
+        icon: "none",
+      });
+      return;
+    }
+
+    this.setData({
+      billing: getBillingPreview(this.data.tool),
+    });
 
     logger.log("[处理执行] 检查工具类型和合规性");
     const { tool, imageInput } = this.data;
@@ -1096,7 +1086,6 @@ Page({
 
       this.updateProcessingProgress(30, "正在智能抠图...");
       logger.log("[照片转证件照] 发送请求到 /api/photo-id");
-      const requestStartedAt = Date.now();
       const remoteResponse = await requestJson("/api/photo-id", {
         file: packedFile,
         size: selections.size,
@@ -1106,7 +1095,6 @@ Page({
         timeout: 180000,
         includeMeta: true,
       });
-      const networkMs = Date.now() - requestStartedAt;
       const response = remoteResponse && remoteResponse.data ? remoteResponse.data : remoteResponse;
 
       this.updateProcessingProgress(75, "正在生成证件照...");
@@ -1138,11 +1126,6 @@ Page({
         }
       }
       const shouldDownloadPreviewEagerly = false;
-      const responseDiagnostics = response.diagnostics || {};
-      const photoIdDiagnosticsLines = buildPhotoIdDiagnosticsLines(imageInput, {
-        networkMs,
-        processingMs: responseDiagnostics.processingMs,
-      });
 
       if (shouldDownloadPreviewEagerly && file.url) {
         try {
@@ -1181,7 +1164,6 @@ Page({
         photoIdResultHeadline: response.headline || "证件照生成成功",
         photoIdResultDetail: response.detail || "已完成证件照的处理，可预览或保存到相册",
         photoIdResultMetaLines: response.metaLines || [],
-        photoIdDiagnosticsLines,
         showProcessingOverlay: false,
         processingProgress: 100,
         processingStatus: "处理完成",
@@ -1208,6 +1190,9 @@ Page({
         this.latestCreatedTaskId = taskResult.task.id;
         nextState.latestCreatedTaskId = taskResult.task.id;
         nextState.relatedTasks = this.getRelatedTasks(tool.id);
+        // 增加证件照使用次数
+        const stats = incrementPhotoIdUsage();
+        nextState.totalUsageCount = stats.totalUsageCount;
       }
 
       persistPhotoIdSession({
@@ -1256,7 +1241,6 @@ Page({
       photoIdResultHeadline: "",
       photoIdResultDetail: "",
       photoIdResultMetaLines: [],
-      photoIdDiagnosticsLines: [],
       photoIdIsProcessing: false,
     };
   },

@@ -581,6 +581,72 @@ app.post("/api/photo-id", async (req, res) => {
   }
 });
 
+const pendingOrders = new Map();
+
+app.post("/api/pay/create", async (req, res) => {
+  const { type, itemId } = req.body || {};
+
+  if (!type || !itemId) {
+    return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
+  }
+
+  const orderId = `ORD-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const nonceStr = crypto.randomBytes(16).toString("hex");
+  const timeStamp = String(Math.floor(Date.now() / 1000));
+
+  const mockPayment = {
+    timeStamp,
+    nonceStr,
+    package: `prepay_id=wx${Date.now()}`,
+    signType: "MD5",
+    paySign: crypto.createHash("md5").update(`${orderId}${nonceStr}${timeStamp}`).digest("hex"),
+  };
+
+  pendingOrders.set(orderId, {
+    type,
+    itemId,
+    status: "pending",
+    createdAt: Date.now(),
+  });
+
+  res.json({ orderId, payment: mockPayment });
+});
+
+app.post("/api/pay/verify", async (req, res) => {
+  const { orderId } = req.body || {};
+
+  if (!orderId) {
+    return res.status(400).json({ error: "MISSING_ORDER_ID", message: "缺少 orderId" });
+  }
+
+  const order = pendingOrders.get(orderId);
+  if (!order) {
+    return res.status(404).json({ error: "ORDER_NOT_FOUND", message: "订单不存在" });
+  }
+
+  order.status = "paid";
+  order.paidAt = Date.now();
+  pendingOrders.set(orderId, order);
+
+  res.json({ success: true, orderId, type: order.type, itemId: order.itemId });
+});
+
+app.post("/api/pay/notify", async (req, res) => {
+  const { orderId, result_code, out_trade_no } = req.body || {};
+
+  if (result_code === "SUCCESS" && orderId) {
+    const order = pendingOrders.get(orderId);
+    if (order) {
+      order.status = "paid";
+      order.paidAt = Date.now();
+      order.transactionId = out_trade_no;
+      pendingOrders.set(orderId, order);
+    }
+  }
+
+  res.json({ code: "SUCCESS", message: "" });
+});
+
 app.get("/api/client/state", async (req, res) => {
   const userId = String(req.query.userId || "").trim();
   const deviceId = String(req.query.deviceId || "").trim();

@@ -2,23 +2,30 @@
   <view class="hero mine-hero">
     <text class="eyebrow">Profile</text>
     <text class="hero-title">{{user.nickname || 'Toolbox User'}}</text>
-    <text class="hero-copy">
-      Your account, task sync status, favorites and recent tools are managed here.
-    </text>
 
     <view class="hero-stat-row">
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{user.points}}</text>
-        <text class="hero-stat-label">Points</text>
+      <view class="hero-stat" bindtap="openVip">
+        <text class="hero-stat-value">{{memberStatus.active ? memberStatus.plan : '未开通'}}</text>
+        <text class="hero-stat-label">会员</text>
       </view>
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{user.freeQuota}}</text>
-        <text class="hero-stat-label">Free Uses</text>
+      <view class="hero-stat" bindtap="openVip">
+        <text class="hero-stat-value">{{user.points}}</text>
+        <text class="hero-stat-label">积分</text>
       </view>
       <view class="hero-stat">
         <text class="hero-stat-value">{{taskCount}}</text>
-        <text class="hero-stat-label">Tasks</text>
+        <text class="hero-stat-label">任务</text>
       </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="card vip-entry" bindtap="openVip">
+      <view class="vip-entry__left">
+        <text class="vip-entry__title">{{memberStatus.active ? '会员中心' : '开通会员'}}</text>
+        <text class="vip-entry__copy">{{memberStatus.active ? '剩余' + memberStatus.remainingDays + '天 · 积分' + user.points : '享受全部工具免费使用'}}</text>
+      </view>
+      <text class="vip-entry__arrow">›</text>
     </view>
   </view>
 
@@ -42,23 +49,6 @@
           {{syncBusy ? 'Syncing...' : 'Sync Now'}}
         </view>
         <view class="btn-ghost profile-card__button" bindtap="openProfileEdit">Edit Profile</view>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="metric-grid">
-      <view class="metric-card" wx:if="{{canConfigureBackend}}" bindtap="openServiceConfig">
-        <text class="metric-label">Cloud Service</text>
-        <text class="metric-value">{{backendConfigured ? 'Configured' : 'Setup'}}</text>
-      </view>
-      <view class="metric-card" bindtap="openProfileEdit">
-        <text class="metric-label">Profile</text>
-        <text class="metric-value">Editable</text>
-      </view>
-      <view class="metric-card" bindtap="syncNow">
-        <text class="metric-label">State Sync</text>
-        <text class="metric-value">{{backendConfigured ? 'Available' : 'Pending'}}</text>
       </view>
     </view>
   </view>

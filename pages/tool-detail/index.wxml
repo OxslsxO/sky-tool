@@ -1,49 +1,24 @@
 <view class="container" wx:if="{{tool}}">
   <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
-    <view class="tag-row">
-      <text class="pill">{{category ? category.name : '工具'}}</text>
-      <text class="tag">{{tool.badge}}</text>
-      <text class="tag">{{tool.points}} 积分</text>
-    </view>
-
-    <text class="eyebrow">Operate</text>
     <text class="hero-title">{{tool.name}}</text>
-    <text class="hero-copy">{{tool.tagline || helperCopy}}</text>
-
-    <view class="hero-stat-row">
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{isClientTool ? '本地直接处理' : '云端智能处理'}}</text>
-        <text class="hero-stat-label">执行方式</text>
-      </view>
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{tool.formatText}}</text>
-        <text class="hero-stat-label">输入类型</text>
-      </view>
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{billing ? billing.costText : '--'}}</text>
-        <text class="hero-stat-label">当前计费</text>
-      </view>
-    </view>
-
-    <text class="hero-note" wx:if="{{heroScenario}}">常见场景：{{heroScenario}}</text>
+    <text class="hero-cost">{{billing ? billing.costText : (tool.points + ' 积分')}}</text>
   </view>
 
   <view class="section">
     <view class="section-head">
       <view>
         <text class="eyebrow">Setup</text>
-        <text class="section-title">先选参数</text>
-        <text class="section-copy">默认值已经带上，改完就能直接开始。</text>
+        <text class="section-title">参数</text>
       </view>
     </view>
 
     <view class="card upload-card">
       <view class="option-block" wx:for="{{tool.params}}" wx:key="key">
         <text class="option-block__title">{{item.label}}</text>
-        <view class="chips-wrap">
+        <view class="chips-wrap {{showMoreColors && item.key === 'background' ? 'chips-wrap-expanded' : ''}}">
           <view
             class="chip {{selections[item.key] === option ? 'chip-active' : ''}} {{item.key === 'background' ? 'chip-color' : ''}}"
-            wx:for="{{item.options}}"
+            wx:for="{{item.key === 'background' && !showMoreColors ? ['白色', '蓝色', '红色'] : (item.key === 'background' && showMoreColors ? tool.params[1].options : item.options)}}"
             wx:for-item="option"
             wx:key="*this"
             data-key="{{item.key}}"
@@ -53,12 +28,19 @@
             <view wx:if="{{item.key === 'background'}}" class="chip-color__dot" style="background: {{backgroundColorMap[option]}};"></view>
             <text>{{option}}</text>
           </view>
+          <view
+            class="chip chip-expand {{showMoreColors ? 'chip-active' : ''}}"
+            wx:if="{{item.key === 'background'}}"
+            bindtap="toggleMoreColors"
+          >
+            <text>{{showMoreColors ? '收起' : '更多'}}</text>
+          </view>
         </view>
       </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{showImageUpload}}">
+  <view class="section" wx:if="{{showImageUpload && tool.id !== 'photo-id'}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
@@ -80,6 +62,25 @@
         <view class="chips-wrap">
           <text class="chip-static" wx:for="{{imageInputs}}" wx:key="path">第 {{index + 1}} 张 · {{item.width}} × {{item.height}}</text>
         </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{tool.id === 'photo-id'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">上传照片</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage">选择图片</view>
+
+      <view class="image-preview" wx:if="{{imageInput}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
+        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
       </view>
     </view>
   </view>
@@ -163,7 +164,7 @@
     </view>
   </view>
 
-  <view class="section">
+  <view class="section" wx:if="{{tool.id !== 'photo-id'}}">
     <view class="card action-card">
       <text class="action-card__title">{{actionTitle}}</text>
       <text class="action-card__copy">{{billing ? billing.text : ''}}</text>
@@ -180,6 +181,32 @@
             <text class="loading-text">处理中</text>
           </view>
           <text wx:else>{{primaryActionText}}</text>
+        </view>
+        <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '取消收藏' : '收藏工具'}}</view>
+      </view>
+      <view class="action-card__buttons" wx:if="{{latestCreatedTaskId}}">
+        <view class="btn-secondary action-card__button" bindtap="openLatestTask">查看刚生成的结果</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{tool.id === 'photo-id'}}">
+    <view class="card action-card">
+      <text class="action-card__title">开始处理</text>
+      <text class="action-card__copy">{{billing ? billing.text : ''}}</text>
+      <text class="action-card__hint" wx:if="{{totalUsageCount > 0}}">已累计使用 {{totalUsageCount}} 次</text>
+
+      <view class="action-card__buttons">
+        <view class="btn-primary action-card__button {{!imageInput || isWorking ? 'action-card__button-disabled' : ''}}" bindtap="handleExecute">
+          <view wx:if="{{isWorking}}" class="loading-wrap">
+            <view class="loading-spinner">
+              <view class="loading-dot"></view>
+              <view class="loading-dot"></view>
+              <view class="loading-dot"></view>
+            </view>
+            <text class="loading-text">处理中</text>
+          </view>
+          <text wx:else>开始处理</text>
         </view>
         <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '取消收藏' : '收藏工具'}}</view>
       </view>
@@ -214,11 +241,6 @@
         <text class="chip-static" wx:for="{{photoIdResultMetaLines}}" wx:key="*this">{{item}}</text>
       </view>
 
-      <view class="result-card__diagnostics" wx:if="{{photoIdDiagnosticsLines.length}}">
-        <text class="result-card__diagnostics-title">诊断信息</text>
-        <text class="result-card__diagnostics-item" wx:for="{{photoIdDiagnosticsLines}}" wx:key="*this">{{item}}</text>
-      </view>
-
       <view class="action-card__buttons">
         <view class="btn-primary action-card__button" bindtap="previewPhotoIdResult">预览大图</view>
         <view class="btn-ghost action-card__button" bindtap="savePhotoIdResult">保存到相册</view>
@@ -226,25 +248,6 @@
 
       <view class="action-card__buttons" wx:if="{{photoIdResultRemoteUrl}}">
         <view class="btn-secondary action-card__button" bindtap="copyPhotoIdLink">复制下载链接</view>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Guide</text>
-        <text class="section-title">{{helperTitle}}</text>
-      </view>
-    </view>
-
-    <view class="card subtle-card">
-      <text class="upload-card__copy">{{tool.helperText || helperCopy}}</text>
-      <view class="tag-row tag-row--spaced" wx:if="{{tool.scenarios && tool.scenarios.length}}">
-        <text class="tag" wx:for="{{tool.scenarios}}" wx:key="*this">{{item}}</text>
-      </view>
-      <view class="tag-row tag-row--spaced" wx:if="{{tool.supportedFormats && tool.supportedFormats.length}}">
-        <text class="tag" wx:for="{{tool.supportedFormats}}" wx:key="*this">{{item}}</text>
       </view>
     </view>
   </view>

@@ -33,9 +33,13 @@ test("photo-id page delegates processing to the backend photo-id API", () => {
 test("photo-id keeps the result on the current page while recording a task", () => {
   const toolDetail = read("pages/tool-detail/index.js");
   const wxml = read("pages/tool-detail/index.wxml");
-  const runRemotePhotoIdBody = (toolDetail.match(/async runRemotePhotoId\(\)\s*\{([\s\S]*?)\n  \},\n\n  getClearedPhotoIdResult/) || [])[1] || "";
+  const runRemotePhotoIdStart = toolDetail.indexOf("  async runRemotePhotoId()");
+  const runRemotePhotoIdEnd = toolDetail.indexOf("  getClearedPhotoIdResult()");
+  const runRemotePhotoIdBody = toolDetail.slice(runRemotePhotoIdStart, runRemotePhotoIdEnd);
 
   assert.match(toolDetail, /photoIdResultReady/);
+  assert.notEqual(runRemotePhotoIdStart, -1, "runRemotePhotoId method was not found");
+  assert.notEqual(runRemotePhotoIdEnd, -1, "getClearedPhotoIdResult method was not found");
   assert.match(
     runRemotePhotoIdBody,
     /createTask\(/,
@@ -48,7 +52,7 @@ test("photo-id keeps the result on the current page while recording a task", () 
   );
   assert.match(wxml, /bindtap="previewPhotoIdResult"/);
   assert.match(wxml, /class="result-card__image"/);
-  assert.match(wxml, /photoIdDiagnosticsLines/);
+  assert.doesNotMatch(wxml, /photoIdDiagnosticsLines/);
 });
 
 test("photo-id shows recent tasks on the tool page", () => {
@@ -66,14 +70,17 @@ test("photo-id persists inline result state so page lifecycle refresh does not w
   assert.match(toolDetail, /writePhotoIdSession\(nextState\)/);
   assert.match(toolDetail, /selections:\s*payload\.selections\s*\|\|\s*\{\}/);
   assert.match(toolDetail, /imageInput:\s*payload\.imageInput\s*\|\|\s*null/);
-  assert.match(toolDetail, /photoIdDiagnosticsLines:\s*payload\.photoIdDiagnosticsLines\s*\|\|\s*\[\]/);
   assert.match(toolDetail, /persistPhotoIdSession\(\{\s*\.\.\.this\.data,\s*\.\.\.nextState,\s*\}\)/);
 });
 
-test("photo-id page surfaces request diagnostics on the result card", () => {
+test("photo-id page keeps diagnostics off the result card", () => {
   const toolDetail = read("pages/tool-detail/index.js");
+  const wxml = read("pages/tool-detail/index.wxml");
+  const wxss = read("pages/tool-detail/index.wxss");
 
   assert.match(toolDetail, /includeMeta:\s*true/);
-  assert.match(toolDetail, /buildPhotoIdDiagnosticsLines/);
-  assert.match(toolDetail, /photoIdDiagnosticsLines/);
+  assert.doesNotMatch(toolDetail, /buildPhotoIdDiagnosticsLines/);
+  assert.doesNotMatch(toolDetail, /photoIdDiagnosticsLines/);
+  assert.doesNotMatch(wxml, /诊断信息|photoIdDiagnosticsLines|result-card__diagnostics/);
+  assert.doesNotMatch(wxss, /result-card__diagnostics/);
 });

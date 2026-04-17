@@ -12,6 +12,9 @@ const STORAGE_KEYS = {
   recent: "sky_tools_recent",
   user: "sky_tools_user",
   syncDirty: "sky_tools_sync_dirty",
+  photoIdStats: "sky_tools_photo_id_stats",
+  pointsRecords: "sky_tools_points_records",
+  orders: "sky_tools_orders",
 };
 
 const DEFAULT_USER = {
@@ -708,12 +711,147 @@ function getTaskDashboard() {
   };
 }
 
+function getPhotoIdStats() {
+  return readStorage(STORAGE_KEYS.photoIdStats, {
+    totalUsageCount: 0,
+    lastUsedAt: null,
+  });
+}
+
+function incrementPhotoIdUsage() {
+  const stats = getPhotoIdStats();
+  const nextStats = {
+    totalUsageCount: stats.totalUsageCount + 1,
+    lastUsedAt: nowIso(),
+  };
+  writeStorage(STORAGE_KEYS.photoIdStats, nextStats);
+  return nextStats;
+}
+
 function getSyncSnapshot() {
   return {
     user: getUserState(),
     tasks: getRawTasks(),
     favorites: getFavorites(),
     recentToolIds: getRecentToolIds(),
+  };
+}
+
+function getPointsRecords() {
+  return readStorage(STORAGE_KEYS.pointsRecords, []);
+}
+
+function addPointsRecord(record) {
+  const records = getPointsRecords();
+  const entry = {
+    id: makeLocalId("pr"),
+    type: record.type || "consume",
+    title: record.title || "",
+    change: record.change || 0,
+    balance: getUserState().points,
+    createdAt: Date.now(),
+    ...record,
+  };
+  records.unshift(entry);
+  const next = records.slice(0, 100);
+  writeStorage(STORAGE_KEYS.pointsRecords, next);
+  markSyncDirty();
+  return entry;
+}
+
+function getOrders() {
+  return readStorage(STORAGE_KEYS.orders, []);
+}
+
+function addOrder(order) {
+  const orders = getOrders();
+  const entry = {
+    id: makeLocalId("order"),
+    status: "pending",
+    createdAt: Date.now(),
+    ...order,
+  };
+  orders.unshift(entry);
+  const next = orders.slice(0, 50);
+  writeStorage(STORAGE_KEYS.orders, next);
+  markSyncDirty();
+  return entry;
+}
+
+function updateOrder(orderId, patch) {
+  const orders = getOrders();
+  const index = orders.findIndex((item) => item.id === orderId);
+  if (index === -1) return null;
+  orders[index] = { ...orders[index], ...patch, updatedAt: Date.now() };
+  writeStorage(STORAGE_KEYS.orders, orders);
+  markSyncDirty();
+  return orders[index];
+}
+
+function consumePoints(tool) {
+  const user = getUserState();
+  const billing = getBillingPreview(tool);
+
+  if (!billing.usable) {
+    return { success: false, billing };
+  }
+
+  if (billing.mode === "member") {
+    addPointsRecord({
+      type: "member",
+      title: `${tool.name}（会员权益）`,
+      change: 0,
+    });
+    return { success: true, billing, mode: "member" };
+  }
+
+  if (billing.mode === "free") {
+    const nextQuota = Math.max(user.freeQuota - 1, 0);
+    updateUserState({ freeQuota: nextQuota });
+    addPointsRecord({
+      type: "free",
+      title: `${tool.name}（免费体验）`,
+      change: 0,
+    });
+    return { success: true, billing, mode: "free" };
+  }
+
+  if (billing.mode === "points") {
+    const nextPoints = Math.max(user.points - tool.points, 0);
+    updateUserState({ points: nextPoints });
+    addPointsRecord({
+      type: "consume",
+      title: tool.name,
+      change: -tool.points,
+    });
+    return { success: true, billing, mode: "points" };
+  }
+
+  return { success: false, billing };
+}
+
+function getMemberStatus() {
+  const user = getUserState();
+  if (!user.memberActive || !user.memberExpire) {
+    return { active: false, expired: true };
+  }
+
+  const expireDate = new Date(user.memberExpire);
+  const now = new Date();
+  const expired = now > expireDate;
+
+  if (expired && user.memberActive) {
+    updateUserState({ memberActive: false });
+  }
+
+  const remainingDays = expired ? 0 : Math.ceil((expireDate - now) / (24 * 60 * 60 * 1000));
+
+  return {
+    active: !expired,
+    expired,
+    plan: user.memberPlan,
+    expireDate: user.memberExpire,
+    remainingDays,
   };
 }
 
@@ -761,4 +899,13 @@ module.exports = {
   clearSyncDirty,
   getSyncSnapshot,
   applyRemoteState,
+  getPhotoIdStats,
+  incrementPhotoIdUsage,
+  getPointsRecords,
+  addPointsRecord,
+  getOrders,
+  addOrder,
+  updateOrder,
+  consumePoints,
+  getMemberStatus,
 };

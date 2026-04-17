@@ -41,3 +41,33 @@
 .profile-card__button {
   flex: 1;
 }
+
+.vip-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #e3efe9 0%, #f4faf6 64%, #ffffff 100%);
+}
+
+.vip-entry__left {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.vip-entry__title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1d5c4b;
+}
+
+.vip-entry__copy {
+  font-size: 24rpx;
+  color: #666b64;
+}
+
+.vip-entry__arrow {
+  font-size: 40rpx;
+  color: #1d5c4b;
+  font-weight: 300;
+}

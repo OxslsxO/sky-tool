@@ -39,7 +39,7 @@ const tools = [
     categoryId: "image",
     badge: "高频",
     points: 8,
-    memberFree: true,
+    memberFree: false,
     accent: "#d66a4d",
     cardBackground: "linear-gradient(135deg, rgba(239, 208, 194, 0.95), rgba(255, 249, 244, 0.96))",
     heroBackground: "linear-gradient(145deg, #efddd2 0%, #f9f4ee 58%, #ffffff 100%)",
@@ -50,7 +50,7 @@ const tools = [
     demoResult: "输出高清电子版与冲印排版版，边距更贴近常见审核标准。",
     params: [
       { key: "size", label: "证件规格", options: ["一寸", "二寸", "考试报名", "签证"] },
-      { key: "background", label: "背景色", options: ["纯白", "淡蓝", "天蓝", "藏蓝", "大红", "酒红", "浅灰", "淡粉", "淡绿"] },
+      { key: "background", label: "背景色", options: ["白色", "蓝色", "红色", "淡蓝", "天蓝", "藏蓝", "大红", "酒红", "浅灰", "淡粉", "淡绿"] },
       { key: "retouch", label: "修饰强度", options: ["自然", "轻修", "标准"] },
     ],
   },

@@ -33,8 +33,9 @@
     }
   },
   "compileType": "miniprogram",
+  "miniprogramRoot": "./",
   "libVersion": "3.15.2",
-  "appid": "wxc782c2c8d588e021",
+  "appid": "wx354551ea326a0156",
   "projectname": "sky-toolbox",
   "simulatorType": "wechat",
   "simulatorPluginLibVersion": {},

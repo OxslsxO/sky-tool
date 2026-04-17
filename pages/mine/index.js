@@ -3,6 +3,7 @@ const {
   getRecentTools,
   getUserState,
   listTasks,
+  getMemberStatus,
 } = require("../../utils/task-store");
 const {
   hasBackendService,
@@ -14,6 +15,7 @@ const { formatDateTime } = require("../../utils/format");
 Page({
   data: {
     user: {},
+    memberStatus: {},
     favorites: [],
     recents: [],
     taskCount: 0,
@@ -31,10 +33,12 @@ Page({
 
   refreshPage() {
     const user = getUserState();
+    const memberStatus = getMemberStatus();
     const backendConfigured = hasBackendService();
 
     this.setData({
       user,
+      memberStatus,
       favorites: listFavoriteTools(),
       recents: getRecentTools(),
       taskCount: listTasks().length,
@@ -94,6 +98,12 @@ Page({
   openProfileEdit() {
     wx.navigateTo({
       url: "/pages/profile-edit/index",
+    });
+  },
+
+  openVip() {
+    wx.navigateTo({
+      url: "/pages/vip/index",
     });
   },
 
