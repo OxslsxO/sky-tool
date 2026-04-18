@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y ffmpeg libreoffice && rm -rf /var/lib/a
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
+RUN mkdir -p backend/storage/models \
+  && node -e "const fs=require('fs');const url='https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx';fetch(url).then(async r=>{if(!r.ok)throw new Error('model download failed: '+r.status);fs.writeFileSync('backend/storage/models/u2net_human_seg.onnx',Buffer.from(await r.arrayBuffer()));}).catch(e=>{console.error(e);process.exit(1);})"
 
 COPY . .
 
