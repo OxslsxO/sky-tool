@@ -1629,14 +1629,38 @@ function shouldUseHighFidelityPdfToWord(layout) {
   return normalized === "保持版式" || normalized === "淇濇寔鐗堝紡";
 }
 
+function resolvePythonBin() {
+  if (process.env.PDF2DOCX_PYTHON_PATH) {
+    return process.env.PDF2DOCX_PYTHON_PATH;
+  }
+
+  if (process.platform === "win32") {
+    const candidates = [
+      "C:\\Python312\\python.exe",
+      "C:\\Python311\\python.exe",
+      "C:\\Python310\\python.exe",
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return "python3";
+}
+
 function assertPdfToDocxConverterAvailable() {
-  const hasPython = process.platform === "win32"
-    ? !!process.env.PDF2DOCX_PYTHON_PATH || fs.existsSync("C:\\Python312\\python.exe") || fs.existsSync("C:\\Python311\\python.exe") || fs.existsSync("C:\\Python310\\python.exe")
-    : true;
-  if (!hasPython) {
-    const error = new Error("PDF转Word保持版式需要安装 Python 3.10+");
-    error.code = "PDF_TO_WORD_CONVERTER_NOT_AVAILABLE";
-    throw error;
+  if (process.platform === "win32") {
+    const hasPython = !!process.env.PDF2DOCX_PYTHON_PATH
+      || fs.existsSync("C:\\Python312\\python.exe")
+      || fs.existsSync("C:\\Python311\\python.exe")
+      || fs.existsSync("C:\\Python310\\python.exe");
+    if (!hasPython) {
+      const error = new Error("PDF转Word保持版式需要安装 Python 3.10+");
+      error.code = "PDF_TO_WORD_CONVERTER_NOT_AVAILABLE";
+      throw error;
+    }
   }
 }
 
@@ -1648,29 +1672,42 @@ async function convertPdfToWordWithPdf2docx(fileBuffer, inputName, tempDir) {
   fs.writeFileSync(inputPath, fileBuffer);
   console.log("[PDF to Word] 使用 pdf2docx 保持版式转换...");
 
-  const pythonBin = process.env.PDF2DOCX_PYTHON_PATH
-    || (process.platform === "win32"
-      ? (fs.existsSync("C:\\Python312\\python.exe") ? "C:\\Python312\\python.exe"
-        : fs.existsSync("C:\\Python311\\python.exe") ? "C:\\Python311\\python.exe"
-        : fs.existsSync("C:\\Python310\\python.exe") ? "C:\\Python310\\python.exe"
-        : "python3")
-      : "python3");
+  const pythonBin = resolvePythonBin();
 
-  const script = `
-import sys
-sys.path.insert(0, '.')
-from pdf2docx import Converter
-try:
-    c = Converter(r'${inputPath.replace(/\\/g, "/")}')
-    c.convert(r'${outputPath.replace(/\\/g, "/")}', start=0, end=None)
-    c.close()
-except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
-    sys.exit(1)
-`;
+  const scriptPath = path.join(tempDir, "_convert.py");
+  const scriptContent = [
+    "import sys",
+    "import json",
+    "from pdf2docx import Converter",
+    "",
+    "input_path = sys.argv[1]",
+    "output_path = sys.argv[2]",
+    "",
+    "try:",
+    "    cv = Converter(input_path)",
+    "    cv.convert(",
+    "        output_path,",
+    "        start=0,",
+    "        end=None,",
+    "        multi_processing=True,",
+    "        recover_tables=True,",
+    "        retain_visually_connect_lines=True,",
+    "        ocr=False,",
+    "    )",
+    "    page_count = len(cv.pages) if hasattr(cv, 'pages') and cv.pages else 0",
+    "    cv.close()",
+    "    print(json.dumps({'pages': page_count}))",
+    "except Exception as e:",
+    "    print(f'ERROR: {e}', file=sys.stderr)",
+    "    sys.exit(1)",
+  ].join("\n");
+
+  fs.writeFileSync(scriptPath, scriptContent);
+
+  let pages = 0;
 
   await new Promise((resolve, reject) => {
-    const child = spawn(pythonBin, ["-c", script], {
+    const child = spawn(pythonBin, [scriptPath, inputPath, outputPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
       cwd: tempDir,
@@ -1688,13 +1725,22 @@ except Exception as e:
         reject(new Error(`pdf2docx 转换失败 (code: ${code}): ${stderrOutput}`));
         return;
       }
+
+      try {
+        const lastLine = stdoutOutput.trim().split("\n").pop();
+        const result = JSON.parse(lastLine);
+        pages = result.pages || 0;
+      } catch (e) {
+        pages = 0;
+      }
+
       resolve();
     });
 
     setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error("pdf2docx 转换超时 (超过 120 秒)"));
-    }, 120000);
+      reject(new Error("pdf2docx 转换超时 (超过 180 秒)"));
+    }, 180000);
   });
 
   if (!fs.existsSync(outputPath)) {
@@ -1708,7 +1754,7 @@ except Exception as e:
 
   return {
     buffer,
-    pages: 0,
+    pages,
     engine: "pdf2docx",
   };
 }
