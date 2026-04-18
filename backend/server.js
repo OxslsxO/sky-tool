@@ -38,6 +38,13 @@ app.use((req, res, next) => {
   next();
 });
 app.use("/files", express.static(config.outputDir));
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    service: "sky-toolbox-backend",
+    requestId: req.requestId,
+  });
+});
 
 if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL)) {
   setTimeout(() => {

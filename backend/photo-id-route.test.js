@@ -87,9 +87,16 @@ function requestJson({ method, port, path: pathname, data }) {
           body += chunk;
         });
         response.on("end", () => {
+          let parsedBody = null;
+          try {
+            parsedBody = body ? JSON.parse(body) : null;
+          } catch (error) {
+            parsedBody = body;
+          }
+
           resolve({
             statusCode: response.statusCode || 0,
-            body: body ? JSON.parse(body) : null,
+            body: parsedBody,
           });
         });
       }
@@ -142,6 +149,15 @@ test("health exposes photo-id capability and the route is mounted", async () => 
 
     assert.equal(health.statusCode, 200);
     assert.equal(health.body.capabilities.photoId, true);
+
+    const root = await requestJson({
+      method: "GET",
+      port,
+      path: "/",
+    });
+
+    assert.equal(root.statusCode, 200);
+    assert.equal(root.body.ok, true);
 
     const response = await requestJson({
       method: "POST",
