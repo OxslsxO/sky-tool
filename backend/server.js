@@ -39,18 +39,24 @@ app.use((req, res, next) => {
 });
 app.use("/files", express.static(config.outputDir));
 
-setTimeout(() => {
-  warmPhotoIdModel(config)
-    .then(() => {
-      console.log("photo-id model warmed");
-    })
-    .catch((error) => {
-      console.warn("photo-id model warmup failed", error && error.message ? error.message : error);
-    });
-}, 0);
+if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL)) {
+  setTimeout(() => {
+    warmPhotoIdModel(config)
+      .then(() => {
+        console.log("photo-id model warmed");
+      })
+      .catch((error) => {
+        console.warn("photo-id model warmup failed", error && error.message ? error.message : error);
+      });
+  }, 0);
+}
 
 function makeId() {
   return `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function isTruthyEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
 function getPublicBaseUrl(req) {

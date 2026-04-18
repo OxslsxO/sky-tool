@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { Readable } = require("stream");
+const { pipeline } = require("stream/promises");
 const sharp = require("sharp");
 
 let ort = null;
@@ -180,8 +182,13 @@ async function ensureModelFile(modelsDir, model) {
     }
 
     const tempPath = `${modelPath}.download`;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    fs.writeFileSync(tempPath, buffer);
+    if (!response.body) {
+      const error = new Error(`Failed to download photo-id model ${model.key}: empty response body`);
+      error.code = "PHOTO_ID_MODEL_DOWNLOAD_FAILED";
+      throw error;
+    }
+
+    await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tempPath));
     fs.renameSync(tempPath, modelPath);
     console.log(`[photo-id] ensureModelFile: 模型下载成功 ${modelPath}`);
     return modelPath;

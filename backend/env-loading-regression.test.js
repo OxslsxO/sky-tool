@@ -13,10 +13,11 @@ test("server loads .env from project root even when started outside the root dir
   );
 });
 
-test("server warms the photo-id model during startup", () => {
+test("server only warms the photo-id model when explicitly enabled", () => {
   const serverPath = path.join(__dirname, "server.js");
   const source = fs.readFileSync(serverPath, "utf8");
 
+  assert.match(source, /PHOTO_ID_WARM_MODEL/);
   assert.match(source, /warmPhotoIdModel\(config\)/);
 });
 

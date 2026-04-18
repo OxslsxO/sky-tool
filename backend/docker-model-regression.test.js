@@ -12,4 +12,5 @@ test("Docker image preloads the photo-id model during build", () => {
     source,
     /danielgatis\/rembg\/releases\/download\/v0\.0\.0\/u2net_human_seg\.onnx/
   );
+  assert.doesNotMatch(source, /arrayBuffer\(\)/);
 });
