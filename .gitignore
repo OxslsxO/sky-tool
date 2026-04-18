@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 backend/storage/outputs/
 backend/storage/temp/
 backend/storage/operations.ndjson
