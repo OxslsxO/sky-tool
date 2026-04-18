@@ -379,9 +379,13 @@ async function recognizeTextFromImage(file, languageLabel) {
   }
 }
 
-function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat = "pdf") {
+function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat = "pdf", infilter = "") {
   return new Promise((resolve, reject) => {
-    const args = ["--headless", "--convert-to", outputFormat, "--outdir", outputDir, inputFilePath];
+    const args = ["--headless"];
+    if (infilter) {
+      args.push(`--infilter=${infilter}`);
+    }
+    args.push("--convert-to", outputFormat, "--outdir", outputDir, inputFilePath);
     console.log("[LibreOffice] 开始转换, 命令:", sofficePath, args.join(" "));
     
     const env = { ...process.env };
@@ -1609,6 +1613,140 @@ app.post("/api/office/to-pdf", async (req, res) => {
   }
 });
 
+function shouldUseHighFidelityPdfToWord(layout) {
+  const normalized = String(layout || "").trim();
+  if (!normalized) {
+    return Boolean(resolveSofficePath());
+  }
+
+  if (normalized === "优先文字" || normalized === "浼樺厛鏂囧瓧") {
+    return false;
+  }
+
+  return normalized === "保持版式" || normalized === "淇濇寔鐗堝紡";
+}
+
+function assertLibreOfficeAvailable() {
+  if (!resolveSofficePath()) {
+    const error = new Error("PDF转Word保持版式需要安装 LibreOffice");
+    error.code = "PDF_TO_WORD_LIBREOFFICE_NOT_AVAILABLE";
+    throw error;
+  }
+}
+
+async function convertPdfToWordWithLibreOffice(fileBuffer, inputName, tempDir) {
+  const sofficePath = resolveSofficePath();
+  const inputPath = path.join(tempDir, inputName);
+  const docxName = inputName.replace(/\.pdf$/i, ".docx");
+  const outputPath = path.join(tempDir, docxName);
+
+  fs.writeFileSync(inputPath, fileBuffer);
+  console.log("[PDF to Word] 使用 LibreOffice 保持版式转换...");
+  await runSofficeConvert(sofficePath, inputPath, tempDir, "docx", "writer_pdf_import");
+
+  if (!fs.existsSync(outputPath)) {
+    throw createError("LibreOffice 未生成 DOCX 文件", "PDF_TO_WORD_LIBREOFFICE_FAILED");
+  }
+
+  const buffer = fs.readFileSync(outputPath);
+  if (!buffer.length) {
+    throw createError("LibreOffice 生成了空的 DOCX 文件", "PDF_TO_WORD_LIBREOFFICE_FAILED");
+  }
+
+  return {
+    buffer,
+    pages: 0,
+    engine: "libreoffice",
+  };
+}
+
+async function convertPdfToWordTextOnly(fileBuffer, file, inputName) {
+  console.log("[PDF to Word] 开始提取PDF文本...");
+  const pdfParser = new PDFParser(this, 1);
+
+  const data = await new Promise((resolve, reject) => {
+    pdfParser.on("pdfParser_dataError", (errData) => {
+      reject(new Error(errData.parserError));
+    });
+    pdfParser.on("pdfParser_dataReady", (pdfData) => {
+      resolve(pdfData);
+    });
+    pdfParser.parseBuffer(fileBuffer);
+  });
+
+  const numPages = data.Pages.length;
+  console.log("[PDF to Word] 提取完成, 共", numPages, "页");
+  console.log("[PDF to Word] 生成Word文档...");
+
+  const paragraphs = [];
+  paragraphs.push(new Paragraph({
+    children: [new TextRun({ text: "PDF转换结果", bold: true, size: 32 })],
+    heading: HeadingLevel.HEADING_1,
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 400 },
+  }));
+  paragraphs.push(new Paragraph({
+    children: [new TextRun({ text: "文档信息", bold: true, size: 24 })],
+    heading: HeadingLevel.HEADING_2,
+    spacing: { after: 200 },
+  }));
+  paragraphs.push(new Paragraph({
+    children: [new TextRun({ text: `原文件: ${file.name || inputName}` })],
+    spacing: { after: 100 },
+  }));
+  paragraphs.push(new Paragraph({
+    children: [new TextRun({ text: `页数: ${numPages}` })],
+    spacing: { after: 200 },
+  }));
+  paragraphs.push(new Paragraph({
+    children: [new TextRun({ text: "文档内容", bold: true, size: 24 })],
+    heading: HeadingLevel.HEADING_2,
+    spacing: { before: 400, after: 200 },
+  }));
+
+  for (let pageIndex = 0; pageIndex < data.Pages.length; pageIndex += 1) {
+    const page = data.Pages[pageIndex];
+
+    if (pageIndex > 0) {
+      paragraphs.push(new Paragraph({
+        children: [new TextRun({ text: `--- 第 ${pageIndex + 1} 页 ---`, bold: true })],
+        spacing: { before: 200, after: 100 },
+      }));
+    }
+
+    if (page.Texts) {
+      const textParts = page.Texts.map((t) =>
+        t.R && t.R[0] ? decodePdfTextToken(t.R[0].T) : ""
+      );
+      const pageText = textParts.join(" ").replace(/\s+/g, " ").trim();
+
+      const textLines = pageText.split(/\n+/);
+      for (const line of textLines) {
+        if (line.trim()) {
+          paragraphs.push(new Paragraph({
+            children: [new TextRun({ text: line.trim() })],
+            spacing: { after: 100 },
+          }));
+        }
+      }
+    }
+  }
+
+  const doc = new Document({
+    sections: [{
+      properties: {},
+      children: paragraphs,
+    }],
+  });
+
+  const buffer = await Packer.toBuffer(doc);
+  return {
+    buffer,
+    pages: numPages,
+    engine: "text-only",
+  };
+}
+
 app.post("/api/pdf/to-word", async (req, res) => {
   const file = req.body.file;
   const format = req.body.format || "DOCX";
@@ -1623,97 +1761,23 @@ app.post("/api/pdf/to-word", async (req, res) => {
     
     const randomId = makeId();
     const inputName = `input-${randomId}.pdf`;
-    const inputPath = path.join(tempDir, inputName);
 
     const fileBuffer = decodeBase64File(file);
     console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
-    fs.writeFileSync(inputPath, decodeBase64File(file));
-    
-    console.log("[PDF to Word] 开始提取PDF文本...");
-    const pdfParser = new PDFParser(this, 1);
-    
-    const data = await new Promise((resolve, reject) => {
-      pdfParser.on("pdfParser_dataError", (errData) => {
-        reject(new Error(errData.parserError));
-      });
-      pdfParser.on("pdfParser_dataReady", (pdfData) => {
-        resolve(pdfData);
-      });
-      pdfParser.parseBuffer(fileBuffer);
-    });
-    
-    const numPages = data.Pages.length;
-    console.log("[PDF to Word] 提取完成, 共", numPages, "页");
-    
-    console.log("[PDF to Word] 生成Word文档...");
-    const paragraphs = [];
-    
-    paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: "PDF转换结果", bold: true, size: 32 })],
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 400 },
-    }));
-    
-    paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: "文档信息", bold: true, size: 24 })],
-      heading: HeadingLevel.HEADING_2,
-      spacing: { after: 200 },
-    }));
-    
-    paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: `原文件: ${file.name || inputName}` })],
-      spacing: { after: 100 },
-    }));
-    
-    paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: `页数: ${numPages}` })],
-      spacing: { after: 200 },
-    }));
-    
-    paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: "文档内容", bold: true, size: 24 })],
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 400, after: 200 },
-    }));
-    
-    for (let pageIndex = 0; pageIndex < data.Pages.length; pageIndex++) {
-      const page = data.Pages[pageIndex];
-      
-      if (pageIndex > 0) {
-        paragraphs.push(new Paragraph({
-          children: [new TextRun({ text: `--- 第 ${pageIndex + 1} 页 ---`, bold: true })],
-          spacing: { before: 200, after: 100 },
-        }));
-      }
-      
-      if (page.Texts) {
-        const textParts = page.Texts.map(t => t.R && t.R[0] ? decodePdfTextToken(t.R[0].T) : "");
-        const pageText = textParts.join(" ").replace(/\s+/g, " ").trim();
-        
-        const textLines = pageText.split(/\n+/);
-        for (const line of textLines) {
-          if (line.trim()) {
-            paragraphs.push(new Paragraph({
-              children: [new TextRun({ text: line.trim() })],
-              spacing: { after: 100 },
-            }));
-          }
-        }
-      }
+
+    const highFidelity = shouldUseHighFidelityPdfToWord(layout);
+    let conversion;
+
+    if (highFidelity) {
+      assertLibreOfficeAvailable();
+      conversion = await convertPdfToWordWithLibreOffice(fileBuffer, inputName, tempDir);
+    } else {
+      conversion = await convertPdfToWordTextOnly(fileBuffer, file, inputName);
     }
-    
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: paragraphs,
-      }],
-    });
-    
-    const buffer = await Packer.toBuffer(doc);
-    console.log("[PDF to Word] Word文档生成完成, 大小:", buffer.length, "bytes");
-    
-    const output = await saveOutputFile(req, buffer, {
+
+    console.log("[PDF to Word] Word文档生成完成, 大小:", conversion.buffer.length, "bytes");
+
+    const output = await saveOutputFile(req, conversion.buffer, {
       extension: "docx",
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       baseName: path.parse(inputName).name,
@@ -1738,7 +1802,8 @@ app.post("/api/pdf/to-word", async (req, res) => {
       meta: {
         format,
         layout,
-        pages: numPages,
+        pages: conversion.pages,
+        engine: conversion.engine,
       },
     });
 
@@ -1746,12 +1811,16 @@ app.post("/api/pdf/to-word", async (req, res) => {
       ok: true,
       resultType: "document",
       headline: "PDF 转 Word 已完成",
-      detail: "已提取PDF文本内容并转换为可编辑的Word文档。",
+      detail:
+        conversion.engine === "libreoffice"
+          ? "已通过 LibreOffice 保持版式转换生成可编辑Word文档，尽量保留原PDF版式。"
+          : "已提取PDF文本内容并转换为可编辑的Word文档。",
       file: buildFileResponse(output, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
       metaLines: [
         `原文件 ${file.name || inputName}`,
-        `共 ${numPages} 页`,
+        conversion.pages ? `共 ${conversion.pages} 页` : "",
         `输出格式 DOCX`,
+        conversion.engine === "libreoffice" ? "模式 保持版式" : "模式 优先文字",
       ].filter(Boolean),
     });
   } catch (error) {

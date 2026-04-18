@@ -145,6 +145,15 @@ GET /health
 
 未安装时，健康检查中的 `officeToPdf` 会是 `false`，接口会返回 `501`。
 
+## PDF 转 Word
+
+`PDF 转 Word` 支持两种模式：
+
+- **保持版式**：通过 LibreOffice 将 PDF 转换为 DOCX，尽量保留原 PDF 版式。需要安装 LibreOffice（同 Office 转 PDF 的安装方式）。
+- **优先文字**：使用本地 pdf2json 提取文本并生成 DOCX，无需 LibreOffice。
+
+未安装 LibreOffice 时，选择"保持版式"会返回错误提示。
+
 ## 清理策略
 
 后端启动时会自动清理超过 `FILE_TTL_HOURS` 的本地输出文件。
@@ -223,3 +232,4 @@ deploy/nginx.sky-toolbox.conf.example
 - 把任务中心从本地存储升级为服务端同步
 - 为七牛云增加 CDN 域名和生命周期清理规则
 - 为文档类工具增加异步队列和失败重试
+
