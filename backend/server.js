@@ -1616,7 +1616,10 @@ app.post("/api/office/to-pdf", async (req, res) => {
 function shouldUseHighFidelityPdfToWord(layout) {
   const normalized = String(layout || "").trim();
   if (!normalized) {
-    return Boolean(resolveSofficePath());
+    if (process.platform === "win32") {
+      return !!process.env.PDF2DOCX_PYTHON_PATH || fs.existsSync("C:\\Python312\\python.exe") || fs.existsSync("C:\\Python311\\python.exe") || fs.existsSync("C:\\Python310\\python.exe");
+    }
+    return true;
   }
 
   if (normalized === "优先文字" || normalized === "浼樺厛鏂囧瓧") {
@@ -1626,37 +1629,87 @@ function shouldUseHighFidelityPdfToWord(layout) {
   return normalized === "保持版式" || normalized === "淇濇寔鐗堝紡";
 }
 
-function assertLibreOfficeAvailable() {
-  if (!resolveSofficePath()) {
-    const error = new Error("PDF转Word保持版式需要安装 LibreOffice");
-    error.code = "PDF_TO_WORD_LIBREOFFICE_NOT_AVAILABLE";
+function assertPdfToDocxConverterAvailable() {
+  const hasPython = process.platform === "win32"
+    ? !!process.env.PDF2DOCX_PYTHON_PATH || fs.existsSync("C:\\Python312\\python.exe") || fs.existsSync("C:\\Python311\\python.exe") || fs.existsSync("C:\\Python310\\python.exe")
+    : true;
+  if (!hasPython) {
+    const error = new Error("PDF转Word保持版式需要安装 Python 3.10+");
+    error.code = "PDF_TO_WORD_CONVERTER_NOT_AVAILABLE";
     throw error;
   }
 }
 
-async function convertPdfToWordWithLibreOffice(fileBuffer, inputName, tempDir) {
-  const sofficePath = resolveSofficePath();
+async function convertPdfToWordWithPdf2docx(fileBuffer, inputName, tempDir) {
   const inputPath = path.join(tempDir, inputName);
   const docxName = inputName.replace(/\.pdf$/i, ".docx");
   const outputPath = path.join(tempDir, docxName);
 
   fs.writeFileSync(inputPath, fileBuffer);
-  console.log("[PDF to Word] 使用 LibreOffice 保持版式转换...");
-  await runSofficeConvert(sofficePath, inputPath, tempDir, "docx", "writer_pdf_import");
+  console.log("[PDF to Word] 使用 pdf2docx 保持版式转换...");
+
+  const pythonBin = process.env.PDF2DOCX_PYTHON_PATH
+    || (process.platform === "win32"
+      ? (fs.existsSync("C:\\Python312\\python.exe") ? "C:\\Python312\\python.exe"
+        : fs.existsSync("C:\\Python311\\python.exe") ? "C:\\Python311\\python.exe"
+        : fs.existsSync("C:\\Python310\\python.exe") ? "C:\\Python310\\python.exe"
+        : "python3")
+      : "python3");
+
+  const script = `
+import sys
+sys.path.insert(0, '.')
+from pdf2docx import Converter
+try:
+    c = Converter(r'${inputPath.replace(/\\/g, "/")}')
+    c.convert(r'${outputPath.replace(/\\/g, "/")}', start=0, end=None)
+    c.close()
+except Exception as e:
+    print(f'ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+`;
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(pythonBin, ["-c", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+      cwd: tempDir,
+    });
+
+    let stderrOutput = "";
+    let stdoutOutput = "";
+
+    child.stdout.on("data", (data) => { stdoutOutput += data.toString(); });
+    child.stderr.on("data", (data) => { stderrOutput += data.toString(); });
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        console.error("[PDF to Word] pdf2docx stderr:", stderrOutput);
+        reject(new Error(`pdf2docx 转换失败 (code: ${code}): ${stderrOutput}`));
+        return;
+      }
+      resolve();
+    });
+
+    setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("pdf2docx 转换超时 (超过 120 秒)"));
+    }, 120000);
+  });
 
   if (!fs.existsSync(outputPath)) {
-    throw createError("LibreOffice 未生成 DOCX 文件", "PDF_TO_WORD_LIBREOFFICE_FAILED");
+    throw createError("pdf2docx 未生成 DOCX 文件", "PDF_TO_WORD_PDF2DOCX_FAILED");
   }
 
   const buffer = fs.readFileSync(outputPath);
   if (!buffer.length) {
-    throw createError("LibreOffice 生成了空的 DOCX 文件", "PDF_TO_WORD_LIBREOFFICE_FAILED");
+    throw createError("pdf2docx 生成了空的 DOCX 文件", "PDF_TO_WORD_PDF2DOCX_FAILED");
   }
 
   return {
     buffer,
     pages: 0,
-    engine: "libreoffice",
+    engine: "pdf2docx",
   };
 }
 
@@ -1769,8 +1822,8 @@ app.post("/api/pdf/to-word", async (req, res) => {
     let conversion;
 
     if (highFidelity) {
-      assertLibreOfficeAvailable();
-      conversion = await convertPdfToWordWithLibreOffice(fileBuffer, inputName, tempDir);
+      assertPdfToDocxConverterAvailable();
+      conversion = await convertPdfToWordWithPdf2docx(fileBuffer, inputName, tempDir);
     } else {
       conversion = await convertPdfToWordTextOnly(fileBuffer, file, inputName);
     }
@@ -1812,15 +1865,15 @@ app.post("/api/pdf/to-word", async (req, res) => {
       resultType: "document",
       headline: "PDF 转 Word 已完成",
       detail:
-        conversion.engine === "libreoffice"
-          ? "已通过 LibreOffice 保持版式转换生成可编辑Word文档，尽量保留原PDF版式。"
+        conversion.engine === "pdf2docx"
+          ? "已通过高保真转换生成可编辑Word文档，尽量保留原PDF版式。"
           : "已提取PDF文本内容并转换为可编辑的Word文档。",
       file: buildFileResponse(output, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
       metaLines: [
         `原文件 ${file.name || inputName}`,
         conversion.pages ? `共 ${conversion.pages} 页` : "",
         `输出格式 DOCX`,
-        conversion.engine === "libreoffice" ? "模式 保持版式" : "模式 优先文字",
+        conversion.engine === "pdf2docx" ? "模式 保持版式" : "模式 优先文字",
       ].filter(Boolean),
     });
   } catch (error) {

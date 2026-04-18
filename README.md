@@ -149,10 +149,10 @@ GET /health
 
 `PDF 转 Word` 支持两种模式：
 
-- **保持版式**：通过 LibreOffice 将 PDF 转换为 DOCX，尽量保留原 PDF 版式。需要安装 LibreOffice（同 Office 转 PDF 的安装方式）。
-- **优先文字**：使用本地 pdf2json 提取文本并生成 DOCX，无需 LibreOffice。
+- **保持版式**：通过 pdf2docx（Python）将 PDF 转换为 DOCX，尽量保留原 PDF 版式、字体、表格和图片。Docker 部署已内置，本地开发需要安装 Python 3.10+ 并 `pip install pdf2docx`。
+- **优先文字**：使用本地 pdf2json 提取文本并生成 DOCX，无需额外依赖。
 
-未安装 LibreOffice 时，选择"保持版式"会返回错误提示。
+本地未安装 Python 时，选择"保持版式"会返回错误提示。
 
 ## 清理策略
 
