@@ -4,7 +4,13 @@ const sharp = require("sharp");
 
 process.env.PHOTO_ID_DISABLE_IMGLY = "1";
 
-const { buildPhotoIdImage } = require("./lib/photo-id");
+const { buildPhotoIdImage, getBackgroundColor } = require("./lib/photo-id");
+
+test("photo-id accepts frontend color labels", () => {
+  assert.equal(getBackgroundColor("蓝色"), "#2d6ec9");
+  assert.equal(getBackgroundColor("红色"), "#cf5446");
+  assert.equal(getBackgroundColor("白色"), "#ffffff");
+});
 
 function hasNonBackgroundPixelNearBottom(image, background) {
   const { data, info } = image;

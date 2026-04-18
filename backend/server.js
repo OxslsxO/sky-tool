@@ -9,6 +9,8 @@ const crypto = require("crypto");
 const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const { createWorker } = require("tesseract.js");
+const PDFParser = require("pdf2json");
+const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require("docx");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
@@ -177,7 +179,43 @@ function buildFileResponse(storedFile, mimeType, label) {
     label: label || storedFile.fileName,
     provider: storedFile.provider,
     key: storedFile.key || "",
+    externalUrl: storedFile.externalUrl || "",
+    fallbackUrl: storedFile.fallbackUrl || "",
   };
+}
+
+function getFallbackContentType(fileName) {
+  const ext = path.extname(fileName || "").toLowerCase();
+  const map = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+function sendLocalFallbackFile(req, res) {
+  const fallbackName = String(req.query.fallback || "").trim();
+  if (!fallbackName || path.basename(fallbackName) !== fallbackName) {
+    return false;
+  }
+
+  const fallbackPath = path.join(config.outputDir, fallbackName);
+  if (!fs.existsSync(fallbackPath) || !fs.statSync(fallbackPath).isFile()) {
+    return false;
+  }
+
+  res.setHeader("content-type", getFallbackContentType(fallbackName));
+  res.sendFile(fallbackPath);
+  return true;
 }
 
 function parsePageRanges(rangeText, totalPages) {
@@ -336,9 +374,15 @@ function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat =
     
     if (process.platform === "win32") {
       const sofficeDir = path.dirname(sofficePath);
+      const libreOfficeRoot = path.dirname(sofficeDir);
+      const shareDir = path.join(libreOfficeRoot, "share");
+      const userProfileDir = path.join(libreOfficeRoot, "user");
+      
       env.URE_BOOTSTRAP_PATH = path.join(sofficeDir, "fundamental.ini");
       env.PATH = `${sofficeDir};${env.PATH || ""}`;
-      console.log("[LibreOffice] 设置环境变量, sofficeDir:", sofficeDir);
+      env.SOFFICE_USER_PROFILE = userProfileDir;
+      env.SOFFICE_INSTALL_ROOT = libreOfficeRoot;
+      console.log("[LibreOffice] 设置环境变量, sofficeDir:", sofficeDir, "libreOfficeRoot:", libreOfficeRoot);
     }
     
     let stderrOutput = "";
@@ -466,6 +510,10 @@ app.get("/files/qiniu", async (req, res, next) => {
 
     const object = await storage.readRemoteObject(key);
     if (!object) {
+      if (sendLocalFallbackFile(req, res)) {
+        return;
+      }
+
       sendError(res, 404, "FILE_NOT_FOUND", "文件不存在或已过期");
       return;
     }
@@ -577,6 +625,68 @@ app.post("/api/photo-id", async (req, res) => {
       500,
       error.code || "PHOTO_ID_FAILED",
       error.message || "证件照生成失败"
+    );
+  }
+});
+
+app.post("/api/files/upload", async (req, res) => {
+  const { file, folder, contentType, baseName } = req.body || {};
+
+  try {
+    const buffer = decodeBase64File(file);
+    const lowerName = String(file && file.name ? file.name : "").toLowerCase();
+    const extension = lowerName.includes(".")
+      ? lowerName.split(".").pop()
+      : String(file && file.extension ? file.extension : "bin").replace(/^\./, "");
+    const mimeType = contentType || file && file.contentType || "application/octet-stream";
+    const output = await saveOutputFile(req, buffer, {
+      extension,
+      contentType: mimeType,
+      baseName: baseName || path.parse(file && file.name ? file.name : "upload").name,
+      folder: folder || "client-outputs",
+    });
+
+    await recordOperation(req, {
+      toolId: "client-file-upload",
+      status: "success",
+      inputFiles: file
+        ? [
+            {
+              name: file.name || "",
+              sizeBytes: file.sizeBytes || buffer.length,
+            },
+          ]
+        : [],
+      outputFiles: [
+        {
+          name: output.fileName,
+          provider: output.provider,
+          sizeBytes: output.sizeBytes,
+        },
+      ],
+      meta: {
+        folder: folder || "client-outputs",
+      },
+    });
+
+    res.json({
+      ok: true,
+      file: buildFileResponse(output, mimeType),
+      metaLines: [`存储位置 ${output.provider === "qiniu" ? "七牛云" : "本地磁盘"}`],
+    });
+  } catch (error) {
+    await recordOperation(req, {
+      toolId: "client-file-upload",
+      status: "failed",
+      errorCode: error.code || "CLIENT_FILE_UPLOAD_FAILED",
+      errorMessage: error.message || "客户端文件上传失败",
+    });
+
+    sendError(
+      res,
+      500,
+      error.code || "CLIENT_FILE_UPLOAD_FAILED",
+      error.message || "客户端文件上传失败"
     );
   }
 });
@@ -708,6 +818,8 @@ app.post("/api/client/state/sync", async (req, res) => {
       tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
       favorites: Array.isArray(payload.favorites) ? payload.favorites : [],
       recentToolIds: Array.isArray(payload.recentToolIds) ? payload.recentToolIds : [],
+      pointsRecords: Array.isArray(payload.pointsRecords) ? payload.pointsRecords : [],
+      orders: Array.isArray(payload.orders) ? payload.orders : [],
       preferRemote: parseBooleanFlag(payload.preferRemote),
     });
 
@@ -720,6 +832,8 @@ app.post("/api/client/state/sync", async (req, res) => {
         taskCount: (state.tasks || []).length,
         favoriteCount: (state.favorites || []).length,
         recentCount: (state.recentToolIds || []).length,
+        pointsRecordCount: (state.pointsRecords || []).length,
+        orderCount: (state.orders || []).length,
       },
     });
 
@@ -731,6 +845,8 @@ app.post("/api/client/state/sync", async (req, res) => {
         taskCount: (state.tasks || []).length,
         favoriteCount: (state.favorites || []).length,
         recentCount: (state.recentToolIds || []).length,
+        pointsRecordCount: (state.pointsRecords || []).length,
+        orderCount: (state.orders || []).length,
       },
     });
   } catch (error) {
@@ -1483,36 +1599,6 @@ app.post("/api/pdf/to-word", async (req, res) => {
   const file = req.body.file;
   const format = req.body.format || "DOCX";
   const layout = req.body.layout || "";
-  const sofficePath = resolveSofficePath();
-
-  if (!sofficePath) {
-    await recordOperation(req, {
-      toolId: "pdf-to-word",
-      status: "failed",
-      inputFiles: file
-        ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
-        : [],
-      errorCode: "OFFICE_CONVERTER_UNAVAILABLE",
-      errorMessage: "当前服务未检测到 LibreOffice",
-      meta: {
-        format,
-        layout,
-      },
-    });
-
-    sendError(
-      res,
-      501,
-      "OFFICE_CONVERTER_UNAVAILABLE",
-      "当前服务端未检测到 LibreOffice，请安装后再启用 PDF 转 Word。"
-    );
-    return;
-  }
 
   let tempDir = "";
 
@@ -1529,37 +1615,92 @@ app.post("/api/pdf/to-word", async (req, res) => {
     console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
     fs.writeFileSync(inputPath, decodeBase64File(file));
     
-    const outputExt = format === "DOC" ? "doc" : "docx";
-    let outputFormat;
-    if (format === "DOC") {
-      outputFormat = "doc:Microsoft Word 97-2003";
-    } else {
-      outputFormat = "docx:Microsoft Word 2007-365";
-    }
-    console.log("[PDF to Word] 使用格式:", outputFormat);
-    await runSofficeConvert(sofficePath, inputPath, tempDir, outputFormat);
-
-    const tempFiles = fs.readdirSync(tempDir);
-    console.log("[PDF to Word] 临时目录内容:", tempFiles);
+    console.log("[PDF to Word] 开始提取PDF文本...");
+    const pdfParser = new PDFParser(this, 1);
     
-    let outputPath = "";
-    for (const f of tempFiles) {
-      if (f.endsWith(`.${outputExt}`)) {
-        outputPath = path.join(tempDir, f);
-        break;
+    const data = await new Promise((resolve, reject) => {
+      pdfParser.on("pdfParser_dataError", (errData) => {
+        reject(new Error(errData.parserError));
+      });
+      pdfParser.on("pdfParser_dataReady", (pdfData) => {
+        resolve(pdfData);
+      });
+      pdfParser.parseBuffer(fileBuffer);
+    });
+    
+    const numPages = data.Pages.length;
+    console.log("[PDF to Word] 提取完成, 共", numPages, "页");
+    
+    console.log("[PDF to Word] 生成Word文档...");
+    const paragraphs = [];
+    
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: "PDF转换结果", bold: true, size: 32 })],
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400 },
+    }));
+    
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: "文档信息", bold: true, size: 24 })],
+      heading: HeadingLevel.HEADING_2,
+      spacing: { after: 200 },
+    }));
+    
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: `原文件: ${file.name || inputName}` })],
+      spacing: { after: 100 },
+    }));
+    
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: `页数: ${numPages}` })],
+      spacing: { after: 200 },
+    }));
+    
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: "文档内容", bold: true, size: 24 })],
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 400, after: 200 },
+    }));
+    
+    for (let pageIndex = 0; pageIndex < data.Pages.length; pageIndex++) {
+      const page = data.Pages[pageIndex];
+      
+      if (pageIndex > 0) {
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({ text: `--- 第 ${pageIndex + 1} 页 ---`, bold: true })],
+          spacing: { before: 200, after: 100 },
+        }));
+      }
+      
+      if (page.Texts) {
+        const textParts = page.Texts.map(t => t.R && t.R[0] ? decodeURIComponent(t.R[0].T) : "");
+        const pageText = textParts.join(" ").replace(/\s+/g, " ").trim();
+        
+        const textLines = pageText.split(/\n+/);
+        for (const line of textLines) {
+          if (line.trim()) {
+            paragraphs.push(new Paragraph({
+              children: [new TextRun({ text: line.trim() })],
+              spacing: { after: 100 },
+            }));
+          }
+        }
       }
     }
     
-    if (!outputPath || !fs.existsSync(outputPath)) {
-      throw new Error(`输出文件不存在, 目录内容: ${tempFiles.join(", ")}`);
-    }
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: paragraphs,
+      }],
+    });
     
-    console.log("[PDF to Word] 找到输出文件:", outputPath);
-    const bytes = fs.readFileSync(outputPath);
-    console.log("[PDF to Word] 输出文件大小:", bytes.length, "bytes");
+    const buffer = await Packer.toBuffer(doc);
+    console.log("[PDF to Word] Word文档生成完成, 大小:", buffer.length, "bytes");
     
-    const output = await saveOutputFile(req, bytes, {
-      extension: outputExt,
+    const output = await saveOutputFile(req, buffer, {
+      extension: "docx",
       contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       baseName: path.parse(inputName).name,
     });
@@ -1583,6 +1724,7 @@ app.post("/api/pdf/to-word", async (req, res) => {
       meta: {
         format,
         layout,
+        pages: numPages,
       },
     });
 
@@ -1590,15 +1732,16 @@ app.post("/api/pdf/to-word", async (req, res) => {
       ok: true,
       resultType: "document",
       headline: "PDF 转 Word 已完成",
-      detail: "已转换为可编辑的 Word 文档，可直接打开修改。",
+      detail: "已提取PDF文本内容并转换为可编辑的Word文档。",
       file: buildFileResponse(output, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
       metaLines: [
         `原文件 ${file.name || inputName}`,
-        `输出格式 ${format}`,
-        layout ? `版式 ${layout}` : "",
+        `共 ${numPages} 页`,
+        `输出格式 DOCX`,
       ].filter(Boolean),
     });
   } catch (error) {
+    console.error("[PDF to Word] 转换失败:", error);
     await recordOperation(req, {
       toolId: "pdf-to-word",
       status: "failed",

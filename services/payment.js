@@ -3,6 +3,8 @@ const {
   getUserState,
   updateUserState,
   addPointsRecord,
+  addOrder,
+  updateOrder,
 } = require("../utils/task-store");
 
 function requestPayment(orderInfo) {
@@ -18,17 +20,23 @@ function requestPayment(orderInfo) {
         const errMsg = err.errMsg || "";
         if (errMsg.indexOf("cancel") > -1) {
           reject({ code: "CANCEL", message: "用户取消支付" });
-        } else if (errMsg.indexOf("no permission") > -1) {
-          reject({ code: "NO_PERMISSION", message: "微信支付权限未开通" });
-        } else {
-          reject({ code: "PAY_ERROR", message: errMsg || "支付失败" });
+          return;
         }
+
+        if (errMsg.indexOf("no permission") > -1) {
+          reject({ code: "NO_PERMISSION", message: "微信支付权限未开通" });
+          return;
+        }
+
+        reject({ code: "PAY_ERROR", message: errMsg || "支付失败" });
       },
     });
   });
 }
 
 function createOrder(type, itemId) {
+  const user = getUserState();
+
   return new Promise((resolve, reject) => {
     wx.request({
       url: buildServiceUrl("/api/pay/create"),
@@ -37,13 +45,19 @@ function createOrder(type, itemId) {
         "content-type": "application/json",
         ...getServiceHeaders(),
       },
-      data: { type, itemId },
+      data: {
+        type,
+        itemId,
+        userId: user.userId,
+        deviceId: user.deviceId,
+      },
       success: (response) => {
         if (response.statusCode >= 200 && response.statusCode < 300) {
           resolve(response.data);
-        } else {
-          reject(response.data || new Error("CREATE_ORDER_FAILED"));
+          return;
         }
+
+        reject(response.data || new Error("CREATE_ORDER_FAILED"));
       },
       fail: reject,
     });
@@ -51,6 +65,8 @@ function createOrder(type, itemId) {
 }
 
 function verifyPayment(orderId) {
+  const user = getUserState();
+
   return new Promise((resolve, reject) => {
     wx.request({
       url: buildServiceUrl("/api/pay/verify"),
@@ -59,17 +75,31 @@ function verifyPayment(orderId) {
         "content-type": "application/json",
         ...getServiceHeaders(),
       },
-      data: { orderId },
+      data: {
+        orderId,
+        userId: user.userId,
+        deviceId: user.deviceId,
+      },
       success: (response) => {
         if (response.statusCode >= 200 && response.statusCode < 300) {
           resolve(response.data);
-        } else {
-          reject(response.data || new Error("VERIFY_FAILED"));
+          return;
         }
+
+        reject(response.data || new Error("VERIFY_FAILED"));
       },
       fail: reject,
     });
   });
+}
+
+function parsePeriodDays(period) {
+  const match = String(period || "").match(/(\d+)/);
+  if (!match) {
+    return 30;
+  }
+
+  return parseInt(match[1], 10);
 }
 
 function simulateMemberPurchase(plan) {
@@ -95,11 +125,11 @@ function simulateMemberPurchase(plan) {
 }
 
 function simulatePointsPurchase(packageItem) {
-  const bonusMatch = packageItem.bonus.match(/(\d+)/);
+  const bonusMatch = String(packageItem.bonus || "").match(/(\d+)/);
   const bonusPoints = bonusMatch ? parseInt(bonusMatch[1], 10) : 0;
   const totalPoints = packageItem.points + bonusPoints;
-
   const user = getUserState();
+
   updateUserState({
     points: user.points + totalPoints,
   });
@@ -115,62 +145,115 @@ function simulatePointsPurchase(packageItem) {
   return { success: true, message: `已充值${totalPoints}积分` };
 }
 
+function createLocalOrder(orderResult, payload) {
+  return addOrder({
+    id: orderResult.orderId,
+    provider: "wechat",
+    status: "pending",
+    ...payload,
+  });
+}
+
 async function purchaseMember(plan) {
+  let localOrder = null;
+
   try {
     const orderResult = await createOrder("member", plan.id);
     if (!orderResult.orderId || !orderResult.payment) {
       throw new Error("订单创建失败");
     }
 
+    localOrder = createLocalOrder(orderResult, {
+      type: "member",
+      itemId: plan.id,
+      title: plan.name,
+      amount: plan.price,
+    });
+
     await requestPayment(orderResult.payment);
 
     const verifyResult = await verifyPayment(orderResult.orderId);
     if (verifyResult.success) {
+      updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
       return simulateMemberPurchase(plan);
     }
 
     throw new Error("支付验证失败");
   } catch (error) {
     if (error.code === "CANCEL") {
+      if (localOrder) {
+        updateOrder(localOrder.id, { status: "cancelled", cancelledAt: Date.now() });
+      }
       return { success: false, message: "已取消支付", cancelled: true };
     }
+
     if (error.code === "NO_PERMISSION") {
+      if (localOrder) {
+        updateOrder(localOrder.id, { status: "paid", paidAt: Date.now(), simulated: true });
+      }
       return simulateMemberPurchase(plan);
+    }
+
+    if (localOrder) {
+      updateOrder(localOrder.id, {
+        status: "failed",
+        failedAt: Date.now(),
+        errorMessage: error.message || "",
+      });
     }
     return { success: false, message: error.message || "支付失败" };
   }
 }
 
 async function purchasePoints(packageItem) {
+  let localOrder = null;
+
   try {
     const orderResult = await createOrder("points", packageItem.id);
     if (!orderResult.orderId || !orderResult.payment) {
       throw new Error("订单创建失败");
     }
 
+    localOrder = createLocalOrder(orderResult, {
+      type: "points",
+      itemId: packageItem.id,
+      title: `${packageItem.points}积分`,
+      amount: packageItem.price,
+    });
+
     await requestPayment(orderResult.payment);
 
     const verifyResult = await verifyPayment(orderResult.orderId);
     if (verifyResult.success) {
+      updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
       return simulatePointsPurchase(packageItem);
     }
 
     throw new Error("支付验证失败");
   } catch (error) {
     if (error.code === "CANCEL") {
+      if (localOrder) {
+        updateOrder(localOrder.id, { status: "cancelled", cancelledAt: Date.now() });
+      }
       return { success: false, message: "已取消支付", cancelled: true };
     }
+
     if (error.code === "NO_PERMISSION") {
+      if (localOrder) {
+        updateOrder(localOrder.id, { status: "paid", paidAt: Date.now(), simulated: true });
+      }
       return simulatePointsPurchase(packageItem);
+    }
+
+    if (localOrder) {
+      updateOrder(localOrder.id, {
+        status: "failed",
+        failedAt: Date.now(),
+        errorMessage: error.message || "",
+      });
     }
     return { success: false, message: error.message || "支付失败" };
   }
-}
-
-function parsePeriodDays(period) {
-  const match = period.match(/(\d+)/);
-  if (!match) return 30;
-  return parseInt(match[1], 10);
 }
 
 function checkMemberExpired() {

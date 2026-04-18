@@ -26,12 +26,16 @@ function createStorage(config) {
     return `${getPublicBaseUrl(req)}/files/${encodeURIComponent(fileName)}`;
   }
 
-  function buildQiniuFileUrl(req, key) {
-    if (!qiniuOptions.privateBucket) {
-      return qiniuBucketManager.publicDownloadUrl(qiniuOptions.publicBaseUrl, key);
-    }
+  function buildQiniuFileUrl(req, key, fileName) {
+    const query = [
+      `key=${encodeURIComponent(key)}`,
+      fileName ? `fallback=${encodeURIComponent(fileName)}` : "",
+    ].filter(Boolean).join("&");
+    return `${getPublicBaseUrl(req)}/files/qiniu?${query}`;
+  }
 
-    return `${getPublicBaseUrl(req)}/files/qiniu?key=${encodeURIComponent(key)}`;
+  function buildQiniuExternalUrl(key) {
+    return qiniuBucketManager.publicDownloadUrl(qiniuOptions.publicBaseUrl, key);
   }
 
   function createKey(folder, fileName) {
@@ -52,10 +56,6 @@ function createStorage(config) {
   }
 
   function getQiniuDownloadUrl(key) {
-    if (!qiniuOptions.privateBucket) {
-      return qiniuBucketManager.publicDownloadUrl(qiniuOptions.publicBaseUrl, key);
-    }
-
     const expiresSeconds = Number.isFinite(qiniuOptions.downloadExpiresSeconds)
       ? qiniuOptions.downloadExpiresSeconds
       : 3600;
@@ -102,12 +102,18 @@ function createStorage(config) {
         contentType,
       });
 
+      const filePath = path.join(config.outputDir, normalizedFileName);
+      fs.writeFileSync(filePath, buffer);
+
       return {
         provider: "qiniu",
         fileName: normalizedFileName,
+        filePath,
         key,
         sizeBytes: buffer.length,
-        url: buildQiniuFileUrl(req, key),
+        url: buildQiniuFileUrl(req, key, normalizedFileName),
+        externalUrl: buildQiniuExternalUrl(key),
+        fallbackUrl: buildLocalFileUrl(req, normalizedFileName),
       };
     }
 

@@ -33,6 +33,15 @@ function buildConfig() {
       collectionName: process.env.MONGODB_COLLECTION_NAME || "operation_logs",
       clientStateCollectionName:
         process.env.MONGODB_CLIENT_STATE_COLLECTION_NAME || "client_states",
+      usersCollectionName: process.env.MONGODB_USERS_COLLECTION_NAME || "users",
+      clientDevicesCollectionName:
+        process.env.MONGODB_CLIENT_DEVICES_COLLECTION_NAME || "client_devices",
+      userPreferencesCollectionName:
+        process.env.MONGODB_USER_PREFERENCES_COLLECTION_NAME || "user_preferences",
+      tasksCollectionName: process.env.MONGODB_TASKS_COLLECTION_NAME || "tasks",
+      pointsRecordsCollectionName:
+        process.env.MONGODB_POINTS_RECORDS_COLLECTION_NAME || "points_records",
+      ordersCollectionName: process.env.MONGODB_ORDERS_COLLECTION_NAME || "orders",
     },
     qiniu: {
       accessKey: process.env.QINIU_ACCESS_KEY || "",

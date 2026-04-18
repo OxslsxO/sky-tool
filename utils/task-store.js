@@ -19,7 +19,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_USER = {
   nickname: "微信用户",
-  points: 58,
+  points: 100,
   freeQuota: 3,
   memberPlan: "体验会员",
   memberExpire: "2026-04-30",
@@ -53,6 +53,7 @@ function nowIso() {
 
 function markSyncDirty() {
   writeStorage(STORAGE_KEYS.syncDirty, nowIso());
+  triggerBackgroundSync();
 }
 
 function clearSyncDirty() {
@@ -61,6 +62,10 @@ function clearSyncDirty() {
 
 function hasDirtySyncState() {
   return !!wx.getStorageSync(STORAGE_KEYS.syncDirty);
+}
+
+function getSyncDirtyStamp() {
+  return wx.getStorageSync(STORAGE_KEYS.syncDirty) || "";
 }
 
 function normalizeUserState(user) {
@@ -212,6 +217,30 @@ function saveTasks(tasks, options = {}) {
   }
 
   return next;
+}
+
+function getTaskSortTime(task) {
+  return Number(task && (task.updatedAt || task.createdAt)) || 0;
+}
+
+function mergeTaskLists(localTasks, remoteTasks) {
+  const taskMap = new Map();
+
+  [].concat(localTasks || [], remoteTasks || []).forEach((task) => {
+    if (!task || !task.id) {
+      return;
+    }
+
+    const stampedTask = stampTask(task);
+    const previous = taskMap.get(stampedTask.id);
+    if (!previous || getTaskSortTime(stampedTask) >= getTaskSortTime(previous)) {
+      taskMap.set(stampedTask.id, stampedTask);
+    }
+  });
+
+  return Array.from(taskMap.values())
+    .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))
+    .slice(0, 100);
 }
 
 function refreshStoredTasks() {
@@ -484,7 +513,7 @@ function buildCompletedTaskPayload(tool, selections, options) {
     copyText: options.copyText || options.resultText || "",
     outputPath: options.outputPath || "",
     remoteUrl: options.remoteUrl || "",
-    previewPath: options.previewPath || options.outputPath || "",
+    previewPath: options.previewPath || options.outputPath || options.remoteUrl || "",
     sourcePath: options.sourcePath || "",
     sourcePreviewPath: options.sourcePreviewPath || options.sourcePath || "",
     metaLines: options.metaLines || [],
@@ -523,6 +552,18 @@ function buildTaskResult(task, tool) {
   return resultMap[tool.id] || task.resultDetail || task.resultText;
 }
 
+function isRemotePath(pathname) {
+  return /^https?:\/\//i.test(String(pathname || ""));
+}
+
+function getPreviewPath(task) {
+  if (task.resultType === "image" && task.outputPath && isRemotePath(task.previewPath)) {
+    return task.outputPath;
+  }
+
+  return task.previewPath || task.outputPath || task.remoteUrl || "";
+}
+
 function normalizeTask(task) {
   const tool = getToolById(task.toolId);
   const now = Date.now();
@@ -543,9 +584,11 @@ function normalizeTask(task) {
   const savedSize = task.beforeSize && task.afterSize
     ? Math.max(task.beforeSize - task.afterSize, 0)
     : 0;
+  const previewPath = getPreviewPath(task);
 
   return {
     ...task,
+    previewPath,
     tool,
     status,
     progress,
@@ -560,7 +603,7 @@ function normalizeTask(task) {
       : task.resultDetail,
     hasOutputPath: !!task.outputPath,
     hasRemoteUrl: !!task.remoteUrl,
-    hasPreviewPath: !!task.previewPath,
+    hasPreviewPath: !!previewPath,
     hasCopyText: !!task.copyText,
     metaLines: task.metaLines || [],
     attachments: task.attachments || [],
@@ -734,6 +777,8 @@ function getSyncSnapshot() {
     tasks: getRawTasks(),
     favorites: getFavorites(),
     recentToolIds: getRecentToolIds(),
+    pointsRecords: getPointsRecords(),
+    orders: getOrders(),
   };
 }
 
@@ -865,7 +910,7 @@ function applyRemoteState(state) {
   writeStorage(STORAGE_KEYS.user, nextUser);
 
   if (Array.isArray(snapshot.tasks)) {
-    saveTasks(snapshot.tasks, { silent: true });
+    saveTasks(mergeTaskLists(getRawTasks(), snapshot.tasks), { silent: true });
   }
 
   if (Array.isArray(snapshot.favorites)) {
@@ -874,6 +919,14 @@ function applyRemoteState(state) {
 
   if (Array.isArray(snapshot.recentToolIds)) {
     setRecentToolIds(snapshot.recentToolIds, { silent: true });
+  }
+
+  if (Array.isArray(snapshot.pointsRecords)) {
+    writeStorage(STORAGE_KEYS.pointsRecords, snapshot.pointsRecords);
+  }
+
+  if (Array.isArray(snapshot.orders)) {
+    writeStorage(STORAGE_KEYS.orders, snapshot.orders);
   }
 
   clearSyncDirty();
@@ -896,6 +949,7 @@ module.exports = {
   touchRecentTool,
   getRecentTools,
   hasDirtySyncState,
+  getSyncDirtyStamp,
   clearSyncDirty,
   getSyncSnapshot,
   applyRemoteState,

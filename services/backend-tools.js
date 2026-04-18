@@ -1,6 +1,6 @@
 const STORAGE_KEY = "sky_tools_backend_service";
 const DEFAULT_SERVICE_CONFIG = {
-  baseUrl: "http://127.0.0.1:3100",
+  baseUrl: "https://sky-tool.onrender.com",
   token: "",
 };
 

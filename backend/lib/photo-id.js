@@ -72,8 +72,14 @@ const PHOTO_SIZE_MAP = {
 
 const BACKGROUND_COLOR_MAP = {
   "白底": "#ffffff",
+  "白色": "#ffffff",
+  "白": "#ffffff",
   "蓝底": "#2d6ec9",
+  "蓝色": "#2d6ec9",
+  "蓝": "#2d6ec9",
   "红底": "#cf5446",
+  "红色": "#cf5446",
+  "红": "#cf5446",
   "纯白": "#ffffff",
   "淡蓝": "#87ceeb",
   "天蓝": "#2d6ec9",

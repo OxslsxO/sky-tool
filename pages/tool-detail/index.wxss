@@ -1,10 +1,46 @@
 .direct-hero {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 12rpx;
   min-height: 140rpx;
   padding: 24rpx 28rpx;
   background: linear-gradient(145deg, #e9e2d6 0%, #f8f5ef 58%, #ffffff 100%);
+}
+
+.hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  flex: 1;
+}
+
+.hero-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  align-items: flex-end;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4rpx;
+}
+
+.user-info__label {
+  font-size: 22rpx;
+  line-height: 1.3;
+  color: #8b6f5c;
+  font-weight: 600;
+}
+
+.user-info__value {
+  font-size: 24rpx;
+  line-height: 1.3;
+  color: #5a4a3a;
 }
 
 .direct-hero .hero-title {
@@ -26,6 +62,20 @@
   line-height: 1.3;
   font-weight: 700;
   color: #9d5c49;
+}
+
+.cost-hint {
+  margin-top: 16rpx;
+  padding: 12rpx 16rpx;
+  background: rgba(157, 92, 73, 0.08);
+  border-radius: 12rpx;
+  text-align: center;
+}
+
+.cost-hint__text {
+  font-size: 24rpx;
+  line-height: 1.4;
+  color: #8b6f5c;
 }
 
 .tag-row {
@@ -143,6 +193,37 @@
   line-height: 1.7;
   color: #1d2421;
   box-sizing: border-box;
+}
+
+.qr-logo-row {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 18rpx;
+}
+
+.qr-logo-button {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.qr-logo-preview {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+
+.qr-logo-preview__image {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 16rpx;
+  background: rgba(244, 240, 233, 0.9);
+}
+
+.qr-logo-preview__meta {
+  flex: 1;
+  font-size: 22rpx;
+  color: #6a6f66;
 }
 
 .backend-card {
@@ -424,6 +505,29 @@
   background-size: 200% 100%;
   animation: progress-shimmer 2s linear infinite;
   transition: width 0.3s ease;
+}
+
+.file-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  padding: 32rpx;
+  background: rgba(157, 92, 73, 0.08);
+  border-radius: 24rpx;
+}
+
+.file-preview__icon {
+  font-size: 96rpx;
+}
+
+.file-preview__name {
+  font-size: 28rpx;
+  line-height: 1.4;
+  color: #5a4a3a;
+  font-weight: 600;
+  text-align: center;
+  word-break: break-all;
 }
 
 @keyframes progress-shimmer {

@@ -62,9 +62,27 @@ async function packLocalFile(file) {
   };
 }
 
+async function uploadLocalFile(file, options = {}) {
+  const response = await requestJson("/api/files/upload", {
+    file: {
+      name: file.name,
+      sizeBytes: file.size || 0,
+      base64: await readFileBase64(file.path),
+      contentType: options.contentType || file.contentType || "application/octet-stream",
+      extension: options.extension || file.extension || "",
+    },
+    folder: options.folder || "client-outputs",
+    contentType: options.contentType || file.contentType || "application/octet-stream",
+    baseName: options.baseName || "",
+  });
+
+  return response.file || null;
+}
+
 module.exports = {
   readFileBase64,
   requestJson,
   downloadRemoteFile,
   packLocalFile,
+  uploadLocalFile,
 };

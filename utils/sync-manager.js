@@ -7,6 +7,7 @@ const {
   getSyncSnapshot,
   applyRemoteState,
   hasDirtySyncState,
+  getSyncDirtyStamp,
 } = require("./task-store");
 
 let inflightSync = null;
@@ -38,6 +39,8 @@ async function runSync(options = {}) {
     };
   }
 
+  const dirtyStampAtStart = getSyncDirtyStamp();
+  const hasLocalChanges = !!dirtyStampAtStart;
   const seededUser = seedUserState();
   updateUserState(
     {
@@ -55,10 +58,12 @@ async function runSync(options = {}) {
     tasks: snapshot.tasks,
     favorites: snapshot.favorites,
     recentToolIds: snapshot.recentToolIds,
+    pointsRecords: snapshot.pointsRecords,
+    orders: snapshot.orders,
     preferRemote:
       options.preferRemote !== undefined
         ? !!options.preferRemote
-        : !snapshot.user.lastSyncedAt,
+        : !snapshot.user.lastSyncedAt && !hasLocalChanges,
   });
   const syncedAt =
     response.sync && response.sync.syncedAt
@@ -66,6 +71,7 @@ async function runSync(options = {}) {
       : response.state && response.state.syncedAt
         ? response.state.syncedAt
         : new Date().toISOString();
+  const dirtyStampBeforeApply = getSyncDirtyStamp();
   const appliedState = applyRemoteState({
     ...(response.state || {}),
     user: {
@@ -74,6 +80,15 @@ async function runSync(options = {}) {
       syncStatus: "synced",
     },
   });
+
+  if (dirtyStampBeforeApply && dirtyStampBeforeApply !== dirtyStampAtStart) {
+    updateUserState(
+      {
+        syncStatus: "local",
+      },
+      { silent: false }
+    );
+  }
 
   return {
     ok: true,

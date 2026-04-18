@@ -27,6 +27,7 @@ const {
   getPhotoIdStats,
   incrementPhotoIdUsage,
   consumePoints,
+  getUserState,
 } = require("../../utils/task-store");
 const { isClientTool } = require("../../utils/tool-engine");
 const { getGroupUnits, convertValue } = require("../../utils/unit-converter");
@@ -37,6 +38,7 @@ const {
   requestJson,
   packLocalFile,
   downloadRemoteFile,
+  uploadLocalFile,
 } = require("../../services/remote-executor");
 
 function chooseImage(count) {
@@ -152,6 +154,44 @@ function setFillStyle(ctx, color) {
   ctx.fillStyle = color;
 }
 
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, radius);
+    ctx.fill();
+    return;
+  }
+
+  const right = x + width;
+  const bottom = y + height;
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(right - radius, y);
+  ctx.quadraticCurveTo(right, y, right, y + radius);
+  ctx.lineTo(right, bottom - radius);
+  ctx.quadraticCurveTo(right, bottom, right - radius, bottom);
+  ctx.lineTo(x + radius, bottom);
+  ctx.quadraticCurveTo(x, bottom, x, bottom - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawQrLogoImage(ctx, logo, canvasSize) {
+  if (!logo || !logo.path) {
+    return;
+  }
+
+  const logoSize = Math.max(46, Math.min(76, Math.round(canvasSize * 0.18)));
+  const padding = 8;
+  const x = Math.round((canvasSize - logoSize) / 2);
+  const y = x;
+  setFillStyle(ctx, "#ffffff");
+  drawRoundedRect(ctx, x - padding, y - padding, logoSize + padding * 2, logoSize + padding * 2, 14);
+  ctx.drawImage(logo.path, x, y, logoSize, logoSize);
+}
+
 function getImageExtension(filePath) {
   const match = /\.([A-Za-z0-9]+)$/.exec(filePath || "");
   return match ? match[1].toLowerCase() : "jpg";
@@ -250,6 +290,7 @@ Page({
     imageInput: null,
     imageInputs: [],
     textInput: "https://",
+    qrLogoInput: null,
     numberInput: "1",
     unitOptions: [],
     fromUnit: "",
@@ -279,12 +320,41 @@ Page({
     photoIdResultHeadline: "",
     photoIdResultDetail: "",
     photoIdResultMetaLines: [],
+    compressResultReady: false,
+    compressResultPath: "",
+    compressResultRemoteUrl: "",
+    compressResultName: "",
+    compressResultHeadline: "",
+    compressResultDetail: "",
+    compressResultBeforeSizeText: "",
+    compressResultAfterSizeText: "",
+    compressResultSavedText: "",
+    compressResultMetaLines: [],
+    convertResultReady: false,
+    convertResultPath: "",
+    convertResultRemoteUrl: "",
+    convertResultName: "",
+    convertResultHeadline: "",
+    convertResultDetail: "",
+    convertResultFromFormat: "",
+    convertResultToFormat: "",
+    convertResultMetaLines: [],
+    pdfToWordResultReady: false,
+    pdfToWordResultPath: "",
+    pdfToWordResultRemoteUrl: "",
+    pdfToWordResultName: "",
+    pdfToWordResultHeadline: "",
+    pdfToWordResultDetail: "",
+    pdfToWordResultMetaLines: [],
     photoIdIsProcessing: false,
     backgroundColorMap: BACKGROUND_COLOR_MAP,
     processingProgress: 0,
     processingStatus: "",
+    processingTitle: "",
+    processingKind: "",
     showProcessingOverlay: false,
     showMoreColors: false,
+    userState: null,
   },
 
   onLoad(options) {
@@ -320,6 +390,7 @@ Page({
       helperCopy: this.getHelperCopy(tool.id),
       backendPickerTitle: this.getBackendPickerTitle(tool.id),
       backendPickerButtonText: this.getBackendPickerButtonText(tool.id),
+      userState: getUserState(),
       ...viewState,
       ...(photoIdSession || {}),
       ...(photoIdStats || {}),
@@ -371,7 +442,13 @@ Page({
   buildDefaultSelections(tool) {
     const selections = {};
     tool.params.forEach((param) => {
-      selections[param.key] = param.options[0];
+      if (tool.id === "image-compress" && param.key === "mode") {
+        selections[param.key] = "体积优先";
+      } else if (tool.id === "image-convert" && param.key === "quality") {
+        selections[param.key] = "高清";
+      } else {
+        selections[param.key] = param.options[0];
+      }
     });
     return selections;
   },
@@ -543,6 +620,24 @@ Page({
         Object.assign(nextState, this.getClearedPhotoIdResult());
       }
 
+      if (this.data.tool && this.data.tool.id === "image-compress") {
+        Object.assign(nextState, this.getClearedCompressResult());
+      }
+
+      if (this.data.tool && this.data.tool.id === "image-convert") {
+        Object.assign(nextState, this.getClearedConvertResult());
+
+        const allFormats = ["JPG", "PNG", "WEBP", "BMP"];
+        const sourceFormat = (imageInputs[0] && imageInputs[0].extension || "").toUpperCase();
+        const availableFormats = allFormats.filter(f => f !== sourceFormat);
+        nextState.convertTargetOptions = availableFormats;
+
+        const currentTarget = this.data.selections && this.data.selections.target;
+        if (!availableFormats.includes(currentTarget)) {
+          nextState.selections = { ...this.data.selections, target: availableFormats[0] || "JPG" };
+        }
+      }
+
       this.setData(nextState);
       if (this.data.tool && this.data.tool.id === "photo-id") {
         persistPhotoIdSession({
@@ -561,6 +656,43 @@ Page({
         icon: "none",
       });
     }
+  },
+
+  async chooseQrLogo() {
+    try {
+      const medias = await chooseImage(1);
+      const media = medias[0];
+      if (!media) {
+        return;
+      }
+
+      const imageInfo = await getImageInfo(media.tempFilePath);
+      const fileInfo = await getFileInfo(media.tempFilePath);
+      this.setData({
+        qrLogoInput: {
+          path: media.tempFilePath,
+          size: fileInfo ? fileInfo.size : media.size,
+          sizeText: formatFileSize(fileInfo ? fileInfo.size : media.size),
+          width: imageInfo.width,
+          height: imageInfo.height,
+        },
+      });
+    } catch (error) {
+      if (error && error.errMsg && error.errMsg.indexOf("cancel") > -1) {
+        return;
+      }
+
+      wx.showToast({
+        title: "Logo 选择失败",
+        icon: "none",
+      });
+    }
+  },
+
+  removeQrLogo() {
+    this.setData({
+      qrLogoInput: null,
+    });
   },
 
   handleTextInput(event) {
@@ -590,6 +722,10 @@ Page({
     if (this.data.tool && this.data.tool.id === "photo-id") {
       clearPhotoIdSession();
       Object.assign(nextState, this.getClearedPhotoIdResult());
+    }
+
+    if (this.data.tool && this.data.tool.id === "image-compress") {
+      Object.assign(nextState, this.getClearedCompressResult());
     }
 
     this.setData(nextState);
@@ -730,6 +866,17 @@ Page({
         showProcessingOverlay: true,
         processingProgress: 0,
         processingStatus: "正在初始化...",
+        processingTitle: "证件照处理中",
+        processingKind: "photo-id",
+      }
+      : tool && tool.id === "image-compress"
+        ? {
+          isWorking: true,
+          showProcessingOverlay: true,
+          processingProgress: 8,
+          processingStatus: "正在读取原图...",
+          processingTitle: "图片压缩中",
+          processingKind: "compress",
       }
       : {
         isWorking: true,
@@ -795,6 +942,8 @@ Page({
         nextState.showProcessingOverlay = false;
         nextState.processingProgress = 0;
         nextState.processingStatus = "";
+        nextState.processingTitle = "";
+        nextState.processingKind = "";
       }
       this.setData(nextState);
       logger.log("[处理执行] 重置处理状态");
@@ -822,14 +971,21 @@ Page({
       };
 
       const files = await chooseMessageFiles(count, extensionMap[tool.id] || []);
-      this.setData({
+      
+      const nextState = {
         backendFiles: files.map((file) => ({
           path: file.path,
           name: file.name || getFileName(file.path),
           size: file.size || 0,
           sizeText: formatFileSize(file.size || 0),
         })),
-      });
+      };
+      
+      if (tool.id === "pdf-to-word") {
+        Object.assign(nextState, this.getClearedPdfToWordResult());
+      }
+      
+      this.setData(nextState);
     } catch (error) {
       this.ignoreOnShowRefreshUntil = 0;
       if (error && error.errMsg && error.errMsg.indexOf("cancel") > -1) {
@@ -922,10 +1078,26 @@ Page({
 
   async createImageTask(taskOptions) {
     const { tool, selections } = this.data;
+    let remoteFile = null;
+
+    if (taskOptions.outputPath) {
+      remoteFile = await this.uploadGeneratedOutput(taskOptions.outputPath, {
+        name: taskOptions.outputName,
+        folder: `client-outputs/${tool.id}`,
+        contentType: taskOptions.contentType || "image/png",
+        extension: taskOptions.extension || getImageExtension(taskOptions.outputName || taskOptions.outputPath),
+      });
+    }
+
     const result = createTask(tool, selections, {
       instant: true,
       resultType: "image",
       ...taskOptions,
+      remoteUrl: remoteFile ? remoteFile.url : taskOptions.remoteUrl,
+      metaLines: [
+        ...(taskOptions.metaLines || []),
+        remoteFile ? `云端存储 ${remoteFile.provider === "qiniu" ? "七牛云" : "后端"}` : "云端存储 待同步",
+      ],
     });
 
     if (!result.task) {
@@ -933,7 +1105,10 @@ Page({
         title: result.usage.costText,
         icon: "none",
       });
-      return;
+      return {
+        task: null,
+        remoteFile,
+      };
     }
 
     this.latestCreatedTaskId = result.task.id;
@@ -945,6 +1120,272 @@ Page({
       title: "处理完成，结果已保存",
       icon: "none",
     });
+
+    return {
+      task: result.task,
+      remoteFile,
+    };
+  },
+
+  getClearedCompressResult() {
+    return {
+      compressResultReady: false,
+      compressResultPath: "",
+      compressResultRemoteUrl: "",
+      compressResultName: "",
+      compressResultHeadline: "",
+      compressResultDetail: "",
+      compressResultBeforeSizeText: "",
+      compressResultAfterSizeText: "",
+      compressResultSavedText: "",
+      compressResultMetaLines: [],
+    };
+  },
+
+  getClearedConvertResult() {
+    return {
+      convertResultReady: false,
+      convertResultPath: "",
+      convertResultRemoteUrl: "",
+      convertResultName: "",
+      convertResultHeadline: "",
+      convertResultDetail: "",
+      convertResultFromFormat: "",
+      convertResultToFormat: "",
+      convertResultMetaLines: [],
+    };
+  },
+
+  getClearedPdfToWordResult() {
+    return {
+      pdfToWordResultReady: false,
+      pdfToWordResultPath: "",
+      pdfToWordResultRemoteUrl: "",
+      pdfToWordResultName: "",
+      pdfToWordResultHeadline: "",
+      pdfToWordResultDetail: "",
+      pdfToWordResultMetaLines: [],
+    };
+  },
+
+  previewCompressResult() {
+    const current = this.data.compressResultPath || this.data.compressResultRemoteUrl;
+    if (!current) {
+      return;
+    }
+
+    wx.previewImage({
+      current,
+      urls: [current],
+    });
+  },
+
+  async saveCompressResult() {
+    let filePath = this.data.compressResultPath;
+
+    try {
+      if (!filePath && this.data.compressResultRemoteUrl) {
+        const download = await downloadRemoteFile(this.data.compressResultRemoteUrl);
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      }
+
+      if (!filePath) {
+        throw new Error("COMPRESS_FILE_MISSING");
+      }
+
+      await new Promise((resolve, reject) => {
+        wx.saveImageToPhotosAlbum({
+          filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.showToast({
+        title: "已保存到相册",
+        icon: "none",
+      });
+    } catch (error) {
+      wx.showToast({
+        title: "保存失败，请检查相册权限",
+        icon: "none",
+      });
+    }
+  },
+
+  copyCompressResultLink() {
+    if (!this.data.compressResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.compressResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  previewConvertResult() {
+    const current = this.data.convertResultPath || this.data.convertResultRemoteUrl;
+    if (!current) {
+      return;
+    }
+
+    wx.previewImage({
+      current,
+      urls: [current],
+    });
+  },
+
+  async saveConvertResult() {
+    let filePath = this.data.convertResultPath;
+
+    try {
+      if (!filePath && this.data.convertResultRemoteUrl) {
+        const download = await downloadRemoteFile(this.data.convertResultRemoteUrl);
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      }
+
+      if (!filePath) {
+        throw new Error("CONVERT_FILE_MISSING");
+      }
+
+      await new Promise((resolve, reject) => {
+        wx.saveImageToPhotosAlbum({
+          filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.showToast({
+        title: "已保存到相册",
+        icon: "none",
+      });
+    } catch (error) {
+      wx.showToast({
+        title: "保存失败，请检查相册权限",
+        icon: "none",
+      });
+    }
+  },
+
+  copyConvertResultLink() {
+    if (!this.data.convertResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.convertResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  async downloadPdfToWordResult() {
+    const url = this.data.pdfToWordResultRemoteUrl;
+    if (!url) {
+      wx.showToast({
+        title: "下载链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在下载",
+      mask: true,
+    });
+
+    try {
+      const download = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url,
+          success: (res) => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(res);
+            } else {
+              reject(new Error("下载失败"));
+            }
+          },
+          fail: reject,
+        });
+      });
+
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: download.tempFilePath,
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("下载失败:", error);
+      wx.showToast({
+        title: "下载失败，请重试",
+        icon: "none",
+      });
+    }
+  },
+
+  copyPdfToWordUrl() {
+    if (!this.data.pdfToWordResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.pdfToWordResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  async uploadGeneratedOutput(filePath, options = {}) {
+    if (!filePath || !hasBackendService()) {
+      return null;
+    }
+
+    try {
+      const fileInfo = await getFileInfo(filePath);
+      return await uploadLocalFile({
+        path: filePath,
+        name: options.name || getFileName(filePath),
+        size: fileInfo ? fileInfo.size : 0,
+        extension: options.extension || getImageExtension(filePath),
+        contentType: options.contentType,
+      }, {
+        folder: options.folder,
+        contentType: options.contentType,
+        extension: options.extension,
+        baseName: options.baseName || "",
+      });
+    } catch (error) {
+      logger.warn("[cloud-upload] generated output upload failed", {
+        filePath,
+        message: error && error.message,
+      });
+      return null;
+    }
   },
 
   navigateWithCreatedTask(result) {
@@ -1450,14 +1891,49 @@ Page({
       return;
     }
 
-    const file = await packLocalFile(backendFiles[0]);
-    const response = await requestJson("/api/pdf/to-word", {
-      file,
-      format: selections.format,
-      layout: selections.layout,
+    wx.showLoading({
+      title: "正在转换",
+      mask: true,
     });
 
-    await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+    try {
+      const file = await packLocalFile(backendFiles[0]);
+      const response = await requestJson("/api/pdf/to-word", {
+        file,
+        format: selections.format,
+        layout: selections.layout,
+      });
+
+      const taskResult = await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+
+      const fileResponse = response.file || {};
+      const remoteUrl = fileResponse.url || "";
+      const fileName = fileResponse.name || "转换结果.docx";
+      const afterBytes = fileResponse.sizeBytes || null;
+      const beforeBytes = backendFiles[0].size || 0;
+
+      const beforeSizeText = formatFileSize(beforeBytes);
+      const afterSizeText = afterBytes ? formatFileSize(afterBytes) : "";
+
+      this.setData({
+        pdfToWordResultReady: true,
+        pdfToWordResultPath: "",
+        pdfToWordResultRemoteUrl: remoteUrl,
+        pdfToWordResultName: fileName,
+        pdfToWordResultHeadline: response.headline || "PDF转Word已完成",
+        pdfToWordResultDetail: response.detail || "",
+        pdfToWordResultMetaLines: response.metaLines || [],
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("PDF转Word失败:", error);
+      wx.showToast({
+        title: "转换失败，请重试",
+        icon: "none",
+      });
+    }
   },
 
   async runRemoteAudioConvert() {
@@ -1519,6 +1995,8 @@ Page({
       return;
     }
 
+    this.updateProcessingProgress(18, "正在分析图片尺寸...");
+
     const scaleMap = {
       清晰优先: 1,
       均衡: 0.82,
@@ -1530,6 +2008,8 @@ Page({
       均衡: 0.76,
       体积优先: 0.56,
     };
+    const scale = scaleMap[selections.mode] || 0.82;
+    const quality = qualityMap[selections.mode] || 0.76;
 
     const exportFormat = selections.output === "PNG"
       ? "png"
@@ -1539,30 +2019,66 @@ Page({
           ? "png"
           : "jpg";
 
-    const width = Math.max(200, Math.round(imageInput.width * scaleMap[selections.mode]));
-    const height = Math.max(200, Math.round(imageInput.height * scaleMap[selections.mode]));
+    const width = Math.max(200, Math.round(imageInput.width * scale));
+    const height = Math.max(200, Math.round(imageInput.height * scale));
 
+    this.updateProcessingProgress(42, "正在压缩图片...");
     const tempFile = await this.withCanvas(width, height, (ctx) => {
       ctx.drawImage(imageInput.path, 0, 0, width, height);
     }, {
       fileType: exportFormat,
-      quality: exportFormat === "jpg" ? qualityMap[selections.mode] : 1,
+      quality: exportFormat === "jpg" ? quality : 1,
     });
 
+    this.updateProcessingProgress(72, "正在统计压缩结果...");
     const fileInfo = await getFileInfo(tempFile.tempFilePath);
+    const afterBytes = fileInfo ? fileInfo.size : null;
+    const savedBytes = afterBytes === null ? null : Math.max(imageInput.size - afterBytes, 0);
+    const savedPercent = imageInput.size && savedBytes !== null
+      ? Math.round((savedBytes / imageInput.size) * 100)
+      : 0;
 
-    await this.createImageTask({
+    this.updateProcessingProgress(88, "正在保存结果...");
+    const taskResult = await this.createImageTask({
       inputName: "原图",
       outputName: `压缩结果.${exportFormat}`,
       sourcePath: imageInput.path,
       outputPath: tempFile.tempFilePath,
       beforeBytes: imageInput.size,
-      afterBytes: fileInfo ? fileInfo.size : null,
+      afterBytes,
       resultHeadline: "图片压缩已完成",
       resultDetail: `已按“${selections.mode}”导出 ${exportFormat.toUpperCase()} 文件，可直接保存或继续发送。`,
       metaLines: [
         `原图尺寸 ${imageInput.width} × ${imageInput.height}`,
         `结果尺寸 ${width} × ${height}`,
+      ],
+    });
+
+    this.updateProcessingProgress(100, "压缩完成");
+
+    const beforeSizeText = formatFileSize(imageInput.size);
+    const afterSizeText = formatFileSize(afterBytes);
+    const savedSizeText = savedBytes === null
+      ? ""
+      : `${formatFileSize(savedBytes)}${savedPercent > 0 ? ` · ${savedPercent}%` : ""}`;
+
+    this.setData({
+      compressResultReady: true,
+      compressResultPath: tempFile.tempFilePath,
+      compressResultRemoteUrl: taskResult && taskResult.remoteFile ? taskResult.remoteFile.url : "",
+      compressResultName: `压缩结果.${exportFormat}`,
+      compressResultHeadline: `${beforeSizeText} → ${afterSizeText}`,
+      compressResultDetail: savedSizeText
+        ? `节省 ${savedSizeText}`
+        : "",
+      compressResultBeforeSizeText: beforeSizeText,
+      compressResultAfterSizeText: afterSizeText,
+      compressResultSavedText: savedSizeText || "--",
+      compressResultMetaLines: [
+        `原图尺寸 ${imageInput.width} × ${imageInput.height}`,
+        `结果尺寸 ${width} × ${height}`,
+        `导出格式 ${exportFormat.toUpperCase()}`,
+        `压缩策略 ${selections.mode}`,
       ],
     });
   },
@@ -1597,19 +2113,40 @@ Page({
     });
 
     const fileInfo = await getFileInfo(tempFile.tempFilePath);
+    const afterBytes = fileInfo ? fileInfo.size : null;
 
-    await this.createImageTask({
+    const taskResult = await this.createImageTask({
       inputName: "原图",
       outputName: `格式转换结果.${exportFormat}`,
       sourcePath: imageInput.path,
       outputPath: tempFile.tempFilePath,
       beforeBytes: imageInput.size,
-      afterBytes: fileInfo ? fileInfo.size : null,
+      afterBytes,
       resultHeadline: "图片格式转换已完成",
       resultDetail: `已输出 ${selections.target} 文件，适合直接保存或用于下一步处理。`,
       metaLines: [
         `原图尺寸 ${imageInput.width} × ${imageInput.height}`,
         `目标格式 ${selections.target}`,
+      ],
+    });
+
+    const fromFormat = (imageInput.extension || "未知").toUpperCase();
+    const toFormat = selections.target;
+    const beforeSizeText = formatFileSize(imageInput.size);
+    const afterSizeText = formatFileSize(afterBytes);
+
+    this.setData({
+      convertResultReady: true,
+      convertResultPath: tempFile.tempFilePath,
+      convertResultRemoteUrl: taskResult && taskResult.remoteFile ? taskResult.remoteFile.url : "",
+      convertResultName: `格式转换结果.${exportFormat}`,
+      convertResultHeadline: `${fromFormat} → ${toFormat}`,
+      convertResultDetail: `${beforeSizeText} → ${afterSizeText}`,
+      convertResultFromFormat: fromFormat,
+      convertResultToFormat: toFormat,
+      convertResultMetaLines: [
+        `原图尺寸 ${imageInput.width} × ${imageInput.height}`,
+        `输出质量 ${selections.quality}`,
       ],
     });
   },
@@ -1701,7 +2238,7 @@ Page({
   },
 
   async runQrMaker() {
-    const { tool, selections, textInput } = this.data;
+    const { tool, selections, textInput, qrLogoInput } = this.data;
     const content = (textInput || "").trim();
 
     if (!content) {
@@ -1712,7 +2249,7 @@ Page({
       return;
     }
 
-    const qr = qrcode(0, "M");
+    const qr = qrcode(0, qrLogoInput ? "H" : "M");
     qr.addData(content);
     qr.make();
 
@@ -1737,10 +2274,14 @@ Page({
     const tempFile = await this.withCanvas(size, size, (ctx) => {
       setFillStyle(ctx, "#ffffff");
       ctx.fillRect(0, 0, size, size);
+      setFillStyle(ctx, fillColor);
 
       for (let row = 0; row < moduleCount; row += 1) {
         for (let col = 0; col < moduleCount; col += 1) {
-          setFillStyle(ctx, qr.isDark(row, col) ? fillColor : "#ffffff");
+          if (!qr.isDark(row, col)) {
+            continue;
+          }
+
           ctx.fillRect(
             (col + margin) * cellSize,
             (row + margin) * cellSize,
@@ -1749,18 +2290,28 @@ Page({
           );
         }
       }
+
+      drawQrLogoImage(ctx, qrLogoInput, size);
     }, {
       fileType: "png",
       quality: 1,
     });
 
     const fileInfo = await getFileInfo(tempFile.tempFilePath);
+    const remoteFile = await this.uploadGeneratedOutput(tempFile.tempFilePath, {
+      name: "二维码.png",
+      folder: "client-outputs/qr-maker",
+      contentType: "image/png",
+      extension: "png",
+      baseName: "qr-code",
+    });
     const result = createTask(tool, selections, {
       instant: true,
       resultType: "image",
       inputName: "二维码内容",
       outputName: "二维码.png",
       outputPath: tempFile.tempFilePath,
+      remoteUrl: remoteFile ? remoteFile.url : "",
       afterBytes: fileInfo ? fileInfo.size : null,
       resultHeadline: "二维码已生成",
       resultDetail: "已生成可保存图片，适合放进海报、物料和分享页。",
@@ -1769,6 +2320,8 @@ Page({
       metaLines: [
         `风格 ${selections.style}`,
         `边距 ${selections.margin}`,
+        `Logo ${qrLogoInput ? "已上传" : "未使用"}`,
+        remoteFile ? `云端存储 ${remoteFile.provider === "qiniu" ? "七牛云" : "后端"}` : "云端存储 待同步",
       ],
     });
 
@@ -1910,6 +2463,13 @@ Page({
     const outputPath = `${wx.env.USER_DATA_PATH}/image-to-pdf-${Date.now()}.pdf`;
     await writeArrayBufferFile(outputPath, pdfBytes);
     const fileInfo = await getFileInfo(outputPath);
+    const remoteFile = await this.uploadGeneratedOutput(outputPath, {
+      name: "图片合集.pdf",
+      folder: "client-outputs/image-to-pdf",
+      contentType: "application/pdf",
+      extension: "pdf",
+      baseName: "image-to-pdf",
+    });
     const totalInputSize = imageInputs.reduce((sum, item) => sum + (item.size || 0), 0);
     const result = createTask(tool, selections, {
       instant: true,
@@ -1917,6 +2477,7 @@ Page({
       inputName: `${imageInputs.length} 张图片`,
       outputName: "图片合集.pdf",
       outputPath,
+      remoteUrl: remoteFile ? remoteFile.url : "",
       beforeBytes: totalInputSize,
       afterBytes: fileInfo ? fileInfo.size : null,
       resultHeadline: "图片转 PDF 已完成",
@@ -1924,6 +2485,7 @@ Page({
       metaLines: [
         `纸张 ${selections.paper}`,
         `布局 ${selections.layout}`,
+        remoteFile ? `云端存储 ${remoteFile.provider === "qiniu" ? "七牛云" : "后端"}` : "云端存储 待同步",
       ],
     });
 
