@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y ffmpeg libreoffice python3 python3-pip && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y ffmpeg libreoffice python3 python3-pip python3-venv gcc python3-dev libmupdf-dev mupdf-tools && rm -rf /var/lib/apt/lists/* \
   && pip3 install --break-system-packages pdf2docx
 
 COPY package.json package-lock.json ./
