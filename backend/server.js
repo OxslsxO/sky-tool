@@ -12,6 +12,7 @@ const { createWorker } = require("tesseract.js");
 const PDFParser = require("pdf2json");
 const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require("docx");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
+const { decodePdfTextToken } = require("./lib/pdf-text");
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");
@@ -1674,7 +1675,7 @@ app.post("/api/pdf/to-word", async (req, res) => {
       }
       
       if (page.Texts) {
-        const textParts = page.Texts.map(t => t.R && t.R[0] ? decodeURIComponent(t.R[0].T) : "");
+        const textParts = page.Texts.map(t => t.R && t.R[0] ? decodePdfTextToken(t.R[0].T) : "");
         const pageText = textParts.join(" ").replace(/\s+/g, " ").trim();
         
         const textLines = pageText.split(/\n+/);
