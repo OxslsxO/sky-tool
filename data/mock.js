@@ -29,6 +29,8 @@ const categories = [
   },
 ];
 
+const hiddenToolIds = ["image-compress", "pdf-compress"];
+
 const tools = [
   {
     id: "photo-id",
@@ -119,7 +121,7 @@ const tools = [
     helperText: "适合先裁剪再导出，避免平台强制压缩时的重复损耗。",
     demoResult: "保留主体区域的同时适配目标画布，适合继续加字或导出。",
     params: [
-      { key: "size", label: "目标比例", options: ["1:1", "4:3", "16:9", "自定义"] },
+      { key: "size", label: "目标比例", options: ["一寸", "小一寸", "二寸", "小二寸", "1:1", "4:3", "16:9", "自定义"] },
       { key: "fit", label: "适配方式", options: ["居中裁剪", "智能留白", "完整缩放"] },
     ],
   },
@@ -145,6 +147,27 @@ const tools = [
       { key: "paper", label: "纸张规格", options: ["A4", "A5", "原图自适应"] },
       { key: "layout", label: "页面布局", options: ["单页铺满", "留白版式", "两图拼页"] },
     ],
+  },
+  {
+    id: "universal-compress",
+    name: "万能压缩",
+    shortDescription: "支持各种格式",
+    tagline: "自动识别文件格式并智能压缩，图片、PDF等一网打尽。",
+    description: "支持图片、PDF、Office文档等多种格式，系统自动识别并采用最佳压缩策略。",
+    categoryId: "image",
+    categoryIds: ["image", "document"],
+    badge: "高频",
+    points: 5,
+    memberFree: true,
+    accent: "#9b59b6",
+    cardBackground: "linear-gradient(135deg, rgba(230, 214, 240, 0.95), rgba(255, 255, 255, 0.96))",
+    heroBackground: "linear-gradient(145deg, #e6d6f0 0%, #f8f5fc 55%, #ffffff 100%)",
+    supportedFormats: ["JPG", "PNG", "WEBP", "PDF", "DOCX", "XLSX", "PPTX", "MP3", "WAV", "FLAC", "M4A", "AAC", "OGG"],
+    formatText: "支持图片、文档、音频等格式",
+    scenarios: ["压缩发送前", "系统提交前", "节省存储空间"],
+    helperText: "支持图片、PDF、Office文档、音频等多种格式，自动识别并压缩。",
+    demoResult: "显示压缩前后对比，标明压缩率和节省空间。",
+    params: [{ key: "mode", label: "压缩等级", options: ["体积优先", "均衡", "质量优先"] }],
   },
   {
     id: "pdf-compress",
@@ -234,7 +257,7 @@ const tools = [
     name: "PDF 转 Word",
     shortDescription: "PDF 一键转文档",
     tagline: "把 PDF 转换成可编辑的 Word，适合二次编辑和格式调整。",
-    description: "支持文本识别和格式保留，把 PDF 转换成可编辑的 Word 文档。",
+    description: "使用 Adobe PDF Services API 把 PDF 转换成可编辑的 Word 文档，尽量保留原版式。",
     categoryId: "document",
     badge: "高频",
     points: 8,
@@ -245,11 +268,11 @@ const tools = [
     supportedFormats: ["PDF"],
     formatText: "PDF",
     scenarios: ["二次编辑", "格式调整", "内容提取"],
-    helperText: "适合需要二次编辑 PDF 的场景，复杂版式建议微调后使用。",
+    helperText: "适合需要二次编辑 PDF 的场景，复杂版式由 Adobe 云端转换后仍建议检查一遍。",
     demoResult: "输出可编辑的 Word 文档，文字和段落可直接修改。",
     params: [
       { key: "format", label: "输出格式", options: ["DOCX", "DOC"] },
-      { key: "layout", label: "版式保留", options: ["保持版式", "优先文字"] },
+      { key: "layout", label: "转换引擎", options: ["Adobe PDF Services"] },
     ],
   },
   {
@@ -323,10 +346,10 @@ const tools = [
   },
   {
     id: "audio-convert",
-    name: "音频格式转换",
-    shortDescription: "常用音频互转",
-    tagline: "把 MP3、WAV、FLAC 等格式互相转换，适合不同设备使用。",
-    description: "支持常见音频格式互转，保持音质的同时优化兼容性。",
+    name: "音视频格式转换",
+    shortDescription: "常用音视频互转",
+    tagline: "把 MP3、WAV、MP4、MOV 等格式互相转换，适合不同设备使用。",
+    description: "支持常见音频和视频格式转换，保持清晰度的同时优化兼容性。",
     categoryId: "utility",
     badge: "常用",
     points: 4,
@@ -334,14 +357,14 @@ const tools = [
     accent: "#9e7f4d",
     cardBackground: "linear-gradient(135deg, rgba(239, 232, 208, 0.95), rgba(255, 251, 242, 0.96))",
     heroBackground: "linear-gradient(145deg, #eee6d2 0%, #faf7ef 55%, #ffffff 100%)",
-    supportedFormats: ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC"],
-    formatText: "MP3 / WAV / FLAC / OGG / M4A / AAC",
-    scenarios: ["设备兼容", "音质优化", "存储空间"],
-    helperText: "适合常见音频格式转换，音质和文件大小会因格式不同而变化。",
-    demoResult: "转换结果会提示音质与文件大小变化，适合不同场景使用。",
+    supportedFormats: ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC", "MP4", "MOV", "WEBM"],
+    formatText: "MP3 / WAV / FLAC / OGG / M4A / AAC / MP4 / MOV / WEBM",
+    scenarios: ["设备兼容", "清晰度优化", "存储空间"],
+    helperText: "适合常见音频和视频格式转换，清晰度、音质和文件大小会因格式不同而变化。",
+    demoResult: "转换结果会提示输出格式与文件大小变化，适合不同场景使用。",
     params: [
-      { key: "target", label: "目标格式", options: ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC"] },
-      { key: "quality", label: "音质设置", options: ["标准", "高清", "无损"] },
+      { key: "target", label: "目标格式", options: ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC", "MP4", "MOV", "WEBM"] },
+      { key: "quality", label: "质量设置", options: ["标准", "高清", "无损"] },
     ],
   },
 ];
@@ -356,16 +379,18 @@ const featuredBundles = [
   {
     id: "office-pack",
     title: "轻办公 PDF 工具包",
-    description: "合并、拆分、压缩和 Office 转 PDF 更适合日常文档整理。",
-    toolIds: ["pdf-merge", "pdf-split", "pdf-compress", "office-to-pdf"],
+    description: "合并、拆分、万能压缩和 Office 转 PDF 更适合日常文档整理。",
+    toolIds: ["pdf-merge", "pdf-split", "universal-compress", "office-to-pdf"],
   },
   {
     id: "shop-pack",
     title: "商家快用图片包",
-    description: "图片压缩、改尺寸和二维码组合，适合商品图和活动页。",
-    toolIds: ["image-compress", "resize-crop", "qr-maker"],
+    description: "万能压缩、改尺寸和二维码组合，适合商品图和活动页。",
+    toolIds: ["universal-compress", "resize-crop", "qr-maker"],
   },
 ];
+
+const visibleTools = tools.filter((tool) => !hiddenToolIds.includes(tool.id));
 
 const memberPlans = [
   { id: "trial", name: "体验周卡", price: "9.9", period: "7 天", highlight: "低门槛体验高频工具", recommended: false },
@@ -389,7 +414,7 @@ function getCategoryById(categoryId) {
 }
 
 function getToolById(toolId) {
-  return tools.find((item) => item.id === toolId);
+  return visibleTools.find((item) => item.id === toolId);
 }
 
 function getToolsByIds(toolIds) {
@@ -397,12 +422,18 @@ function getToolsByIds(toolIds) {
 }
 
 function getToolsByCategory(categoryId) {
-  return tools.filter((tool) => tool.categoryId === categoryId);
+  return visibleTools.filter((tool) => {
+    if (Array.isArray(tool.categoryIds) && tool.categoryIds.includes(categoryId)) {
+      return true;
+    }
+
+    return tool.categoryId === categoryId;
+  });
 }
 
 module.exports = {
   categories,
-  tools,
+  tools: visibleTools,
   featuredBundles,
   memberPlans,
   pointPackages,

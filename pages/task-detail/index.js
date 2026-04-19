@@ -5,10 +5,12 @@ const AUDIO_EXTENSIONS = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
 
 function isAudioTask(task) {
   if (!task || !task.toolId) return false;
-  if (task.toolId === "audio-convert") return true;
   if (task.outputName) {
     const ext = task.outputName.split(".").pop().toLowerCase();
     return AUDIO_EXTENSIONS.includes(ext);
+  }
+  if (task.toolId === "audio-convert" && task.selections && task.selections.target) {
+    return AUDIO_EXTENSIONS.includes(String(task.selections.target).toLowerCase());
   }
   return false;
 }

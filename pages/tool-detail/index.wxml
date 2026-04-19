@@ -1,17 +1,17 @@
-<view class="container" wx:if="{{tool}}">
+﻿<view class="container" wx:if="{{tool}}">
   <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
     <view class="hero-left">
       <text class="hero-title">{{tool.name}}</text>
-      <text class="hero-cost" wx:if="{{tool.id !== 'photo-id'}}">{{billing ? billing.costText : (tool.points + ' 积分')}}</text>
+      <text class="hero-cost" wx:if="{{tool.id !== 'photo-id'}}">{{billing ? billing.costText : (tool.points + ' 绉垎')}}</text>
     </view>
     <view class="hero-right" wx:if="{{userState}}">
       <view class="user-info">
         <text class="user-info__label">{{userState.memberPlan}}</text>
-        <text class="user-info__value" wx:if="{{userState.memberActive}}">有效期至 {{userState.memberExpire}}</text>
-        <text class="user-info__value" wx:if="{{!userState.memberActive}}">已过期</text>
+        <text class="user-info__value" wx:if="{{userState.memberActive}}">鏈夋晥鏈熻嚦 {{userState.memberExpire}}</text>
+        <text class="user-info__value" wx:if="{{!userState.memberActive}}">宸茶繃鏈?/text>
       </view>
       <view class="user-info">
-        <text class="user-info__label">积分</text>
+        <text class="user-info__label">绉垎</text>
         <text class="user-info__value">{{userState.points}}</text>
       </view>
     </view>
@@ -21,17 +21,17 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Setup</text>
-        <text class="section-title">参数</text>
+        <text class="section-title">鍙傛暟</text>
       </view>
     </view>
 
     <view class="card upload-card">
-      <view class="option-block" wx:for="{{tool.params}}" wx:key="key">
+      <view class="option-block" wx:for="{{visibleParams}}" wx:key="key">
         <text class="option-block__title">{{item.label}}</text>
         <view class="chips-wrap {{showMoreColors && item.key === 'background' ? 'chips-wrap-expanded' : ''}}">
           <view
             class="chip {{selections[item.key] === option ? 'chip-active' : ''}} {{item.key === 'background' ? 'chip-color' : ''}}"
-            wx:for="{{item.key === 'background' && !showMoreColors ? ['白色', '蓝色', '红色'] : (item.key === 'background' && showMoreColors ? tool.params[1].options : (tool.id === 'image-convert' && item.key === 'target' && imageInput ? convertTargetOptions : item.options))}}"
+            wx:for="{{item.key === 'background' && !showMoreColors ? ['鐧借壊', '钃濊壊', '绾㈣壊'] : (item.key === 'background' && showMoreColors ? tool.params[1].options : (tool.id === 'image-convert' && item.key === 'target' && imageInput ? convertTargetOptions : item.options))}}"
             wx:for-item="option"
             wx:key="*this"
             data-key="{{item.key}}"
@@ -46,34 +46,92 @@
             wx:if="{{item.key === 'background'}}"
             bindtap="toggleMoreColors"
           >
-            <text>{{showMoreColors ? '收起' : '更多'}}</text>
+            <text>{{showMoreColors ? '鏀惰捣' : '鏇村'}}</text>
           </view>
         </view>
       </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{showImageUpload && tool.id !== 'photo-id' && tool.id !== 'image-compress' && tool.id !== 'image-convert'}}">
+  <view class="section" wx:if="{{showImageUpload && tool.id !== 'photo-id' && tool.id !== 'image-compress' && tool.id !== 'image-convert' && tool.id !== 'resize-crop'}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
-        <text class="section-title">{{tool.id === 'ocr-text' ? '上传识别图片' : '上传图片'}}</text>
+        <text class="section-title">{{tool.id === 'ocr-text' ? (ocrResultReady ? '璇嗗埆缁撴灉' : '涓婁紶璇嗗埆鍥剧墖') : '涓婁紶鍥剧墖'}}</text>
+        <text class="section-copy" wx:if="{{tool.id === 'ocr-text' && ocrResultReady}}">{{ocrResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '选择图片（可多选）' : (tool.id === 'ocr-text' ? '选择识别图片' : '选择图片')}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '閫夋嫨鍥剧墖锛堝彲澶氶€夛級' : (tool.id === 'ocr-text' ? (ocrResultReady ? '閲嶆柊閫夋嫨鍥剧墖' : '閫夋嫨璇嗗埆鍥剧墖') : '閫夋嫨鍥剧墖')}}</view>
 
-      <view class="image-preview" wx:if="{{imageInput}}">
+      <view class="image-preview" wx:if="{{imageInput && !(tool.id === 'ocr-text' && ocrResultReady)}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
-        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
-        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
+      </view>
+
+      <view class="ocr-result" wx:if="{{tool.id === 'ocr-text' && ocrResultReady}}">
+        <view class="ocr-result__head">
+          <view>
+            <text class="result-card__title">{{ocrResultHeadline}}</text>
+            <text class="ocr-result__meta">{{ocrResultLines.length}} 娈?路 {{ocrResultText.length}} 瀛?路 {{ocrResultProviderText}}</text>
+          </view>
+          <view class="btn-ghost ocr-result__copy-all" bindtap="copyOcrAll">澶嶅埗鍏ㄩ儴</view>
+        </view>
+        <scroll-view class="ocr-result__scroll" scroll-y>
+          <view class="ocr-empty" wx:if="{{!ocrResultLines.length}}">
+            <text>鏈瘑鍒埌鍙睍绀虹殑鏂囧瓧</text>
+          </view>
+          <view class="ocr-line" wx:for="{{ocrResultLines}}" wx:key="id">
+            <text class="ocr-line__text" selectable="true" user-select="true">{{item.text}}</text>
+            <view class="ocr-line__copy" data-text="{{item.text}}" bindtap="copyOcrLine">澶嶅埗</view>
+          </view>
+        </scroll-view>
       </view>
 
       <view class="image-preview__list" wx:if="{{tool.id === 'image-to-pdf' && imageInputs.length}}">
-        <text class="image-preview__meta">已选择 {{imageInputs.length}} 张图片</text>
+        <text class="image-preview__meta">宸查€夋嫨 {{imageInputs.length}} 寮犲浘鐗?/text>
         <view class="chips-wrap">
-          <text class="chip-static" wx:for="{{imageInputs}}" wx:key="path">第 {{index + 1}} 张 · {{item.width}} × {{item.height}}</text>
+          <text class="chip-static" wx:for="{{imageInputs}}" wx:key="path">绗?{{index + 1}} 寮?路 {{item.width}} 脳 {{item.height}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{tool.id === 'resize-crop'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">{{resizeResultReady ? '璋冩暣缁撴灉' : '涓婁紶鍥剧墖'}}</text>
+        <text class="section-copy" wx:if="{{resizeResultReady}}">{{resizeResultDetail}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!resizeResultReady}}">閫夋嫨鍥剧墖</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{resizeResultReady}}">閲嶆柊閫夋嫨</view>
+
+      <view class="image-preview" wx:if="{{imageInput && !resizeResultReady}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
+      </view>
+
+      <view class="image-preview" wx:if="{{resizeResultReady}}">
+        <image class="image-preview__image" src="{{resizeResultPath}}" mode="aspectFit"></image>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{resizeResultHeadline}}</text>
+        <view class="chips-wrap" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static">鍘熷昂瀵?{{resizeBeforeWidth}} 脳 {{resizeBeforeHeight}}</text>
+          <text class="chip-static">鏂板昂瀵?{{resizeAfterWidth}} 脳 {{resizeAfterHeight}}</text>
+        </view>
+        <view class="chips-wrap" wx:if="{{resizeResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{resizeResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewResizeResult">棰勮澶у浘</view>
+          <view class="btn-ghost action-card__button" bindtap="saveResizeResult">淇濆瓨鍒扮浉鍐?/view>
+          <view class="btn-ghost action-card__button" wx:if="{{resizeResultRemoteUrl}}" bindtap="copyResizeResultLink">澶嶅埗閾炬帴</view>
         </view>
       </view>
     </view>
@@ -83,19 +141,19 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
-        <text class="section-title">{{compressResultReady ? '压缩结果' : '上传图片'}}</text>
+        <text class="section-title">{{compressResultReady ? '鍘嬬缉缁撴灉' : '涓婁紶鍥剧墖'}}</text>
         <text class="section-copy" wx:if="{{compressResultReady}}">{{compressResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!compressResultReady}}">选择图片</view>
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{compressResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!compressResultReady}}">閫夋嫨鍥剧墖</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{compressResultReady}}">閲嶆柊閫夋嫨</view>
 
       <view class="image-preview" wx:if="{{imageInput && !compressResultReady}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
-        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
-        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
       </view>
 
       <view class="image-preview" wx:if="{{compressResultReady}}">
@@ -105,8 +163,73 @@
           <text class="chip-static" wx:for="{{compressResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewCompressResult">预览大图</view>
-          <view class="btn-ghost action-card__button" bindtap="saveCompressResult">保存到相册</view>
+          <view class="btn-primary action-card__button" bindtap="previewCompressResult">棰勮澶у浘</view>
+          <view class="btn-ghost action-card__button" bindtap="saveCompressResult">淇濆瓨鍒扮浉鍐?/view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 涓囪兘鍘嬬缉閮ㄥ垎 -->
+  <view class="section" wx:if="{{tool.id === 'universal-compress'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">{{universalCompressResultReady ? '鍘嬬缉缁撴灉' : '閫夋嫨鏂囦欢'}}</text>
+        <text class="section-copy" wx:if="{{universalCompressResultReady}}">{{universalCompressResultDetail}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <!-- 閫夋嫨鏂囦欢鎸夐挳 -->
+      <view class="btn-ghost picker-button" bindtap="chooseUniversalCompressFile" wx:if="{{!universalCompressResultReady}}">
+        閫夋嫨鍥剧墖鎴栨枃浠?
+      </view>
+      <view class="btn-ghost picker-button" bindtap="chooseUniversalCompressFile" wx:if="{{universalCompressResultReady}}">
+        閲嶆柊閫夋嫨鏂囦欢
+      </view>
+
+      <!-- 鏄剧ず宸查€夋嫨鐨勫浘鐗?-->
+      <view class="image-preview" wx:if="{{imageInput && !universalCompressResultReady}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
+      </view>
+
+      <!-- 鏄剧ず宸查€夋嫨鐨勬枃浠?-->
+      <view class="file-list" wx:if="{{backendFiles.length && !universalCompressResultReady}}">
+        <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
+          <text class="file-item__name">{{item.name}}</text>
+          <text class="file-item__meta">{{item.sizeText}}</text>
+        </view>
+      </view>
+
+      <!-- 鏄剧ず鍘嬬缉缁撴灉 -->
+      <view class="image-preview" wx:if="{{universalCompressResultReady}}">
+        <!-- 濡傛灉鏄浘鐗囨樉绀洪瑙?-->
+        <image wx:if="{{universalCompressFileType === 'image'}}" class="image-preview__image" src="{{universalCompressResultPath}}" mode="aspectFit"></image>
+        <!-- 濡傛灉鏄叾浠栨枃浠舵樉绀烘枃浠跺浘鏍?-->
+        <view wx:else class="file-preview">
+          <text class="file-preview__icon">馃搫</text>
+          <text class="file-preview__name">{{universalCompressResultName}}</text>
+        </view>
+
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{universalCompressResultHeadline}}</text>
+
+        <view class="chips-wrap" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static">鍘熷ぇ灏?{{universalCompressResultBeforeSizeText}}</text>
+          <text class="chip-static">鍘嬬缉鍚?{{universalCompressResultAfterSizeText}}</text>
+          <text class="chip-static" wx:if="{{universalCompressResultSavedText}}">{{universalCompressResultSavedText}}</text>
+        </view>
+
+        <view class="chips-wrap" wx:if="{{universalCompressResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{universalCompressResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewUniversalCompressResult">棰勮</view>
+          <view class="btn-ghost action-card__button" bindtap="saveUniversalCompressResult">淇濆瓨</view>
+          <view class="btn-ghost action-card__button" wx:if="{{universalCompressResultRemoteUrl}}" bindtap="copyUniversalCompressResultLink">澶嶅埗閾炬帴</view>
         </view>
       </view>
     </view>
@@ -116,19 +239,19 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
-        <text class="section-title">{{convertResultReady ? '转换结果' : '上传图片'}}</text>
+        <text class="section-title">{{convertResultReady ? '杞崲缁撴灉' : '涓婁紶鍥剧墖'}}</text>
         <text class="section-copy" wx:if="{{convertResultReady}}">{{convertResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!convertResultReady}}">选择图片</view>
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{convertResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!convertResultReady}}">閫夋嫨鍥剧墖</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{convertResultReady}}">閲嶆柊閫夋嫨</view>
 
       <view class="image-preview" wx:if="{{imageInput && !convertResultReady}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
-        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
-        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
       </view>
 
       <view class="image-preview" wx:if="{{convertResultReady}}">
@@ -138,8 +261,8 @@
           <text class="chip-static" wx:for="{{convertResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewConvertResult">预览大图</view>
-          <view class="btn-ghost action-card__button" bindtap="saveConvertResult">保存到相册</view>
+          <view class="btn-primary action-card__button" bindtap="previewConvertResult">棰勮澶у浘</view>
+          <view class="btn-ghost action-card__button" bindtap="saveConvertResult">淇濆瓨鍒扮浉鍐?/view>
         </view>
       </view>
     </view>
@@ -149,19 +272,19 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
-        <text class="section-title">{{photoIdResultReady ? '生成结果' : '上传照片'}}</text>
+        <text class="section-title">{{photoIdResultReady ? '鐢熸垚缁撴灉' : '涓婁紶鐓х墖'}}</text>
         <text class="section-copy" wx:if="{{photoIdResultReady}}">{{photoIdResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!photoIdResultReady}}">选择图片</view>
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{photoIdResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!photoIdResultReady}}">閫夋嫨鍥剧墖</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{photoIdResultReady}}">閲嶆柊閫夋嫨</view>
 
       <view class="image-preview" wx:if="{{imageInput && !photoIdResultReady}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
-        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
-        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+        <text class="image-preview__meta">灏哄 {{imageInput.width}} 脳 {{imageInput.height}}</text>
+        <text class="image-preview__meta">澶у皬 {{imageInput.sizeText}}</text>
         <view class="cost-hint" wx:if="{{billing}}">
           <text class="cost-hint__text">{{billing.text}}</text>
         </view>
@@ -173,9 +296,9 @@
                 <view class="loading-dot"></view>
                 <view class="loading-dot"></view>
               </view>
-              <text class="loading-text">处理中</text>
+              <text class="loading-text">澶勭悊涓?/text>
             </view>
-            <text wx:else>开始处理</text>
+            <text wx:else>寮€濮嬪鐞?/text>
           </view>
         </view>
       </view>
@@ -187,8 +310,8 @@
           <text class="chip-static" wx:for="{{photoIdResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewPhotoIdResult">预览大图</view>
-          <view class="btn-ghost action-card__button" bindtap="savePhotoIdResult">保存到相册</view>
+          <view class="btn-primary action-card__button" bindtap="previewPhotoIdResult">棰勮澶у浘</view>
+          <view class="btn-ghost action-card__button" bindtap="savePhotoIdResult">淇濆瓨鍒扮浉鍐?/view>
         </view>
       </view>
     </view>
@@ -198,16 +321,17 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Files</text>
-        <text class="section-title">{{pdfToWordResultReady ? '转换结果' : backendPickerTitle}}</text>
+        <text class="section-title">{{pdfToWordResultReady || audioConvertResultReady ? '杞崲缁撴灉' : backendPickerTitle}}</text>
         <text class="section-copy" wx:if="{{pdfToWordResultReady}}">{{pdfToWordResultDetail}}</text>
+        <text class="section-copy" wx:if="{{audioConvertResultReady}}">{{audioConvertResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady}}">{{backendPickerButtonText}}</view>
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady}}">{{backendPickerButtonText}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady}}">閲嶆柊閫夋嫨</view>
 
-      <view class="file-list" wx:if="{{backendFiles.length && !pdfToWordResultReady}}">
+      <view class="file-list" wx:if="{{backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady}}">
         <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
           <text class="file-item__name">{{item.name}}</text>
           <text class="file-item__meta">{{item.sizeText}}</text>
@@ -216,7 +340,7 @@
 
       <view class="image-preview" wx:if="{{pdfToWordResultReady}}">
         <view class="file-preview">
-          <text class="file-preview__icon">📄</text>
+          <text class="file-preview__icon">馃搫</text>
           <text class="file-preview__name">{{pdfToWordResultName}}</text>
         </view>
         <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{pdfToWordResultHeadline}}</text>
@@ -224,8 +348,33 @@
           <text class="chip-static" wx:for="{{pdfToWordResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">下载文件</view>
-          <view class="btn-ghost action-card__button" wx:if="{{pdfToWordResultRemoteUrl}}" bindtap="copyPdfToWordUrl">复制链接</view>
+          <view class="btn-primary action-card__button" bindtap="previewPdfToWordResult">棰勮鏂囦欢</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">涓嬭浇鏂囦欢</view>
+          <view class="btn-ghost action-card__button" wx:if="{{pdfToWordResultRemoteUrl}}" bindtap="copyPdfToWordUrl">澶嶅埗閾炬帴</view>
+        </view>
+      </view>
+
+      <view class="image-preview" wx:if="{{audioConvertResultReady}}">
+        <video
+          wx:if="{{audioConvertResultKind === 'video'}}"
+          class="media-preview__video"
+          src="{{audioConvertResultPath || audioConvertResultRemoteUrl}}"
+          controls
+          show-fullscreen-btn
+          show-play-btn
+        ></video>
+        <view wx:else class="file-preview">
+          <text class="file-preview__icon">馃幍</text>
+          <text class="file-preview__name">{{audioConvertResultName}}</text>
+        </view>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{audioConvertResultHeadline}}</text>
+        <view class="chips-wrap" wx:if="{{audioConvertResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{audioConvertResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewAudioConvertResult">{{audioConvertResultKind === 'audio' && audioConvertIsPlaying ? '鏆傚仠棰勮' : '棰勮'}}</view>
+          <view class="btn-ghost action-card__button" bindtap="saveAudioConvertResult">淇濆瓨</view>
+          <view class="btn-ghost action-card__button" wx:if="{{audioConvertResultRemoteUrl}}" bindtap="copyAudioConvertResultLink">澶嶅埗閾炬帴</view>
         </view>
       </view>
     </view>
@@ -235,12 +384,12 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Range</text>
-        <text class="section-title">输入页码范围</text>
+        <text class="section-title">杈撳叆椤电爜鑼冨洿</text>
       </view>
     </view>
 
     <view class="card form-card">
-      <input class="field-input" value="{{pageRange}}" bindinput="handlePageRangeInput" placeholder="例如 1-3,5,8-10" />
+      <input class="field-input" value="{{pageRange}}" bindinput="handlePageRangeInput" placeholder="渚嬪 1-3,5,8-10" />
     </view>
   </view>
 
@@ -248,13 +397,13 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Custom</text>
-        <text class="section-title">输入自定义尺寸</text>
+        <text class="section-title">杈撳叆鑷畾涔夊昂瀵?/text>
       </view>
     </view>
 
     <view class="card form-card">
-      <input class="field-input" type="number" value="{{customWidth}}" bindinput="handleCustomWidth" placeholder="宽度" />
-      <input class="field-input" type="number" value="{{customHeight}}" bindinput="handleCustomHeight" placeholder="高度" />
+      <input class="field-input" type="number" value="{{customWidth}}" bindinput="handleCustomWidth" placeholder="瀹藉害" />
+      <input class="field-input" type="number" value="{{customHeight}}" bindinput="handleCustomHeight" placeholder="楂樺害" />
     </view>
   </view>
 
@@ -262,19 +411,19 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Content</text>
-        <text class="section-title">输入二维码内容</text>
+        <text class="section-title">杈撳叆浜岀淮鐮佸唴瀹?/text>
       </view>
     </view>
 
     <view class="card">
-      <textarea class="text-area" maxlength="-1" value="{{textInput}}" bindinput="handleTextInput" placeholder="输入链接、文本、联系方式等内容" />
+      <textarea class="text-area" maxlength="-1" value="{{textInput}}" bindinput="handleTextInput" placeholder="杈撳叆閾炬帴銆佹枃鏈€佽仈绯绘柟寮忕瓑鍐呭" />
       <view class="qr-logo-row">
-        <view class="btn-ghost qr-logo-button" bindtap="chooseQrLogo">{{qrLogoInput ? '更换 Logo' : '上传 Logo'}}</view>
-        <view class="btn-ghost qr-logo-button" wx:if="{{qrLogoInput}}" bindtap="removeQrLogo">移除</view>
+        <view class="btn-ghost qr-logo-button" bindtap="chooseQrLogo">{{qrLogoInput ? '鏇存崲 Logo' : '涓婁紶 Logo'}}</view>
+        <view class="btn-ghost qr-logo-button" wx:if="{{qrLogoInput}}" bindtap="removeQrLogo">绉婚櫎</view>
       </view>
       <view class="qr-logo-preview" wx:if="{{qrLogoInput}}">
         <image class="qr-logo-preview__image" src="{{qrLogoInput.path}}" mode="aspectFill"></image>
-        <text class="qr-logo-preview__meta">{{qrLogoInput.width}} × {{qrLogoInput.height}} · {{qrLogoInput.sizeText}}</text>
+        <text class="qr-logo-preview__meta">{{qrLogoInput.width}} 脳 {{qrLogoInput.height}} 路 {{qrLogoInput.sizeText}}</text>
       </view>
     </view>
   </view>
@@ -283,19 +432,19 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Convert</text>
-        <text class="section-title">输入换算数值</text>
+        <text class="section-title">杈撳叆鎹㈢畻鏁板€?/text>
       </view>
     </view>
 
     <view class="card form-card">
-      <input class="field-input" type="digit" value="{{numberInput}}" bindinput="handleNumberInput" placeholder="输入数值" />
+      <input class="field-input" type="digit" value="{{numberInput}}" bindinput="handleNumberInput" placeholder="杈撳叆鏁板€? />
       <picker range="{{unitOptions}}" bindchange="handleUnitChange" data-field="fromUnit">
-        <view class="picker-line">从：{{fromUnit}}</view>
+        <view class="picker-line">浠庯細{{fromUnit}}</view>
       </picker>
       <picker range="{{unitOptions}}" bindchange="handleUnitChange" data-field="toUnit">
-        <view class="picker-line">到：{{toUnit}}</view>
+        <view class="picker-line">鍒帮細{{toUnit}}</view>
       </picker>
-      <view class="btn-ghost picker-button" bindtap="swapUnits">交换单位</view>
+      <view class="btn-ghost picker-button" bindtap="swapUnits">浜ゆ崲鍗曚綅</view>
     </view>
   </view>
 
@@ -313,11 +462,11 @@
               <view class="loading-dot"></view>
               <view class="loading-dot"></view>
             </view>
-            <text class="loading-text">处理中</text>
+            <text class="loading-text">澶勭悊涓?/text>
           </view>
           <text wx:else>{{primaryActionText}}</text>
         </view>
-        <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '取消收藏' : '收藏工具'}}</view>
+        <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '鍙栨秷鏀惰棌' : '鏀惰棌宸ュ叿'}}</view>
       </view>
     </view>
   </view>
@@ -332,7 +481,7 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Recent</text>
-        <text class="section-title">最近处理记录</text>
+        <text class="section-title">鏈€杩戝鐞嗚褰?/text>
       </view>
     </view>
 
@@ -355,17 +504,31 @@
 
   <view wx:if="{{showProcessingOverlay}}" class="processing-overlay">
     <view class="processing-panel">
-      <view class="processing-spinner">
-        <view class="processing-spinner__ring"></view>
-        <view class="processing-spinner__ring processing-spinner__ring--second"></view>
+      <view class="processing-stage">
+        <view class="processing-orbit">
+          <view class="processing-orbit__ring"></view>
+          <view class="processing-orbit__ring processing-orbit__ring--second"></view>
+          <view class="processing-orbit__core">
+            <view class="processing-core__bar processing-core__bar--one"></view>
+            <view class="processing-core__bar processing-core__bar--two"></view>
+            <view class="processing-core__bar processing-core__bar--three"></view>
+          </view>
+          <view class="processing-chip processing-chip--one"></view>
+          <view class="processing-chip processing-chip--two"></view>
+          <view class="processing-chip processing-chip--three"></view>
+        </view>
       </view>
-      <text class="processing-title">证件照处理中</text>
+      <text class="processing-title">{{processingTitle || '澶勭悊涓?}}</text>
       <text class="processing-status">{{processingStatus}}</text>
       <view class="processing-progress-wrap">
         <view class="processing-progress-track">
-          <view class="processing-progress-fill" style="width: {{processingProgress}}%;"></view>
+          <view class="processing-progress-fill" style="width: {{processingDisplayProgress}}%;"></view>
+          <view class="processing-progress-spark" style="left: {{processingDisplayProgress}}%;"></view>
         </view>
-        <text class="processing-progress-text">{{processingProgress}}%</text>
+        <view class="processing-progress-row">
+          <text class="processing-progress-label">杩涘害</text>
+          <text class="processing-progress-text">{{processingDisplayProgressText}}%</text>
+        </view>
       </view>
     </view>
   </view>

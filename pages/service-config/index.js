@@ -167,6 +167,7 @@ Page({
       pdfSplit: "PDF Split",
       pdfCompress: "PDF Compress",
       ocrImage: "Image OCR",
+      baiduOcr: "Baidu OCR",
       officeToPdf: "Office to PDF",
     };
 

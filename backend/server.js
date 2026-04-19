@@ -1,4 +1,4 @@
-require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 const http = require("http");
 const express = require("express");
@@ -9,10 +9,23 @@ const crypto = require("crypto");
 const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const { createWorker } = require("tesseract.js");
-const PDFParser = require("pdf2json");
-const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require("docx");
+const sharp = require("sharp");
+const {
+  PDFServices,
+  MimeType,
+  ServicePrincipalCredentials,
+  ClientConfig,
+  Region,
+  ExportPDFParams,
+  ExportPDFTargetFormat,
+  ExportOCRLocale,
+  ExportPDFJob,
+  ExportPDFResult,
+  RemoveProtectionParams,
+  RemoveProtectionJob,
+  RemoveProtectionResult,
+} = require("@adobe/pdfservices-node-sdk");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
-const { decodePdfTextToken } = require("./lib/pdf-text");
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");
@@ -37,7 +50,6 @@ app.use((req, res, next) => {
   res.setHeader("x-request-id", req.requestId);
   next();
 });
-app.use("/files", express.static(config.outputDir));
 app.get("/", (req, res) => {
   res.json({
     ok: true,
@@ -132,14 +144,14 @@ function sendError(res, status, code, message, extra) {
 
 function decodeBase64File(file) {
   if (!file || !file.base64) {
-    const error = new Error("缺少文件内容");
+    const error = new Error("缂哄皯鏂囦欢鍐呭");
     error.code = "MISSING_FILE_CONTENT";
     throw error;
   }
 
   const buffer = Buffer.from(file.base64, "base64");
   if (!buffer.length) {
-    const error = new Error("文件内容为空或编码不正确");
+    const error = new Error("鏂囦欢鍐呭涓虹┖鎴栫紪鐮佷笉姝ｇ‘");
     error.code = "INVALID_FILE_CONTENT";
     throw error;
   }
@@ -157,7 +169,7 @@ function requireApiToken(req, res, next) {
   const token = authorization.replace(/^Bearer\s+/i, "").trim();
 
   if (token !== config.apiToken) {
-    sendError(res, 401, "UNAUTHORIZED", "缺少有效的服务访问令牌");
+    sendError(res, 401, "UNAUTHORIZED", "缂哄皯鏈夋晥鐨勬湇鍔¤闂护鐗?)";
     return;
   }
 
@@ -178,7 +190,7 @@ async function saveOutputFile(req, buffer, options) {
 function assertPdfFile(file) {
   const lowerName = String(file && file.name ? file.name : "").toLowerCase();
   if (!lowerName.endsWith(".pdf")) {
-    const error = new Error("只支持 PDF 文件");
+    const error = new Error("鍙敮鎸?PDF 鏂囦欢");
     error.code = "INVALID_PDF_FILE";
     throw error;
   }
@@ -227,8 +239,10 @@ function sendLocalFallbackFile(req, res) {
     return false;
   }
 
+  const body = fs.readFileSync(fallbackPath);
   res.setHeader("content-type", getFallbackContentType(fallbackName));
-  res.sendFile(fallbackPath);
+  res.setHeader("content-length", body.length);
+  res.send(body);
   return true;
 }
 
@@ -239,7 +253,7 @@ function parsePageRanges(rangeText, totalPages) {
     .filter(Boolean);
 
   if (!ranges.length) {
-    const error = new Error("页码范围不能为空");
+    const error = new Error("椤电爜鑼冨洿涓嶈兘涓虹┖");
     error.code = "INVALID_PAGE_RANGE";
     throw error;
   }
@@ -252,7 +266,7 @@ function parsePageRanges(rangeText, totalPages) {
       const end = Number(endText);
 
       if (!start || !end || start > end) {
-        const error = new Error(`无效的页码范围：${part}`);
+        const error = new Error(`鏃犳晥鐨勯〉鐮佽寖鍥达細${part}`);
         error.code = "INVALID_PAGE_RANGE";
         throw error;
       }
@@ -265,7 +279,7 @@ function parsePageRanges(rangeText, totalPages) {
 
     const page = Number(part);
     if (!page) {
-      const error = new Error(`无效的页码：${part}`);
+      const error = new Error(`鏃犳晥鐨勯〉鐮侊細${part}`);
       error.code = "INVALID_PAGE_RANGE";
       throw error;
     }
@@ -278,7 +292,7 @@ function parsePageRanges(rangeText, totalPages) {
   );
 
   if (!unique.length) {
-    const error = new Error("页码超出文档范围");
+    const error = new Error("椤电爜瓒呭嚭鏂囨。鑼冨洿");
     error.code = "INVALID_PAGE_RANGE";
     throw error;
   }
@@ -310,10 +324,10 @@ function normalizeSplitMode(splitMode) {
   }
 
   if (
-    label.includes("范围") ||
+    label.includes("鑼冨洿") ||
     label.includes("page") ||
     label.includes("range") ||
-    label.includes("鎸夐〉")
+    label.includes("閹稿銆?")
   ) {
     return "page-range";
   }
@@ -324,15 +338,277 @@ function normalizeSplitMode(splitMode) {
 function normalizeOcrLanguage(languageLabel) {
   const label = String(languageLabel || "").trim().toLowerCase();
 
-  if (label === "eng" || label === "english") {
+  if (label === "eng" || label === "english" || label.includes("鑻辨枃")) {
     return "eng";
   }
 
-  if (label === "chi_sim" || label === "chinese") {
+  if (label === "chi_sim" || label === "chinese" || label.includes("涓枃")) {
     return "chi_sim";
   }
 
-  return "eng+chi_sim";
+  return "chi_sim+eng";
+}
+
+function getOcrPageSegMode(layoutLabel) {
+  const label = String(layoutLabel || "").trim().toLowerCase();
+
+  if (label.includes("琛ㄦ牸") || label.includes("table")) {
+    return "6";
+  }
+
+  if (label.includes("鎵嬪啓") || label.includes("sparse")) {
+    return "11";
+  }
+
+  return "4";
+}
+
+function normalizeOcrLines(lines, fallbackText) {
+  const normalized = (lines || [])
+    .map((line) => {
+      if (typeof line === "string") {
+        return line.trim();
+      }
+
+      return String(line && line.text ? line.text : "").trim();
+    })
+    .filter(Boolean);
+
+  if (normalized.length) {
+    return normalized;
+  }
+
+  return String(fallbackText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function prepareOcrImageVariants(fileBuffer, layoutLabel) {
+  const metadata = await sharp(fileBuffer).metadata();
+  const sourceWidth = metadata.width || 0;
+  const shouldUpscale = sourceWidth > 0 && sourceWidth < 1800;
+  const targetWidth = shouldUpscale ? 1800 : Math.min(sourceWidth || 2400, 2600);
+
+  const base = sharp(fileBuffer)
+    .rotate()
+    .resize({
+      width: targetWidth,
+      withoutEnlargement: !shouldUpscale,
+    })
+    .grayscale()
+    .normalize()
+    .sharpen({ sigma: 0.8, m1: 0.7, m2: 1.6 });
+
+  const variants = [
+    {
+      name: "clean",
+      buffer: await base.clone().png().toBuffer(),
+    },
+  ];
+
+  if (!String(layoutLabel || "").includes("鎵嬪啓")) {
+    variants.push({
+      name: "threshold",
+      buffer: await base.clone().threshold(178).png().toBuffer(),
+    });
+  }
+
+  variants.push({
+    name: "original",
+    buffer: fileBuffer,
+  });
+
+  return variants;
+}
+
+function scoreOcrResult(result) {
+  const text = result && result.data && result.data.text ? result.data.text : "";
+  const confidence = Number(result && result.data ? result.data.confidence : 0) || 0;
+  const visibleLength = text.replace(/\s+/g, "").length;
+  const cjkLength = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  return confidence * 3 + visibleLength + cjkLength * 0.6;
+}
+
+let baiduOcrTokenCache = {
+  token: "",
+  expiresAt: 0,
+};
+
+function getBaiduOcrConfig() {
+  return {
+    apiKey: process.env.BAIDU_OCR_API_KEY || process.env.BAIDU_API_KEY || "",
+    secretKey: process.env.BAIDU_OCR_SECRET_KEY || process.env.BAIDU_SECRET_KEY || "",
+    endpoint: process.env.BAIDU_OCR_ENDPOINT || "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic",
+  };
+}
+
+function maskSecret(value) {
+  const text = String(value || "");
+  if (!text) {
+    return "";
+  }
+
+  return `${text.slice(0, 4)}***${text.slice(-4)}`;
+}
+
+function isBaiduOcrConfigured() {
+  const config = getBaiduOcrConfig();
+  return Boolean(config.apiKey && config.secretKey);
+}
+
+async function getBaiduOcrAccessToken() {
+  if (baiduOcrTokenCache.token && Date.now() < baiduOcrTokenCache.expiresAt) {
+    return baiduOcrTokenCache.token;
+  }
+
+  const config = getBaiduOcrConfig();
+  if (!config.apiKey || !config.secretKey) {
+    return "";
+  }
+
+  const params = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: config.apiKey,
+    client_secret: config.secretKey,
+  });
+
+  const response = await fetch("https://aip.baidubce.com/oauth/2.0/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: params,
+  });
+
+  const data = await response.json();
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || "鐧惧害 OCR access_token 鑾峰彇澶辫触");
+  }
+
+  const expiresIn = Number(data.expires_in || 2592000);
+  baiduOcrTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max(60, expiresIn - 300) * 1000,
+  };
+
+  return baiduOcrTokenCache.token;
+}
+
+async function prepareBaiduOcrImage(fileBuffer) {
+  let width = 2200;
+  let quality = 92;
+  let output = await sharp(fileBuffer)
+    .rotate()
+    .resize({
+      width,
+      withoutEnlargement: true,
+    })
+    .jpeg({
+      quality,
+      mozjpeg: true,
+    })
+    .toBuffer();
+
+  while (output.length > 3.6 * 1024 * 1024 && width > 1000) {
+    width = Math.round(width * 0.82);
+    quality = Math.max(76, quality - 6);
+    output = await sharp(fileBuffer)
+      .rotate()
+      .resize({
+        width,
+        withoutEnlargement: true,
+      })
+      .jpeg({
+        quality,
+        mozjpeg: true,
+      })
+      .toBuffer();
+  }
+
+  return output;
+}
+
+function normalizeBaiduOcrLines(data) {
+  const words = Array.isArray(data && data.words_result) ? data.words_result : [];
+  const lines = words
+    .map((item) => String(item && item.words ? item.words : "").trim())
+    .filter(Boolean);
+
+  const paragraphs = Array.isArray(data && data.paragraphs_result) ? data.paragraphs_result : [];
+  if (paragraphs.length) {
+    const paragraphLines = paragraphs
+      .map((paragraph) => {
+        const indexes = paragraph && Array.isArray(paragraph.words_result_idx)
+          ? paragraph.words_result_idx
+          : [];
+        return indexes
+          .map((index) => lines[index])
+          .filter(Boolean)
+          .join("\n");
+      })
+      .filter(Boolean);
+
+    if (paragraphLines.length) {
+      return paragraphLines;
+    }
+  }
+
+  return lines;
+}
+
+async function recognizeTextFromImageWithBaidu(file, languageLabel, layoutLabel) {
+  const token = await getBaiduOcrAccessToken();
+  const config = getBaiduOcrConfig();
+  const fileBuffer = decodeBase64File(file);
+  const imageBuffer = await prepareBaiduOcrImage(fileBuffer);
+  const requestUrl = `${config.endpoint}?access_token=${encodeURIComponent(token)}`;
+  const body = new URLSearchParams({
+    image: imageBuffer.toString("base64"),
+    paragraph: "true",
+    probability: "true",
+    detect_direction: "true",
+  });
+
+  const language = normalizeOcrLanguage(languageLabel);
+  if (language === "eng") {
+    body.set("language_type", "ENG");
+  } else if (language === "chi_sim") {
+    body.set("language_type", "CHN_ENG");
+  } else {
+    body.set("language_type", "CHN_ENG");
+  }
+
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const data = await response.json();
+  if (!response.ok || data.error_code) {
+    throw new Error(data.error_msg || data.error_description || `鐧惧害 OCR 璋冪敤澶辫触 ${data.error_code || response.status}`);
+  }
+
+  const lines = normalizeBaiduOcrLines(data);
+  const text = lines.join("\n");
+  const words = Array.isArray(data.words_result) ? data.words_result : [];
+  const probabilities = words
+    .map((item) => item && item.probability && Number(item.probability.average))
+    .filter((item) => Number.isFinite(item));
+  const confidence = probabilities.length
+    ? Math.round((probabilities.reduce((sum, item) => sum + item, 0) / probabilities.length) * 100)
+    : 0;
+
+  return {
+    text,
+    lines,
+    confidence,
+    variant: "baidu",
+    provider: "baidu",
+  };
 }
 
 function resolveSofficePath() {
@@ -368,12 +644,50 @@ function resolveSofficePath() {
   }
 }
 
-async function recognizeTextFromImage(file, languageLabel) {
+async function recognizeTextFromImage(file, languageLabel, layoutLabel) {
+  if (isBaiduOcrConfigured()) {
+    try {
+      console.log("[OCR] using Baidu OCR", {
+        endpoint: getBaiduOcrConfig().endpoint,
+        apiKey: maskSecret(getBaiduOcrConfig().apiKey),
+      });
+      return await recognizeTextFromImageWithBaidu(file, languageLabel, layoutLabel);
+    } catch (error) {
+      console.warn("[OCR] 鐧惧害 OCR 璋冪敤澶辫触锛屽洖閫€鍒?Tesseract:", error && error.message ? error.message : error);
+    }
+  }
+
+  const fileBuffer = decodeBase64File(file);
+  const variants = await prepareOcrImageVariants(fileBuffer, layoutLabel);
   const worker = await createWorker(normalizeOcrLanguage(languageLabel));
 
   try {
-    const result = await worker.recognize(decodeBase64File(file));
-    return result.data.text || "";
+    await worker.setParameters({
+      tessedit_pageseg_mode: getOcrPageSegMode(layoutLabel),
+      preserve_interword_spaces: "1",
+    });
+
+    let best = null;
+    let bestVariant = "";
+
+    for (const variant of variants) {
+      const result = await worker.recognize(variant.buffer);
+      if (!best || scoreOcrResult(result) > scoreOcrResult(best)) {
+        best = result;
+        bestVariant = variant.name;
+      }
+    }
+
+    const text = best && best.data && best.data.text ? best.data.text : "";
+    const lines = normalizeOcrLines(best && best.data ? best.data.lines : [], text);
+
+    return {
+      text,
+      lines,
+      confidence: best && best.data ? Math.round(Number(best.data.confidence || 0)) : 0,
+      variant: bestVariant,
+      provider: "tesseract",
+    };
   } finally {
     await worker.terminate();
   }
@@ -386,34 +700,34 @@ function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat =
       args.push(`--infilter=${infilter}`);
     }
     args.push("--convert-to", outputFormat, "--outdir", outputDir, inputFilePath);
-    console.log("[LibreOffice] 开始转换, 命令:", sofficePath, args.join(" "));
-    
+    console.log("[LibreOffice] 寮€濮嬭浆鎹? 鍛戒护:", sofficePath, args.join(" "));
+
     const env = { ...process.env };
-    
+
     if (process.platform === "win32") {
       const sofficeDir = path.dirname(sofficePath);
       const libreOfficeRoot = path.dirname(sofficeDir);
       const shareDir = path.join(libreOfficeRoot, "share");
       const userProfileDir = path.join(libreOfficeRoot, "user");
-      
+
       env.URE_BOOTSTRAP_PATH = path.join(sofficeDir, "fundamental.ini");
       env.PATH = `${sofficeDir};${env.PATH || ""}`;
       env.SOFFICE_USER_PROFILE = userProfileDir;
       env.SOFFICE_INSTALL_ROOT = libreOfficeRoot;
-      console.log("[LibreOffice] 设置环境变量, sofficeDir:", sofficeDir, "libreOfficeRoot:", libreOfficeRoot);
+      console.log("[LibreOffice] 璁剧疆鐜鍙橀噺, sofficeDir:", sofficeDir, "libreOfficeRoot:", libreOfficeRoot);
     }
-    
+
     let stderrOutput = "";
     let stdoutOutput = "";
-    const child = spawn(sofficePath, args, { 
+    const child = spawn(sofficePath, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env 
+      env
     });
 
     let timeoutId = setTimeout(() => {
-      console.error("[LibreOffice] 转换超时，正在杀死进程...");
+      console.error("[LibreOffice] 杞崲瓒呮椂锛屾鍦ㄦ潃姝昏繘绋?..");
       child.kill("SIGKILL");
-      reject(new Error("LibreOffice 转换超时 (超过 60 秒)"));
+      reject(new Error("LibreOffice 杞崲瓒呮椂 (瓒呰繃 60 绉?"));
     }, 60000);
 
     child.stdout.on("data", (data) => {
@@ -426,17 +740,17 @@ function runSofficeConvert(sofficePath, inputFilePath, outputDir, outputFormat =
 
     child.on("error", (err) => {
       clearTimeout(timeoutId);
-      console.error("[LibreOffice] 启动错误:", err);
+      console.error("[LibreOffice] 鍚姩閿欒:", err);
       reject(err);
     });
 
     child.on("close", (code) => {
       clearTimeout(timeoutId);
-      console.log("[LibreOffice] 进程退出, code:", code);
+      console.log("[LibreOffice] 杩涚▼閫€鍑? code:", code);
       if (code !== 0) {
         console.error("[LibreOffice] stdout:", stdoutOutput);
         console.error("[LibreOffice] stderr:", stderrOutput);
-        reject(new Error(`LibreOffice 转换失败 (code: ${code}): ${stderrOutput}`));
+        reject(new Error(`LibreOffice 杞崲澶辫触 (code: ${code}): ${stderrOutput}`));
         return;
       }
 
@@ -471,6 +785,32 @@ function parseBooleanFlag(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
+function getUniversalCompressImageQuality(mode) {
+  if (mode === "浣撶Н浼樺厛") {
+    return 58;
+  }
+
+  if (mode === "璐ㄩ噺浼樺厛") {
+    return 84;
+  }
+
+  return 72;
+}
+
+function selectSmallerOutput(originalBytes, candidateBytes) {
+  if (candidateBytes && candidateBytes.length > 0 && candidateBytes.length < originalBytes.length) {
+    return {
+      bytes: candidateBytes,
+      compressed: true,
+    };
+  }
+
+  return {
+    bytes: originalBytes,
+    compressed: false,
+  };
+}
+
 app.get("/health", async (req, res) => {
   const sofficePath = resolveSofficePath();
   const ffmpegPath = resolveFfmpegPath();
@@ -489,6 +829,7 @@ app.get("/health", async (req, res) => {
       pdfSplit: true,
       pdfCompress: true,
       ocrImage: true,
+      baiduOcr: isBaiduOcrConfigured(),
       officeToPdf: Boolean(sofficePath),
       pdfToWord: Boolean(sofficePath),
       audioConvert: Boolean(ffmpegPath),
@@ -511,28 +852,28 @@ app.get("/files/qiniu", async (req, res, next) => {
   try {
     const { provider } = storage.getHealth();
     if (provider !== "qiniu") {
-      sendError(res, 404, "QINIU_NOT_ENABLED", "当前服务未启用七牛云存储");
+      sendError(res, 404, "QINIU_NOT_ENABLED", "褰撳墠鏈嶅姟鏈惎鐢ㄤ竷鐗涗簯瀛樺偍");
       return;
     }
 
     const key = String(req.query.key || "").trim();
     if (!key) {
-      sendError(res, 400, "MISSING_QINIU_KEY", "缺少七牛云文件标识");
+      sendError(res, 400, "MISSING_QINIU_KEY", "缂哄皯涓冪墰浜戞枃浠舵爣璇?)";
       return;
     }
 
     if (config.qiniu.prefix && !key.startsWith(`${config.qiniu.prefix}/`)) {
-      sendError(res, 403, "INVALID_QINIU_KEY", "不允许访问当前文件");
+      sendError(res, 403, "INVALID_QINIU_KEY", "涓嶅厑璁歌闂綋鍓嶆枃浠?)";
+      return;
+    }
+
+    if (sendLocalFallbackFile(req, res)) {
       return;
     }
 
     const object = await storage.readRemoteObject(key);
     if (!object) {
-      if (sendLocalFallbackFile(req, res)) {
-        return;
-      }
-
-      sendError(res, 404, "FILE_NOT_FOUND", "文件不存在或已过期");
+      sendError(res, 404, "FILE_NOT_FOUND", "鏂囦欢涓嶅瓨鍦ㄦ垨宸茶繃鏈?)";
       return;
     }
 
@@ -546,11 +887,33 @@ app.get("/files/qiniu", async (req, res, next) => {
 
     res.send(normalizeResponseBody(object.body));
   } catch (error) {
+    if (sendLocalFallbackFile(req, res)) {
+      return;
+    }
+
     next(error);
   }
 });
 
+app.use("/files", express.static(config.outputDir));
+
 app.use("/api", requireApiToken);
+
+app.get("/api/tools/usage", async (req, res, next) => {
+  try {
+    const usage = await clientStateRepository.getToolUsageStats();
+    const stats = usage.stats || [];
+    res.json({
+      ok: true,
+      provider: usage.provider,
+      totalUsageCount: stats.reduce((sum, item) => sum + item.count, 0),
+      stats,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.post("/api/photo-id", async (req, res) => {
   const { file, size, background, retouch } = req.body || {};
@@ -573,11 +936,11 @@ app.post("/api/photo-id", async (req, res) => {
       status: "success",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       outputFiles: [
         {
@@ -604,17 +967,17 @@ app.post("/api/photo-id", async (req, res) => {
         requestId: req.requestId,
         processingMs,
       },
-      headline: "证件照已生成",
-      detail: `已按 ${size || "考试报名"} 输出新底色证件照。`,
+      headline: "璇佷欢鐓у凡鐢熸垚",
+      detail: `宸叉寜 ${size || "鑰冭瘯鎶ュ悕"} 杈撳嚭鏂板簳鑹茶瘉浠剁収銆俙`,
       file: {
-        ...buildFileResponse(output, "image/png", "证件照.png"),
+        ...buildFileResponse(output, "image/png", "璇佷欢鐓?png"),
         inlineBase64: result.buffer.toString("base64"),
       },
       metaLines: [
-        `规格 ${size || "考试报名"}`,
-        `背景 ${background || "白底"}`,
-        `修饰 ${retouch || "自然"}`,
-        `尺寸 ${result.width} × ${result.height}`,
+        `瑙勬牸 ${size || "鑰冭瘯鎶ュ悕"}`,
+        `鑳屾櫙 ${background || "鐧藉簳"}`,
+        `淇グ ${retouch || "鑷劧"}`,
+        `灏哄 ${result.width} 脳 ${result.height}`,
       ],
     });
   } catch (error) {
@@ -623,14 +986,14 @@ app.post("/api/photo-id", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "PHOTO_ID_FAILED",
-      errorMessage: error.message || "证件照生成失败",
+      errorMessage: error.message || "璇佷欢鐓х敓鎴愬け璐?",
       meta: {
         size,
         background,
@@ -642,7 +1005,7 @@ app.post("/api/photo-id", async (req, res) => {
       res,
       500,
       error.code || "PHOTO_ID_FAILED",
-      error.message || "证件照生成失败"
+      error.message || "璇佷欢鐓х敓鎴愬け璐?"
     );
   }
 });
@@ -669,11 +1032,11 @@ app.post("/api/files/upload", async (req, res) => {
       status: "success",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || buffer.length,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || buffer.length,
+          },
+        ]
         : [],
       outputFiles: [
         {
@@ -690,21 +1053,21 @@ app.post("/api/files/upload", async (req, res) => {
     res.json({
       ok: true,
       file: buildFileResponse(output, mimeType),
-      metaLines: [`存储位置 ${output.provider === "qiniu" ? "七牛云" : "本地磁盘"}`],
+      metaLines: [`瀛樺偍浣嶇疆 ${output.provider === "qiniu" ? "涓冪墰浜? : "鏈湴纾佺洏"}`]",
     });
   } catch (error) {
     await recordOperation(req, {
       toolId: "client-file-upload",
       status: "failed",
       errorCode: error.code || "CLIENT_FILE_UPLOAD_FAILED",
-      errorMessage: error.message || "客户端文件上传失败",
+      errorMessage: error.message || "瀹㈡埛绔枃浠朵笂浼犲け璐?",
     });
 
     sendError(
       res,
       500,
       error.code || "CLIENT_FILE_UPLOAD_FAILED",
-      error.message || "客户端文件上传失败"
+      error.message || "瀹㈡埛绔枃浠朵笂浼犲け璐?"
     );
   }
 });
@@ -715,7 +1078,7 @@ app.post("/api/pay/create", async (req, res) => {
   const { type, itemId } = req.body || {};
 
   if (!type || !itemId) {
-    return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
+    return res.status(400).json({ error: "MISSING_PARAMS", message: "缂哄皯 type 鎴?itemId" });
   }
 
   const orderId = `ORD-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -744,12 +1107,12 @@ app.post("/api/pay/verify", async (req, res) => {
   const { orderId } = req.body || {};
 
   if (!orderId) {
-    return res.status(400).json({ error: "MISSING_ORDER_ID", message: "缺少 orderId" });
+    return res.status(400).json({ error: "MISSING_ORDER_ID", message: "缂哄皯 orderId" });
   }
 
   const order = pendingOrders.get(orderId);
   if (!order) {
-    return res.status(404).json({ error: "ORDER_NOT_FOUND", message: "订单不存在" });
+    return res.status(404).json({ error: "ORDER_NOT_FOUND", message: "璁㈠崟涓嶅瓨鍦? })";
   }
 
   order.status = "paid";
@@ -893,7 +1256,7 @@ app.post("/api/pdf/merge", async (req, res) => {
 
   try {
     if (files.length < 2) {
-      sendError(res, 400, "INVALID_FILE_COUNT", "至少需要 2 个 PDF 文件");
+      sendError(res, 400, "INVALID_FILE_COUNT", "鑷冲皯闇€瑕?2 涓?PDF 鏂囦欢");
       return;
     }
 
@@ -935,12 +1298,12 @@ app.post("/api/pdf/merge", async (req, res) => {
     res.json({
       ok: true,
       resultType: "document",
-      headline: "PDF 合并已完成",
-      detail: `已合并 ${files.length} 份 PDF 文档，可直接下载或继续处理。`,
+      headline: "PDF 鍚堝苟宸插畬鎴?",
+      detail: `宸插悎骞?${files.length} 浠?PDF 鏂囨。锛屽彲鐩存帴涓嬭浇鎴栫户缁鐞嗐€俙`,
       file: buildFileResponse(output, "application/pdf"),
       metaLines: [
-        `输入文件 ${files.length} 份`,
-        `存储位置 ${output.provider === "qiniu" ? "七牛云" : "本地磁盘"}`,
+        `杈撳叆鏂囦欢 ${files.length} 浠絗`,
+        `瀛樺偍浣嶇疆 ${output.provider === "qiniu" ? "涓冪墰浜? : "鏈湴纾佺洏"}`",
       ],
     });
   } catch (error) {
@@ -952,10 +1315,10 @@ app.post("/api/pdf/merge", async (req, res) => {
         sizeBytes: file.sizeBytes || 0,
       })),
       errorCode: error.code || "PDF_MERGE_FAILED",
-      errorMessage: error.message || "PDF 合并失败",
+      errorMessage: error.message || "PDF 鍚堝苟澶辫触",
     });
 
-    sendError(res, 500, error.code || "PDF_MERGE_FAILED", error.message || "PDF 合并失败");
+    sendError(res, 500, error.code || "PDF_MERGE_FAILED", error.message || "PDF 鍚堝苟澶辫触");
   }
 });
 
@@ -999,7 +1362,7 @@ app.post("/api/pdf/split", async (req, res) => {
         buildFileResponse(
           output,
           "application/pdf",
-          `第 ${index + 1} 份 · 第 ${pages.map((page) => page + 1).join(", ")} 页`
+          `绗?${index + 1} 浠?路 绗?${pages.map((page) => page + 1).join(", ")} 椤礰`
         )
       );
     }
@@ -1028,13 +1391,13 @@ app.post("/api/pdf/split", async (req, res) => {
     res.json({
       ok: true,
       resultType: outputs.length === 1 ? "document" : "documents",
-      headline: "PDF 拆分已完成",
-      detail: `已拆分为 ${outputs.length} 份文档，可分别打开或下载。`,
+      headline: "PDF 鎷嗗垎宸插畬鎴?",
+      detail: `宸叉媶鍒嗕负 ${outputs.length} 浠芥枃妗ｏ紝鍙垎鍒墦寮€鎴栦笅杞姐€俙`,
       file: outputs[0],
       files: outputs,
       metaLines: [
-        `总页数 ${totalPages}`,
-        `拆分方式 ${splitMode || normalizedSplitMode}`,
+        `鎬婚〉鏁?${totalPages}`,
+        `鎷嗗垎鏂瑰紡 ${splitMode || normalizedSplitMode}`,
       ],
     });
   } catch (error) {
@@ -1043,21 +1406,21 @@ app.post("/api/pdf/split", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "PDF_SPLIT_FAILED",
-      errorMessage: error.message || "PDF 拆分失败",
+      errorMessage: error.message || "PDF 鎷嗗垎澶辫触",
       meta: {
         splitMode,
         pageRange,
       },
     });
 
-    sendError(res, 500, error.code || "PDF_SPLIT_FAILED", error.message || "PDF 拆分失败");
+    sendError(res, 500, error.code || "PDF_SPLIT_FAILED", error.message || "PDF 鎷嗗垎澶辫触");
   }
 });
 
@@ -1100,12 +1463,12 @@ app.post("/api/pdf/compress", async (req, res) => {
     res.json({
       ok: true,
       resultType: "document",
-      headline: "PDF 基础优化已完成",
-      detail: "已完成基础压缩优化，实际体积变化会受原文档结构影响。",
+      headline: "PDF 鍩虹浼樺寲宸插畬鎴?",
+      detail: "宸插畬鎴愬熀纭€鍘嬬缉浼樺寲锛屽疄闄呬綋绉彉鍖栦細鍙楀師鏂囨。缁撴瀯褰卞搷銆?",
       file: buildFileResponse(output, "application/pdf"),
       metaLines: [
-        `压缩模式 ${mode || "默认"}`,
-        "当前为基础优化版压缩",
+        `鍘嬬缉妯″紡 ${mode || "榛樿"}`,
+        "褰撳墠涓哄熀纭€浼樺寲鐗堝帇缂?",
       ],
     });
   } catch (error) {
@@ -1114,14 +1477,14 @@ app.post("/api/pdf/compress", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "PDF_COMPRESS_FAILED",
-      errorMessage: error.message || "PDF 压缩失败",
+      errorMessage: error.message || "PDF 鍘嬬缉澶辫触",
       meta: {
         mode,
       },
@@ -1131,7 +1494,297 @@ app.post("/api/pdf/compress", async (req, res) => {
       res,
       500,
       error.code || "PDF_COMPRESS_FAILED",
-      error.message || "PDF 压缩失败"
+      error.message || "PDF 鍘嬬缉澶辫触"
+    );
+  }
+});
+
+app.post("/api/file/compress", async (req, res) => {
+  const file = req.body.file;
+  const mode = req.body.mode || "";
+
+  try {
+    if (!file || !file.base64) {
+      throw new Error("闇€瑕佷笂浼犳枃浠?)";
+    }
+
+    const ext = normalizeExtension(file.name ? file.name.split('.').pop() : "bin");
+    const fileBytes = decodeBase64File(file);
+
+    let outputBytes = fileBytes;
+    let outputExt = ext;
+    let compressed = false;
+    let compressionNote = "褰撳墠鏂囦欢鏈彂鐜板彲杩涗竴姝ュ帇缂╃殑绌洪棿";
+
+    // 鏍规嵁鏂囦欢绫诲瀷杩涜涓嶅悓鐨勫帇缂╁鐞?
+    if (ext === "pdf") {
+      // PDF鍘嬬缉 - 浣跨敤鐜版湁鐨凱DF鍘嬬缉閫昏緫
+      const pdfDoc = await PDFDocument.load(fileBytes);
+      const selected = selectSmallerOutput(fileBytes, Buffer.from(await pdfDoc.save({ useObjectStreams: true })));
+      outputBytes = selected.bytes;
+      compressed = selected.compressed;
+      compressionNote = compressed ? "宸插畬鎴?PDF 鍩虹缁撴瀯浼樺寲" : "杩欎釜 PDF 宸茬粡姣旇緝绱у噾锛屽熀纭€浼樺寲鍚庝綋绉病鏈変笅闄?";
+      outputExt = "pdf";
+    } else if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
+      const quality = getUniversalCompressImageQuality(mode);
+      let image = sharp(fileBytes, { animated: false }).rotate();
+
+      if (mode === "浣撶Н浼樺厛") {
+        image = image.resize({
+          width: 1920,
+          height: 1920,
+          fit: "inside",
+          withoutEnlargement: true,
+        });
+      }
+
+      let candidateBytes;
+      if (ext === "png") {
+        candidateBytes = await image.png({
+          compressionLevel: 9,
+          adaptiveFiltering: true,
+          palette: mode === "浣撶Н浼樺厛",
+          quality,
+        }).toBuffer();
+      } else if (ext === "webp") {
+        candidateBytes = await image.webp({
+          quality,
+          effort: 5,
+        }).toBuffer();
+      } else {
+        candidateBytes = await image.jpeg({
+          quality,
+          mozjpeg: true,
+        }).toBuffer();
+        outputExt = ext === "jpeg" ? "jpg" : ext;
+      }
+
+      const selected = selectSmallerOutput(fileBytes, candidateBytes);
+      outputBytes = selected.bytes;
+      compressed = selected.compressed;
+      compressionNote = compressed ? "宸查噸鏂扮紪鐮佸浘鐗囧苟闄嶄綆浣撶Н" : "鍥剧墖閲嶆柊缂栫爜鍚庢病鏈夊彉灏忥紝宸蹭繚鐣欏師鏂囦欢";
+    } else if (["bmp", "gif"].includes(ext)) {
+      outputBytes = fileBytes;
+      outputExt = ext;
+      compressionNote = "褰撳墠鍥剧墖鏍煎紡鏆備笉鍋氭湁鎹熷帇缂╋紝宸蹭繚鐣欏師鏂囦欢";
+    } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) {
+      // 闊抽鍘嬬缉 - 浣跨敤ffmpeg
+      const ffmpegPath = resolveFfmpegPath();
+      if (ffmpegPath) {
+        try {
+          const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
+          const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
+
+          fs.writeFileSync(tempInputPath, fileBytes);
+
+          let qualityArgs = [];
+          if (mode === "浣撶Н浼樺厛") {
+            qualityArgs = ["-b:a", "64k"];
+          } else if (mode === "鍧囪　") {
+            qualityArgs = ["-b:a", "128k"];
+          } else if (mode === "璐ㄩ噺浼樺厛") {
+            qualityArgs = ["-b:a", "256k"];
+          } else {
+            qualityArgs = ["-b:a", "128k"];
+          }
+
+          const args = [
+            "-y", "-i", tempInputPath,
+            ...qualityArgs,
+            tempOutputPath
+          ];
+
+          const result = await new Promise((resolve, reject) => {
+            const proc = spawn(ffmpegPath, args);
+            let errorOutput = "";
+
+            proc.stderr.on("data", (data) => {
+              errorOutput += data.toString();
+            });
+
+            proc.on("exit", (code) => {
+              if (code === 0) {
+                resolve(true);
+              } else {
+                reject(new Error(errorOutput));
+              }
+            });
+          });
+
+          const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
+          outputBytes = selected.bytes;
+          compressed = selected.compressed;
+          compressionNote = compressed ? "宸蹭娇鐢?FFmpeg 閲嶆柊缂栫爜瑙嗛" : "瑙嗛閲嶆柊缂栫爜鍚庢病鏈夊彉灏忥紝宸蹭繚鐣欏師鏂囦欢";
+          outputExt = ext;
+
+          try {
+            fs.unlinkSync(tempInputPath);
+            fs.unlinkSync(tempOutputPath);
+          } catch (cleanError) {
+            // 蹇界暐娓呯悊閿欒
+          }
+        } catch (audioError) {
+          console.warn("闊抽鍘嬬缉澶辫触锛屼娇鐢ㄥ師鏂囦欢:", audioError);
+          outputBytes = fileBytes;
+          compressionNote = "闊抽鍘嬬缉澶辫触锛屽凡淇濈暀鍘熸枃浠?";
+        }
+      } else {
+        compressionNote = "褰撳墠鏈嶅姟鏈娴嬪埌 FFmpeg锛屽凡淇濈暀鍘熸枃浠?";
+      }
+    } else if (["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"].includes(ext)) {
+      // 瑙嗛鍘嬬缉 - 浣跨敤ffmpeg
+      const ffmpegPath = resolveFfmpegPath();
+      if (ffmpegPath) {
+        try {
+          const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
+          const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
+
+          fs.writeFileSync(tempInputPath, fileBytes);
+
+          let crf = "28";
+          if (mode === "浣撶Н浼樺厛") {
+            crf = "32";
+          } else if (mode === "璐ㄩ噺浼樺厛") {
+            crf = "23";
+          }
+
+          const args = [
+            "-y", "-i", tempInputPath,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", crf,
+            "-c:a", "aac",
+            "-b:a", "128k",
+            tempOutputPath
+          ];
+
+          await new Promise((resolve, reject) => {
+            const proc = spawn(ffmpegPath, args);
+            let errorOutput = "";
+
+            proc.stderr.on("data", (data) => {
+              errorOutput += data.toString();
+            });
+
+            proc.on("exit", (code) => {
+              if (code === 0) {
+                resolve(true);
+              } else {
+                reject(new Error(errorOutput));
+              }
+            });
+          });
+
+          const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
+          outputBytes = selected.bytes;
+          compressed = selected.compressed;
+          compressionNote = compressed ? "宸蹭娇鐢?FFmpeg 閲嶆柊缂栫爜闊抽" : "闊抽閲嶆柊缂栫爜鍚庢病鏈夊彉灏忥紝宸蹭繚鐣欏師鏂囦欢";
+          outputExt = ext;
+
+          try {
+            fs.unlinkSync(tempInputPath);
+            fs.unlinkSync(tempOutputPath);
+          } catch (cleanError) {
+            // 蹇界暐娓呯悊閿欒
+          }
+        } catch (videoError) {
+          console.warn("瑙嗛鍘嬬缉澶辫触锛屼娇鐢ㄥ師鏂囦欢:", videoError);
+          outputBytes = fileBytes;
+          compressionNote = "瑙嗛鍘嬬缉澶辫触锛屽凡淇濈暀鍘熸枃浠?";
+        }
+      } else {
+        compressionNote = "褰撳墠鏈嶅姟鏈娴嬪埌 FFmpeg锛屽凡淇濈暀鍘熸枃浠?";
+      }
+    } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z"].includes(ext)) {
+      // Office鏂囨。鎴栧帇缂╁寘 - 鍘熸牱杩斿洖锛屽凡鍘嬬缉杩?      outputBytes = fileBytes;
+      outputExt = ext;
+      compressionNote = "Office 鏂囨。鍜屽帇缂╁寘閫氬父宸插寘鍚帇缂╃粨鏋勶紝宸蹭繚鐣欏師鏂囦欢";
+    } else {
+      // 鍏朵粬鏂囦欢绫诲瀷 - 鍘熸牱杩斿洖
+      outputBytes = fileBytes;
+      outputExt = ext;
+      compressionNote = "鏆備笉鏀寔璇ョ被鍨嬬殑瀹為檯鍘嬬缉锛屽凡淇濈暀鍘熸枃浠?";
+    }
+
+    const savedBytes = Math.max(fileBytes.length - outputBytes.length, 0);
+    const savedPercent = fileBytes.length > 0 ? Math.round((savedBytes / fileBytes.length) * 100) : 0;
+
+    const output = await saveOutputFile(req, outputBytes, {
+      extension: outputExt,
+      baseName: "compressed",
+    });
+
+    await recordOperation(req, {
+      toolId: "file-compress",
+      status: "success",
+      inputFiles: [
+        {
+          name: file.name || "",
+          sizeBytes: file.sizeBytes || 0,
+        },
+      ],
+      outputFiles: [
+        {
+          name: output.fileName,
+          provider: output.provider,
+          sizeBytes: output.sizeBytes,
+        },
+      ],
+      meta: {
+        mode,
+        extension: ext,
+        compressed,
+        savedBytes,
+        savedPercent,
+      },
+    });
+
+    const responseFile = buildFileResponse(output, "application/octet-stream");
+    responseFile.name = file.name || responseFile.name;
+    responseFile.label = file.name || responseFile.label;
+
+    res.json({
+      ok: true,
+      resultType: "document",
+      headline: compressed ? "鏂囦欢鍘嬬缉瀹屾垚" : "鏂囦欢浣撶Н鏈彉灏?",
+      detail: compressed ? `宸叉寜鐓с€?{mode || "榛樿"}銆嶇瓥鐣ュ畬鎴愬帇缂┿€俙 : compressionNote`,
+      file: responseFile,
+      compressed,
+      beforeBytes: fileBytes.length,
+      afterBytes: outputBytes.length,
+      savedBytes,
+      savedPercent,
+      note: compressionNote,
+      metaLines: [
+        `鍘嬬缉妯″紡 ${mode || "榛樿"}`,
+        `鏂囦欢绫诲瀷 ${ext}`,
+        compressed ? `鑺傜渷 ${savedPercent}%` : "鏈骇鐢熶綋绉敹鐩?",
+      ],
+    });
+  } catch (error) {
+    await recordOperation(req, {
+      toolId: "file-compress",
+      status: "failed",
+      inputFiles: file
+        ? [
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
+        : [],
+      errorCode: error.code || "FILE_COMPRESS_FAILED",
+      errorMessage: error.message || "鏂囦欢鍘嬬缉澶辫触",
+      meta: {
+        mode,
+      },
+    });
+
+    sendError(
+      res,
+      500,
+      error.code || "FILE_COMPRESS_FAILED",
+      error.message || "鏂囦欢鍘嬬缉澶辫触"
     );
   }
 });
@@ -1169,16 +1822,34 @@ function getAudioCodec(targetFormat) {
   return codecMap[targetFormat.toLowerCase()] || "libmp3lame";
 }
 
+function getVideoCodec(targetFormat) {
+  const codecMap = {
+    mp4: "libx264",
+    mov: "libx264",
+    webm: "libvpx-vp9",
+  };
+  return codecMap[targetFormat.toLowerCase()] || "libx264";
+}
+
 function getAudioBitrate(qualityLabel) {
   const bitrateMap = {
-    "标准": "192k",
-    "高清": "320k",
-    "无损": "320k",
+    "鏍囧噯": "192k",
+    "楂樻竻": "320k",
+    "鏃犳崯": "320k",
   };
   return bitrateMap[qualityLabel] || "192k";
 }
 
-function getAudioExtension(targetFormat) {
+function getVideoCrf(qualityLabel) {
+  const crfMap = {
+    "鏍囧噯": "28",
+    "楂樻竻": "23",
+    "鏃犳崯": "18",
+  };
+  return crfMap[qualityLabel] || "28";
+}
+
+function getMediaExtension(targetFormat) {
   const extMap = {
     mp3: "mp3",
     wav: "wav",
@@ -1186,8 +1857,35 @@ function getAudioExtension(targetFormat) {
     ogg: "ogg",
     m4a: "m4a",
     aac: "aac",
+    mp4: "mp4",
+    mov: "mov",
+    webm: "webm",
   };
   return extMap[targetFormat.toLowerCase()] || "mp3";
+}
+
+function isAudioExtension(ext) {
+  return ["mp3", "wav", "flac", "ogg", "m4a", "aac"].includes(String(ext || "").toLowerCase());
+}
+
+function isVideoExtension(ext) {
+  return ["mp4", "mov", "webm", "avi", "mkv", "wmv", "flv"].includes(String(ext || "").toLowerCase());
+}
+
+function getMediaContentType(ext) {
+  const normalized = String(ext || "").toLowerCase();
+  const contentTypes = {
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    flac: "audio/flac",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
+    aac: "audio/aac",
+    mp4: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+  };
+  return contentTypes[normalized] || "application/octet-stream";
 }
 
 function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetFormat, quality) {
@@ -1195,32 +1893,32 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
     const ext = targetFormat.toLowerCase();
     const args = ["-y", "-probesize", "100M", "-analyzeduration", "10M", "-i", inputFilePath];
 
-    if (ext === "mp3") {
-      args.push("-acodec", "libmp3lame");
-      args.push("-b:a", getAudioBitrate(quality));
-    } else if (ext === "wav") {
-      args.push("-acodec", "pcm_s16le");
-    } else if (ext === "flac") {
-      args.push("-acodec", "flac");
-    } else if (ext === "ogg") {
-      args.push("-acodec", "libvorbis");
-      args.push("-b:a", getAudioBitrate(quality));
-    } else if (ext === "m4a") {
-      args.push("-acodec", "aac");
-      args.push("-b:a", getAudioBitrate(quality));
-      args.push("-f", "ipod");
-    } else if (ext === "aac") {
-      args.push("-acodec", "aac");
-      args.push("-b:a", getAudioBitrate(quality));
-      args.push("-f", "adts");
-    } else {
-      args.push("-acodec", "libmp3lame");
-      args.push("-b:a", getAudioBitrate(quality));
+    if (isAudioExtension(ext)) {
+      args.push("-vn");
+      args.push("-acodec", getAudioCodec(ext));
+      if (!["wav", "flac"].includes(ext)) {
+        args.push("-b:a", getAudioBitrate(quality));
+      }
+      if (ext === "m4a") {
+        args.push("-f", "ipod");
+      } else if (ext === "aac") {
+        args.push("-f", "adts");
+      }
+    } else if (isVideoExtension(ext)) {
+      args.push("-c:v", getVideoCodec(ext));
+      if (ext === "webm") {
+        args.push("-b:v", "0", "-crf", getVideoCrf(quality), "-c:a", "libopus", "-b:a", "128k");
+      } else {
+        args.push("-preset", "veryfast", "-crf", getVideoCrf(quality), "-c:a", "aac", "-b:a", "160k");
+        if (ext === "mp4") {
+          args.push("-movflags", "+faststart");
+        }
+      }
     }
 
     args.push(outputFilePath);
 
-    console.log("[FFmpeg] 执行命令:", ffmpegPath, args.join(" "));
+    console.log("[FFmpeg] 鎵ц鍛戒护:", ffmpegPath, args.join(" "));
 
     let stderrOutput = "";
     const child = spawn(ffmpegPath, args);
@@ -1230,17 +1928,17 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
     });
 
     child.on("error", (err) => {
-      console.error("[FFmpeg] 启动错误:", err);
-      reject(new Error(`FFmpeg 启动失败: ${err.message}`));
+      console.error("[FFmpeg] 鍚姩閿欒:", err);
+      reject(new Error(`FFmpeg 鍚姩澶辫触: ${err.message}`));
     });
 
     child.on("close", (code) => {
       if (code !== 0) {
-        console.error("[FFmpeg] 错误输出:", stderrOutput);
-        reject(new Error(`FFmpeg 转换失败 (exit code ${code})`));
+        console.error("[FFmpeg] 閿欒杈撳嚭:", stderrOutput);
+        reject(new Error(`FFmpeg 杞崲澶辫触 (exit code ${code})`));
         return;
       }
-      console.log("[FFmpeg] 转换成功");
+      console.log("[FFmpeg] 杞崲鎴愬姛");
       resolve();
     });
   });
@@ -1249,7 +1947,7 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
 app.post("/api/audio/convert", async (req, res) => {
   const file = req.body.file;
   const target = req.body.target || "MP3";
-  const quality = req.body.quality || "标准";
+  const quality = req.body.quality || "鏍囧噯";
   const ffmpegPath = resolveFfmpegPath();
 
   if (!ffmpegPath) {
@@ -1258,14 +1956,14 @@ app.post("/api/audio/convert", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: "FFMPEG_UNAVAILABLE",
-      errorMessage: "当前服务未检测到 FFmpeg",
+      errorMessage: "褰撳墠鏈嶅姟鏈娴嬪埌 FFmpeg",
       meta: {
         target,
         quality,
@@ -1276,7 +1974,7 @@ app.post("/api/audio/convert", async (req, res) => {
       res,
       501,
       "FFMPEG_UNAVAILABLE",
-      "当前服务端未检测到 FFmpeg，请安装后再启用音频转换。"
+      "褰撳墠鏈嶅姟绔湭妫€娴嬪埌 FFmpeg锛岃瀹夎鍚庡啀鍚敤闊宠棰戣浆鎹€?"
     );
     return;
   }
@@ -1284,25 +1982,43 @@ app.post("/api/audio/convert", async (req, res) => {
   let tempDir = "";
 
   try {
-    tempDir = fs.mkdtempSync(path.join(config.tempDir, "audio-"));
-    const originalInputName = file && file.name ? file.name : `audio-${makeId()}.mp3`;
-    
+    tempDir = fs.mkdtempSync(path.join(config.tempDir, "media-"));
+    const originalInputName = file && file.name ? file.name : `media-${makeId()}.mp4`;
+
     const inputExt = path.extname(originalInputName) || ".mp3";
+    const inputExtName = inputExt.replace(".", "").toLowerCase();
     const safeInputName = `input-${makeId()}${inputExt}`;
     const inputPath = path.join(tempDir, safeInputName);
 
-    const targetExt = getAudioExtension(target);
-    const originalBaseName = path.parse(originalInputName).name || "audio";
+    const targetExt = getMediaExtension(target);
+    const targetIsAudio = isAudioExtension(targetExt);
+    const targetIsVideo = isVideoExtension(targetExt);
+    const inputIsAudio = isAudioExtension(inputExtName);
+    const inputIsVideo = isVideoExtension(inputExtName);
+
+    if (!targetIsAudio && !targetIsVideo) {
+      const error = new Error("Unsupported target format");
+      error.code = "UNSUPPORTED_MEDIA_TARGET";
+      throw error;
+    }
+
+    if (targetIsVideo && inputIsAudio) {
+      const error = new Error("Audio files cannot be directly converted to video formats");
+      error.code = "AUDIO_TO_VIDEO_UNSUPPORTED";
+      throw error;
+    }
+
+    const originalBaseName = path.parse(originalInputName).name || "media";
     const safeBaseName = originalBaseName.replace(/[^\w\u4e00-\u9fa5\-_]/g, "_");
     const outputName = `${safeBaseName}.${targetExt}`;
     const outputPath = path.join(tempDir, outputName);
 
     const fileBuffer = decodeBase64File(file);
-    console.log("[Audio Convert] 写入文件:", inputPath, "大小:", fileBuffer.length, "bytes");
+    console.log("[Media Convert] 鍐欏叆鏂囦欢:", inputPath, "澶у皬:", fileBuffer.length, "bytes");
 
     const magic = fileBuffer.slice(0, 8).toString("hex");
-    console.log("[Audio Convert] 文件头 (hex):", magic);
-    
+    console.log("[Media Convert] 鏂囦欢澶?(hex):", magic);
+
     const isFlac = magic.startsWith("664c6143");
     const isMp3 = magic.startsWith("494433") || magic.startsWith("fff") || magic.startsWith("fffa") || magic.startsWith("fffb");
     const isWav = magic.startsWith("52494646");
@@ -1313,44 +2029,45 @@ app.post("/api/audio/convert", async (req, res) => {
     const isKgm = magic.startsWith("7b226b67");
     const isQmc = magic.startsWith("789c");
 
-    console.log("[Audio Convert] 格式检测 - FLAC:", isFlac, "MP3:", isMp3, "WAV:", isWav, "OGG:", isOgg, "M4A:", isM4a);
-    console.log("[Audio Convert] 加密检测 - NCM:", isNcm, "KGM:", isKgm, "QMC:", isQmc);
+    console.log("[Media Convert] 鏍煎紡妫€娴?- FLAC:", isFlac, "MP3:", isMp3, "WAV:", isWav, "OGG:", isOgg, "M4A:", isM4a, "VideoExt:", inputIsVideo);
+    console.log("[Media Convert] 鍔犲瘑妫€娴?- NCM:", isNcm, "KGM:", isKgm, "QMC:", isQmc);
 
     let formatMatch = true;
     let formatHint = "";
 
     if (inputExt.toLowerCase() === ".flac" && !isFlac) {
       formatMatch = false;
-      if (isNcm) formatHint = "这看起来是网易云音乐的加密格式 (.ncm)，不是真正的 FLAC！";
-      else if (isKgm) formatHint = "这看起来是酷狗音乐的加密格式 (.kgm)，不是真正的 FLAC！";
-      else if (isQmc) formatHint = "这看起来是 QQ 音乐的加密格式 (.qmc)，不是真正的 FLAC！";
-      else formatHint = "这个文件的扩展名是 .flac，但内容不是标准 FLAC 格式！";
+      if (isNcm) formatHint = "杩欑湅璧锋潵鏄綉鏄撲簯闊充箰鐨勫姞瀵嗘牸寮?(.ncm)锛屼笉鏄湡姝ｇ殑 FLAC锛?";
+      else if (isKgm) formatHint = "杩欑湅璧锋潵鏄叿鐙楅煶涔愮殑鍔犲瘑鏍煎紡 (.kgm)锛屼笉鏄湡姝ｇ殑 FLAC锛?";
+      else if (isQmc) formatHint = "杩欑湅璧锋潵鏄?QQ 闊充箰鐨勫姞瀵嗘牸寮?(.qmc)锛屼笉鏄湡姝ｇ殑 FLAC锛?";
+      else formatHint = "杩欎釜鏂囦欢鐨勬墿灞曞悕鏄?.flac锛屼絾鍐呭涓嶆槸鏍囧噯 FLAC 鏍煎紡锛?";
     } else if (inputExt.toLowerCase() === ".mp3" && !isMp3) {
       formatMatch = false;
-      formatHint = "这个文件的扩展名是 .mp3，但内容看起来不像是标准 MP3 格式！";
+      formatHint = "杩欎釜鏂囦欢鐨勬墿灞曞悕鏄?.mp3锛屼絾鍐呭鐪嬭捣鏉ヤ笉鍍忔槸鏍囧噯 MP3 鏍煎紡锛?";
     } else if (inputExt.toLowerCase() === ".wav" && !isWav) {
       formatMatch = false;
-      formatHint = "这个文件的扩展名是 .wav，但内容看起来不像是标准 WAV 格式！";
+      formatHint = "杩欎釜鏂囦欢鐨勬墿灞曞悕鏄?.wav锛屼絾鍐呭鐪嬭捣鏉ヤ笉鍍忔槸鏍囧噯 WAV 鏍煎紡锛?";
     }
 
     if (!formatMatch) {
       const error = new Error(formatHint);
-      error.code = "INVALID_AUDIO_FORMAT";
+      error.code = "INVALID_MEDIA_FORMAT";
       throw error;
     }
 
     fs.writeFileSync(inputPath, fileBuffer);
 
     const stats = fs.statSync(inputPath);
-    console.log("[Audio Convert] 文件已写入, 实际大小:", stats.size, "bytes");
-    console.log("[Audio Convert] 输出路径:", outputPath);
+    console.log("[Media Convert] 鏂囦欢宸插啓鍏? 瀹為檯澶у皬:", stats.size, "bytes");
+    console.log("[Media Convert] 杈撳嚭璺緞:", outputPath);
 
     await runFfmpegConvert(ffmpegPath, inputPath, outputPath, target, quality);
 
     const bytes = fs.readFileSync(outputPath);
+    const contentType = getMediaContentType(targetExt);
     const output = await saveOutputFile(req, bytes, {
       extension: targetExt,
-      contentType: `audio/${targetExt}`,
+      contentType,
       baseName: safeBaseName,
     });
 
@@ -1379,26 +2096,29 @@ app.post("/api/audio/convert", async (req, res) => {
     res.json({
       ok: true,
       resultType: "document",
-      headline: "音频格式转换已完成",
-      detail: `已转换为 ${target} 格式，可直接下载使用。`,
-      file: buildFileResponse(output, `audio/${targetExt}`),
+      headline: "闊宠棰戞牸寮忚浆鎹㈠凡瀹屾垚",
+      detail: `宸茶浆鎹负 ${target} 鏍煎紡锛屽彲鐩存帴涓嬭浇浣跨敤銆俙`,
+      file: buildFileResponse(output, contentType),
       metaLines: [
-        `原文件 ${originalInputName}`,
-        `目标格式 ${target}`,
-        `音质 ${quality}`,
+        `鍘熸枃浠?${originalInputName}`,
+        `鐩爣鏍煎紡 ${target}`,
+        `璐ㄩ噺 ${quality}`,
       ].filter(Boolean),
     });
   } catch (error) {
-    console.error("[Audio Convert] 错误:", error);
-    let errorMessage = "音频转换失败";
+    console.error("[Media Convert] 閿欒:", error);
+    let errorMessage = "闊宠棰戣浆鎹㈠け璐?";
     let errorHint = "";
 
     const errMsg = (error.message || "").toLowerCase();
     if (errMsg.includes("invalid data") || errMsg.includes("could not find codec")) {
-      errorMessage = "无法解析音频文件";
-      errorHint = "请检查文件是否损坏，或尝试转换为其他格式";
+      errorMessage = "鏃犳硶瑙ｆ瀽闊宠棰戞枃浠?";
+      errorHint = "璇锋鏌ユ枃浠舵槸鍚︽崯鍧忥紝鎴栧皾璇曡浆鎹负鍏朵粬鏍煎紡";
+    } else if (error.code === "AUDIO_TO_VIDEO_UNSUPPORTED") {
+      errorMessage = "闊抽涓嶈兘鐩存帴杞崲涓鸿棰?";
+      errorHint = "璇烽€夋嫨 MP3銆乄AV銆丗LAC銆丱GG銆丮4A 鎴?AAC 绛夐煶棰戠洰鏍囨牸寮?";
     } else if (errMsg.includes("ffmpeg")) {
-      errorMessage = "FFmpeg 执行错误";
+      errorMessage = "FFmpeg 鎵ц閿欒";
     }
 
     await recordOperation(req, {
@@ -1406,13 +2126,13 @@ app.post("/api/audio/convert", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: originalInputName || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: originalInputName || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
-      errorCode: error.code || "AUDIO_CONVERT_FAILED",
+      errorCode: error.code || "MEDIA_CONVERT_FAILED",
       errorMessage: errorMessage,
       meta: {
         target,
@@ -1423,8 +2143,8 @@ app.post("/api/audio/convert", async (req, res) => {
     sendError(
       res,
       500,
-      error.code || "AUDIO_CONVERT_FAILED",
-      errorHint ? `${errorMessage}。${errorHint}` : errorMessage
+      error.code || "MEDIA_CONVERT_FAILED",
+      errorHint ? `${errorMessage}銆?{errorHint}` : errorMessage
     );
   } finally {
     cleanupTempDir(tempDir);
@@ -1433,39 +2153,48 @@ app.post("/api/audio/convert", async (req, res) => {
 
 app.post("/api/ocr/image", async (req, res) => {
   const file = req.body.file;
-  const language = req.body.language || "中英混合";
+  const language = req.body.language || "涓嫳娣峰悎";
   const layout = req.body.layout || "";
 
   try {
-    const text = await recognizeTextFromImage(file, language);
+    const result = await recognizeTextFromImage(file, language, layout);
+    const text = result.text || "";
 
     await recordOperation(req, {
       toolId: "ocr-image",
       status: "success",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       meta: {
         language,
         layout,
         textLength: text.trim().length,
+        confidence: result.confidence,
+        variant: result.variant,
+        provider: result.provider,
       },
     });
 
     res.json({
       ok: true,
       resultType: "text",
-      headline: "OCR 识别已完成",
-      detail: `共识别 ${text.trim().length} 个字符，可直接复制继续使用。`,
+      headline: "OCR 璇嗗埆宸插畬鎴?",
+      detail: `鍏辫瘑鍒?${text.trim().length} 涓瓧绗︼紝鍙洿鎺ュ鍒剁户缁娇鐢ㄣ€俙`,
       text,
+      lines: result.lines || [],
+      confidence: result.confidence,
+      provider: result.provider,
       metaLines: [
-        `语言 ${language}`,
-        layout ? `模式 ${layout}` : "",
+        `璇█ ${language}`,
+        layout ? `妯″紡 ${layout}` : "",
+        `寮曟搸 ${result.provider === "baidu" ? "鐧惧害 OCR" : "Tesseract"}`,
+        result.confidence ? `缃俊搴?${result.confidence}` : "",
       ].filter(Boolean),
     });
   } catch (error) {
@@ -1474,21 +2203,21 @@ app.post("/api/ocr/image", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "OCR_FAILED",
-      errorMessage: error.message || "OCR 识别失败",
+      errorMessage: error.message || "OCR 璇嗗埆澶辫触",
       meta: {
         language,
         layout,
       },
     });
 
-    sendError(res, 500, error.code || "OCR_FAILED", error.message || "OCR 识别失败");
+    sendError(res, 500, error.code || "OCR_FAILED", error.message || "OCR 璇嗗埆澶辫触");
   }
 });
 
@@ -1504,14 +2233,14 @@ app.post("/api/office/to-pdf", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: "OFFICE_CONVERTER_UNAVAILABLE",
-      errorMessage: "当前服务未检测到 LibreOffice",
+      errorMessage: "褰撳墠鏈嶅姟鏈娴嬪埌 LibreOffice",
       meta: {
         quality,
         pageMode,
@@ -1522,7 +2251,7 @@ app.post("/api/office/to-pdf", async (req, res) => {
       res,
       501,
       "OFFICE_CONVERTER_UNAVAILABLE",
-      "当前服务端未检测到 LibreOffice，请安装后再启用 Office 转 PDF。"
+      "褰撳墠鏈嶅姟绔湭妫€娴嬪埌 LibreOffice锛岃瀹夎鍚庡啀鍚敤 Office 杞?PDF銆?"
     );
     return;
   }
@@ -1573,13 +2302,13 @@ app.post("/api/office/to-pdf", async (req, res) => {
     res.json({
       ok: true,
       resultType: "document",
-      headline: "Office 转 PDF 已完成",
-      detail: "文档已导出为 PDF，可直接打开或继续压缩、合并。",
+      headline: "Office 杞?PDF 宸插畬鎴?",
+      detail: "鏂囨。宸插鍑轰负 PDF锛屽彲鐩存帴鎵撳紑鎴栫户缁帇缂┿€佸悎骞躲€?",
       file: buildFileResponse(output, "application/pdf"),
       metaLines: [
-        `原文件 ${file.name || inputName}`,
-        quality ? `清晰度 ${quality}` : "",
-        pageMode ? `页面策略 ${pageMode}` : "",
+        `鍘熸枃浠?${file.name || inputName}`,
+        quality ? `娓呮櫚搴?${quality}` : "",
+        pageMode ? `椤甸潰绛栫暐 ${pageMode}` : "",
       ].filter(Boolean),
     });
   } catch (error) {
@@ -1588,14 +2317,14 @@ app.post("/api/office/to-pdf", async (req, res) => {
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "OFFICE_TO_PDF_FAILED",
-      errorMessage: error.message || "Office 转 PDF 失败",
+      errorMessage: error.message || "Office 杞?PDF 澶辫触",
       meta: {
         quality,
         pageMode,
@@ -1606,279 +2335,268 @@ app.post("/api/office/to-pdf", async (req, res) => {
       res,
       500,
       error.code || "OFFICE_TO_PDF_FAILED",
-      error.message || "Office 转 PDF 失败"
+      error.message || "Office 杞?PDF 澶辫触"
     );
   } finally {
     cleanupTempDir(tempDir);
   }
 });
 
-function shouldUseHighFidelityPdfToWord(layout) {
-  const normalized = String(layout || "").trim();
-  if (!normalized) {
-    if (process.platform === "win32") {
-      return !!process.env.PDF2DOCX_PYTHON_PATH || fs.existsSync("C:\\Python312\\python.exe") || fs.existsSync("C:\\Python311\\python.exe") || fs.existsSync("C:\\Python310\\python.exe");
-    }
-    return true;
-  }
-
-  if (normalized === "优先文字" || normalized === "浼樺厛鏂囧瓧") {
-    return false;
-  }
-
-  return normalized === "保持版式" || normalized === "淇濇寔鐗堝紡";
+function createCodedError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
-function resolvePythonBin() {
-  if (process.env.PDF2DOCX_PYTHON_PATH) {
-    return process.env.PDF2DOCX_PYTHON_PATH;
+function getAdobePdfServicesCredentials() {
+  const clientId = process.env.PDF_SERVICES_CLIENT_ID || process.env.ADOBE_PDF_SERVICES_CLIENT_ID;
+  const clientSecret = process.env.PDF_SERVICES_CLIENT_SECRET || process.env.ADOBE_PDF_SERVICES_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw createCodedError(
+      "Adobe PDF Services API 鏈厤缃紝璇疯缃?PDF_SERVICES_CLIENT_ID 鍜?PDF_SERVICES_CLIENT_SECRET",
+      "PDF_TO_WORD_ADOBE_NOT_CONFIGURED"
+    );
   }
 
-  if (process.platform === "win32") {
-    const candidates = [
-      "C:\\Python312\\python.exe",
-      "C:\\Python311\\python.exe",
-      "C:\\Python310\\python.exe",
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return "python3";
+  return new ServicePrincipalCredentials({ clientId, clientSecret });
 }
 
-function assertPdfToDocxConverterAvailable() {
-  if (process.platform === "win32") {
-    const hasPython = !!process.env.PDF2DOCX_PYTHON_PATH
-      || fs.existsSync("C:\\Python312\\python.exe")
-      || fs.existsSync("C:\\Python311\\python.exe")
-      || fs.existsSync("C:\\Python310\\python.exe");
-    if (!hasPython) {
-      const error = new Error("PDF转Word保持版式需要安装 Python 3.10+");
-      error.code = "PDF_TO_WORD_CONVERTER_NOT_AVAILABLE";
-      throw error;
-    }
+function buildAdobeClientConfig() {
+  const configOptions = {};
+  const timeoutMs = Number(process.env.PDF_SERVICES_TIMEOUT_MS || process.env.ADOBE_PDF_SERVICES_TIMEOUT_MS || 120000);
+  const region = String(process.env.PDF_SERVICES_REGION || process.env.ADOBE_PDF_SERVICES_REGION || "").trim().toUpperCase();
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    configOptions.timeout = timeoutMs;
+  }
+
+  if (region === "EU") {
+    configOptions.region = Region.EU;
+  } else if (region === "US") {
+    configOptions.region = Region.US;
+  }
+
+  return new ClientConfig(configOptions);
+}
+
+function createAdobePdfServicesClient() {
+  return new PDFServices({
+    credentials: getAdobePdfServicesCredentials(),
+    clientConfig: buildAdobeClientConfig(),
+  });
+}
+
+function getPdfToWordOutputConfig(format) {
+  const normalizedFormat = String(format || "DOCX").trim().toUpperCase();
+  if (normalizedFormat === "DOC") {
+    return {
+      extension: "doc",
+      contentType: MimeType.DOC,
+      targetFormat: ExportPDFTargetFormat.DOC,
+      format: "DOC",
+    };
+  }
+
+  return {
+    extension: "docx",
+    contentType: MimeType.DOCX,
+    targetFormat: ExportPDFTargetFormat.DOCX,
+    format: "DOCX",
+  };
+}
+
+function getAdobeExportOcrLocale(locale) {
+  const requestedLocale = String(locale || process.env.PDF_SERVICES_OCR_LOCALE || "zh-CN").trim();
+  const localeEntry = Object.entries(ExportOCRLocale).find(
+    ([key, value]) =>
+      key.toLowerCase() === requestedLocale.toLowerCase().replace(/-/g, "_") ||
+      value.toLowerCase() === requestedLocale.toLowerCase()
+  );
+
+  return localeEntry ? localeEntry[1] : ExportOCRLocale.ZH_CN;
+}
+
+async function readStreamToBuffer(readStream) {
+  const chunks = [];
+  for await (const chunk of readStream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function getPdfPageCount(fileBuffer) {
+  try {
+    const pdf = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
+    return pdf.getPageCount();
+  } catch (error) {
+    console.warn("[PDF to Word] unable to read PDF page count:", error && error.message ? error.message : error);
+    return 0;
   }
 }
 
-async function convertPdfToWordWithPdf2docx(fileBuffer, inputName, tempDir) {
+async function deleteAdobeAssetQuietly(pdfServices, asset) {
+  if (!asset) {
+    return;
+  }
+
+  try {
+    await pdfServices.deleteAsset({ asset });
+  } catch (error) {
+    console.warn("[PDF to Word] Adobe asset cleanup failed:", error && error.message ? error.message : error);
+  }
+}
+
+async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options = {}) {
   const inputPath = path.join(tempDir, inputName);
-  const docxName = inputName.replace(/\.pdf$/i, ".docx");
-  const outputPath = path.join(tempDir, docxName);
-
   fs.writeFileSync(inputPath, fileBuffer);
-  console.log("[PDF to Word] 使用 pdf2docx 保持版式转换...");
 
-  const pythonBin = resolvePythonBin();
+  const password = String(options.password || "").trim();
+  // 馃敟 寮哄埗榛樿绮剧‘杩樺師锛堝瓧浣?鏍煎紡1:1锛?
+  const layoutMode = String(options.layout || "exact").toLowerCase();
+  const outputConfig = getPdfToWordOutputConfig(options.format);
+  const ocrLocale = getAdobeExportOcrLocale(options.ocrLocale);
+  const pages = await getPdfPageCount(fileBuffer);
+  const pdfServices = createAdobePdfServicesClient();
+  const uploadedAssets = [];
+  const generatedAssets = [];
 
-  const scriptPath = path.join(tempDir, "_convert.py");
-  const scriptContent = [
-    "import sys",
-    "import json",
-    "from pdf2docx import Converter",
-    "",
-    "input_path = sys.argv[1]",
-    "output_path = sys.argv[2]",
-    "",
-    "try:",
-    "    cv = Converter(input_path)",
-    "    cv.convert(",
-    "        output_path,",
-    "        start=0,",
-    "        end=None,",
-    "        multi_processing=True,",
-    "        recover_tables=True,",
-    "        retain_visually_connect_lines=True,",
-    "        ocr=False,",
-    "    )",
-    "    page_count = len(cv.pages) if hasattr(cv, 'pages') and cv.pages else 0",
-    "    cv.close()",
-    "    print(json.dumps({'pages': page_count}))",
-    "except Exception as e:",
-    "    print(f'ERROR: {e}', file=sys.stderr)",
-    "    sys.exit(1)",
-  ].join("\n");
+  console.log("[PDF to Word] 浣跨敤 Adobe 楂樼簿搴︽ā寮忚浆鎹紙瀛椾綋/鏍煎紡1:1杩樺師锛?)";
 
-  fs.writeFileSync(scriptPath, scriptContent);
-
-  let pages = 0;
-
-  await new Promise((resolve, reject) => {
-    const child = spawn(pythonBin, [scriptPath, inputPath, outputPath], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
-      cwd: tempDir,
+  try {
+    const inputAsset = await pdfServices.upload({
+      readStream: fs.createReadStream(inputPath),
+      mimeType: MimeType.PDF,
     });
+    uploadedAssets.push(inputAsset);
 
-    let stderrOutput = "";
-    let stdoutOutput = "";
+    let exportInputAsset = inputAsset;
+    let wasUnlocked = false;
 
-    child.stdout.on("data", (data) => { stdoutOutput += data.toString(); });
-    child.stderr.on("data", (data) => { stderrOutput += data.toString(); });
-    child.on("error", (err) => reject(err));
-    child.on("close", (code) => {
-      if (code !== 0) {
-        console.error("[PDF to Word] pdf2docx stderr:", stderrOutput);
-        reject(new Error(`pdf2docx 转换失败 (code: ${code}): ${stderrOutput}`));
-        return;
+    // 澶勭悊鍔犲瘑PDF
+    if (password) {
+      const removeProtectionParams = new RemoveProtectionParams({ password });
+      const removeProtectionJob = new RemoveProtectionJob({
+        inputAsset: exportInputAsset,
+        params: removeProtectionParams,
+      });
+      const removeProtectionPollingURL = await pdfServices.submit({ job: removeProtectionJob });
+      const removeProtectionResponse = await pdfServices.getJobResult({
+        pollingURL: removeProtectionPollingURL,
+        resultType: RemoveProtectionResult,
+      });
+
+      if (!removeProtectionResponse.result || !removeProtectionResponse.result.asset) {
+        throw createCodedError("Adobe PDF Services API 鏈繑鍥炶В瀵嗗悗鐨?PDF", "PDF_TO_WORD_ADOBE_FAILED");
       }
 
-      try {
-        const lastLine = stdoutOutput.trim().split("\n").pop();
-        const result = JSON.parse(lastLine);
-        pages = result.pages || 0;
-      } catch (e) {
-        pages = 0;
-      }
-
-      resolve();
-    });
-
-    setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error("pdf2docx 转换超时 (超过 180 秒)"));
-    }, 180000);
-  });
-
-  if (!fs.existsSync(outputPath)) {
-    throw createError("pdf2docx 未生成 DOCX 文件", "PDF_TO_WORD_PDF2DOCX_FAILED");
-  }
-
-  const buffer = fs.readFileSync(outputPath);
-  if (!buffer.length) {
-    throw createError("pdf2docx 生成了空的 DOCX 文件", "PDF_TO_WORD_PDF2DOCX_FAILED");
-  }
-
-  return {
-    buffer,
-    pages,
-    engine: "pdf2docx",
-  };
-}
-
-async function convertPdfToWordTextOnly(fileBuffer, file, inputName) {
-  console.log("[PDF to Word] 开始提取PDF文本...");
-  const pdfParser = new PDFParser(this, 1);
-
-  const data = await new Promise((resolve, reject) => {
-    pdfParser.on("pdfParser_dataError", (errData) => {
-      reject(new Error(errData.parserError));
-    });
-    pdfParser.on("pdfParser_dataReady", (pdfData) => {
-      resolve(pdfData);
-    });
-    pdfParser.parseBuffer(fileBuffer);
-  });
-
-  const numPages = data.Pages.length;
-  console.log("[PDF to Word] 提取完成, 共", numPages, "页");
-  console.log("[PDF to Word] 生成Word文档...");
-
-  const paragraphs = [];
-  paragraphs.push(new Paragraph({
-    children: [new TextRun({ text: "PDF转换结果", bold: true, size: 32 })],
-    heading: HeadingLevel.HEADING_1,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 400 },
-  }));
-  paragraphs.push(new Paragraph({
-    children: [new TextRun({ text: "文档信息", bold: true, size: 24 })],
-    heading: HeadingLevel.HEADING_2,
-    spacing: { after: 200 },
-  }));
-  paragraphs.push(new Paragraph({
-    children: [new TextRun({ text: `原文件: ${file.name || inputName}` })],
-    spacing: { after: 100 },
-  }));
-  paragraphs.push(new Paragraph({
-    children: [new TextRun({ text: `页数: ${numPages}` })],
-    spacing: { after: 200 },
-  }));
-  paragraphs.push(new Paragraph({
-    children: [new TextRun({ text: "文档内容", bold: true, size: 24 })],
-    heading: HeadingLevel.HEADING_2,
-    spacing: { before: 400, after: 200 },
-  }));
-
-  for (let pageIndex = 0; pageIndex < data.Pages.length; pageIndex += 1) {
-    const page = data.Pages[pageIndex];
-
-    if (pageIndex > 0) {
-      paragraphs.push(new Paragraph({
-        children: [new TextRun({ text: `--- 第 ${pageIndex + 1} 页 ---`, bold: true })],
-        spacing: { before: 200, after: 100 },
-      }));
+      exportInputAsset = removeProtectionResponse.result.asset;
+      generatedAssets.push(exportInputAsset);
+      wasUnlocked = true;
     }
 
-    if (page.Texts) {
-      const textParts = page.Texts.map((t) =>
-        t.R && t.R[0] ? decodePdfTextToken(t.R[0].T) : ""
-      );
-      const pageText = textParts.join(" ").replace(/\s+/g, " ").trim();
+    // ====================== 鉁?缁堟瀬浼樺寲锛氭渶楂樺瓧浣?鏍煎紡杩樺師閰嶇疆 ======================
+    const finalLayoutMode = layoutMode === "exact" ? "EXACT" : "FLOW";
+    const exportParams = new ExportPDFParams({
+      targetFormat: outputConfig.targetFormat,
+      ocrLocale,
+      // 馃敟 鏍稿績1锛氱簿纭竷灞€锛堝畬鍏ㄥ鍒籔DF鐨勫瓧浣撱€侀棿璺濄€佹帓鐗堬級
+      layoutMode: finalLayoutMode,
+      // 馃敟 鏍稿績2锛氫繚鐣橮DF鍘熷瀛椾綋锛堜笉鏇挎崲涓虹郴缁熼粯璁ゅ瓧浣擄級
+      preserveFonts: true,
+      // 馃敟 鏍稿績3锛氬皢瀛椾綋宓屽叆Word鏂囨。锛堟墦寮€浠讳綍鐢佃剳閮芥樉绀哄師瀛椾綋锛?
+      embedFonts: true,
+      // 馃敟 鏍稿績4锛氫繚鐣欏畬鏁存牸寮忥紙瀛楀彿銆侀鑹层€佺矖浣撱€佹枩浣撱€佷笅鍒掔嚎锛?
+      preserveFormatting: true,
+      // 馃敟 鏍稿績5锛氫繚鐣欎笓涓氭帓鐗堬紙瀛楃闂磋窛銆佽楂樸€佸榻愭柟寮忥級
+      preserveTypography: true,
+      // 淇濈暀椤电湁椤佃剼/鑴氭敞
+      includeHeadersAndFooters: true,
+      includeFootnotes: true,
+      // 绮惧噯璇嗗埆琛ㄦ牸
+      tableDetectionEnabled: true,
+      // 瀛椾綋瀛愰泦鍖栵紙鍑忓皬鏂囦欢浣撶Н锛屼笉褰卞搷杩樺師搴︼級
+      subsetFonts: true,
+    });
 
-      const textLines = pageText.split(/\n+/);
-      for (const line of textLines) {
-        if (line.trim()) {
-          paragraphs.push(new Paragraph({
-            children: [new TextRun({ text: line.trim() })],
-            spacing: { after: 100 },
-          }));
-        }
-      }
+    const exportJob = new ExportPDFJob({
+      inputAsset: exportInputAsset,
+      params: exportParams,
+    });
+    const exportPollingURL = await pdfServices.submit({ job: exportJob });
+    const exportResponse = await pdfServices.getJobResult({
+      pollingURL: exportPollingURL,
+      resultType: ExportPDFResult,
+    });
+
+    if (!exportResponse.result || !exportResponse.result.asset) {
+      throw createCodedError("Adobe PDF Services API 鏈繑鍥?DOCX 鏂囦欢", "PDF_TO_WORD_ADOBE_FAILED");
+    }
+
+    const resultAsset = exportResponse.result.asset;
+    generatedAssets.push(resultAsset);
+
+    const streamAsset = await pdfServices.getContent({ asset: resultAsset });
+    const buffer = await readStreamToBuffer(streamAsset.readStream);
+
+    if (!buffer.length) {
+      throw createCodedError("Adobe PDF Services API 杩斿洖浜嗙┖鐨?DOCX 鏂囦欢", "PDF_TO_WORD_ADOBE_FAILED");
+    }
+
+    return {
+      buffer,
+      pages,
+      engine: "adobe-pdf-services",
+      extension: outputConfig.extension,
+      contentType: outputConfig.contentType,
+      format: outputConfig.format,
+      ocrLocale,
+      unlocked: wasUnlocked,
+      layoutMode: layoutMode,
+    };
+  } catch (error) {
+    if (!error.code) {
+      error.code = "PDF_TO_WORD_ADOBE_FAILED";
+    }
+    throw error;
+  } finally {
+    // 娓呯悊璧勬簮
+    for (const asset of [...generatedAssets, ...uploadedAssets]) {
+      await deleteAdobeAssetQuietly(pdfServices, asset);
     }
   }
-
-  const doc = new Document({
-    sections: [{
-      properties: {},
-      children: paragraphs,
-    }],
-  });
-
-  const buffer = await Packer.toBuffer(doc);
-  return {
-    buffer,
-    pages: numPages,
-    engine: "text-only",
-  };
 }
 
 app.post("/api/pdf/to-word", async (req, res) => {
   const file = req.body.file;
   const format = req.body.format || "DOCX";
-  const layout = req.body.layout || "";
+  const layout = req.body.layout || "exact";
 
   let tempDir = "";
 
   try {
     assertPdfFile(file);
     tempDir = fs.mkdtempSync(path.join(config.tempDir, "pdf-word-"));
-    console.log("[PDF to Word] 临时目录:", tempDir);
-    
+    console.log("[PDF to Word] 涓存椂鐩綍:", tempDir);
+
     const randomId = makeId();
     const inputName = `input-${randomId}.pdf`;
 
     const fileBuffer = decodeBase64File(file);
-    console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
+    console.log("[PDF to Word] 杈撳叆鏂囦欢澶у皬:", fileBuffer.length, "bytes");
 
-    const highFidelity = shouldUseHighFidelityPdfToWord(layout);
-    let conversion;
+    const conversion = await convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, {
+      format,
+      ocrLocale: req.body.ocrLocale || req.body.language || req.body.locale || "",
+      password: req.body.password || req.body.pdfPassword || "",
+      layout: layout, // 馃敟 鏂板锛氫紶閫掑竷灞€妯″紡
+    });
 
-    if (highFidelity) {
-      assertPdfToDocxConverterAvailable();
-      conversion = await convertPdfToWordWithPdf2docx(fileBuffer, inputName, tempDir);
-    } else {
-      conversion = await convertPdfToWordTextOnly(fileBuffer, file, inputName);
-    }
-
-    console.log("[PDF to Word] Word文档生成完成, 大小:", conversion.buffer.length, "bytes");
+    console.log("[PDF to Word] Word鏂囨。鐢熸垚瀹屾垚, 澶у皬:", conversion.buffer.length, "bytes");
 
     const output = await saveOutputFile(req, conversion.buffer, {
-      extension: "docx",
-      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      extension: conversion.extension,
+      contentType: conversion.contentType,
       baseName: path.parse(inputName).name,
     });
 
@@ -1899,44 +2617,45 @@ app.post("/api/pdf/to-word", async (req, res) => {
         },
       ],
       meta: {
-        format,
+        format: conversion.format,
         layout,
         pages: conversion.pages,
         engine: conversion.engine,
+        ocrLocale: conversion.ocrLocale,
+        unlocked: conversion.unlocked || false,
       },
     });
 
     res.json({
       ok: true,
       resultType: "document",
-      headline: "PDF 转 Word 已完成",
-      detail:
-        conversion.engine === "pdf2docx"
-          ? "已通过高保真转换生成可编辑Word文档，尽量保留原PDF版式。"
-          : "已提取PDF文本内容并转换为可编辑的Word文档。",
-      file: buildFileResponse(output, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+      headline: "PDF 杞?Word 宸插畬鎴?",
+      detail: "宸查€氳繃 Adobe PDF Services API 鐢熸垚鍙紪杈?Word 鏂囨。锛屽敖閲忎繚鐣欏師 PDF 鐗堝紡銆?",
+      file: buildFileResponse(output, conversion.contentType),
       metaLines: [
-        `原文件 ${file.name || inputName}`,
-        conversion.pages ? `共 ${conversion.pages} 页` : "",
-        `输出格式 DOCX`,
-        conversion.engine === "pdf2docx" ? "模式 保持版式" : "模式 优先文字",
+        `鍘熸枃浠?${file.name || inputName}`,
+        conversion.pages ? `鍏?${conversion.pages} 椤礰` : "",
+        `杈撳嚭鏍煎紡 ${conversion.format}`,
+        `OCR ${conversion.ocrLocale}`,
+        "妯″紡 Adobe PDF Services",
+        conversion.unlocked ? "宸蹭娇鐢ㄥ瘑鐮佽В閿?PDF" : "",
       ].filter(Boolean),
     });
   } catch (error) {
-    console.error("[PDF to Word] 转换失败:", error);
+    console.error("[PDF to Word] 杞崲澶辫触:", error);
     await recordOperation(req, {
       toolId: "pdf-to-word",
       status: "failed",
       inputFiles: file
         ? [
-            {
-              name: file.name || "",
-              sizeBytes: file.sizeBytes || 0,
-            },
-          ]
+          {
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0,
+          },
+        ]
         : [],
       errorCode: error.code || "PDF_TO_WORD_FAILED",
-      errorMessage: error.message || "PDF 转 Word 失败",
+      errorMessage: error.message || "PDF 杞?Word 澶辫触",
       meta: {
         format,
         layout,
@@ -1947,7 +2666,7 @@ app.post("/api/pdf/to-word", async (req, res) => {
       res,
       500,
       error.code || "PDF_TO_WORD_FAILED",
-      error.message || "PDF 转 Word 失败"
+      error.message || "PDF 杞?Word 澶辫触"
     );
   } finally {
     cleanupTempDir(tempDir);
@@ -1956,7 +2675,7 @@ app.post("/api/pdf/to-word", async (req, res) => {
 
 app.use(async (error, req, res, next) => {
   const code = error && error.code ? error.code : "UNHANDLED_ERROR";
-  const message = error && error.message ? error.message : "服务端发生未处理异常";
+  const message = error && error.message ? error.message : "鏈嶅姟绔彂鐢熸湭澶勭悊寮傚父";
 
   if (req && req.path) {
     await recordOperation(req, {
@@ -2006,13 +2725,13 @@ function cleanupOldTempDirs() {
           deletedCount++;
         }
       } catch (e) {
-        console.error("[Temp Cleanup] 无法删除", itemPath, ":", e.message);
+        console.error("[Temp Cleanup] 鏃犳硶鍒犻櫎", itemPath, ":", e.message);
       }
     }
 
     return deletedCount;
   } catch (e) {
-    console.error("[Temp Cleanup] 清理失败:", e);
+    console.error("[Temp Cleanup] 娓呯悊澶辫触:", e);
     return 0;
   }
 }
@@ -2027,7 +2746,7 @@ server.once("listening", () => {
   setInterval(() => {
     const count = cleanupOldTempDirs();
     if (count > 0) {
-      console.log(`[Temp Cleanup] 清理了 ${count} 个旧临时目录`);
+      console.log(`[Temp Cleanup] 娓呯悊浜?${count} 涓棫涓存椂鐩綍`);
     }
   }, 30 * 60 * 1000);
 });

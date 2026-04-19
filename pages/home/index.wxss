@@ -257,6 +257,13 @@
   flex: 1;
 }
 
+.tool-grid-usage {
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: #1d5c4b;
+  font-weight: 600;
+}
+
 .tool-grid-footer {
   display: flex;
   align-items: center;
@@ -366,6 +373,12 @@
 .tool-list-format {
   font-size: 22rpx;
   color: #9ba096;
+}
+
+.tool-list-usage {
+  font-size: 22rpx;
+  color: #1d5c4b;
+  font-weight: 600;
 }
 
 .tool-list-points {
