@@ -968,8 +968,31 @@ async function removeUniformBackground(inputBuffer) {
 
 async function removeBackgroundWithModel(config, inputBuffer) {
   console.log("[photo-id] removeBackgroundWithModel: 开始");
-  console.log("[photo-id] removeBackgroundWithModel: 获取会话");
   
+  // 先获取图片信息
+  let sourceMetadata;
+  try {
+    sourceMetadata = await sharp(inputBuffer).metadata();
+  } catch (error) {
+    console.warn("[photo-id] removeBackgroundWithModel: 获取图片元数据失败", error.message || error);
+    return null;
+  }
+  
+  // ⚠️ 关键优化：先大幅缩小图片尺寸，减少内存使用！
+  let workBuffer = inputBuffer;
+  let workScale = 1;
+  const MAX_SIZE = parseInt(process.env.PHOTO_ID_MAX_SIZE || '800', 10); // 从环境变量读取，默认 800px
+  if (sourceMetadata.width > MAX_SIZE || sourceMetadata.height > MAX_SIZE) {
+    console.log(`[photo-id] removeBackgroundWithModel: 图片尺寸 ${sourceMetadata.width}x${sourceMetadata.height} 太大，先缩小到 ${MAX_SIZE}px 内`);
+    workScale = Math.min(MAX_SIZE / sourceMetadata.width, MAX_SIZE / sourceMetadata.height);
+    workBuffer = await sharp(inputBuffer)
+      .resize({ width: Math.round(sourceMetadata.width * workScale), height: Math.round(sourceMetadata.height * workScale), fit: 'inside', withoutEnlargement: false })
+      .png()
+      .toBuffer();
+    console.log(`[photo-id] removeBackgroundWithModel: 图片已缩小，缩放比例 ${workScale.toFixed(3)}`);
+  }
+  
+  console.log("[photo-id] removeBackgroundWithModel: 获取会话");
   let sessionBundle;
   try {
     sessionBundle = await getSession(config);
@@ -989,7 +1012,7 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   let tensor;
   try {
     console.log("[photo-id] removeBackgroundWithModel: 标准化图像");
-    tensor = await normalizeImageForModel(session, model, inputBuffer);
+    tensor = await normalizeImageForModel(session, model, workBuffer); // 使用缩小后的图片
   } catch (error) {
     console.error("[photo-id] removeBackgroundWithModel: 图像标准化失败", error.message || error);
     return null;
@@ -1024,15 +1047,18 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   }
   console.log(`[photo-id] removeBackgroundWithModel: 掩码尺寸 ${maskWidth}x${maskHeight}`);
 
-  console.log("[photo-id] removeBackgroundWithModel: 调整掩码大小");
-  const resizedMetadata = await sharp(inputBuffer).metadata();
+  console.log("[photo-id] removeBackgroundWithModel: 处理 alpha 掩码");
   const alpha = buildNormalizedAlpha(outputTensor.data, maskWidth * maskHeight);
   const refinedAlpha = refineAlphaBuffer(alpha);
 
-  const resizedAlpha = await sharp(refinedAlpha, {
+  // 获取工作图片的尺寸
+  const workMetadata = await sharp(workBuffer).metadata();
+  
+  // 先调整掩码到工作图片尺寸
+  const workAlpha = await sharp(refinedAlpha, {
     raw: { width: maskWidth, height: maskHeight, channels: 1 },
   })
-    .resize(resizedMetadata.width, resizedMetadata.height, {
+    .resize(workMetadata.width, workMetadata.height, {
       fit: "fill",
       kernel: sharp.kernel.lanczos3,
     })
@@ -1040,10 +1066,38 @@ async function removeBackgroundWithModel(config, inputBuffer) {
     .raw()
     .toBuffer();
 
-  console.log("[photo-id] removeBackgroundWithModel: 应用 alpha 遮罩");
-  const resultMask = await applyAlphaMask(inputBuffer, resizedAlpha, resizedMetadata.width, resizedMetadata.height);
+  console.log("[photo-id] removeBackgroundWithModel: 在工作图片上应用 alpha 遮罩");
+  const workResult = await applyAlphaMask(workBuffer, workAlpha, workMetadata.width, workMetadata.height);
+  
+  // 生成工作图片的透明 PNG
+  const workPngBuffer = await workResult.png().toBuffer();
+  
+  // 如果图片是被缩小过的，把结果放大回原始尺寸
+  let resultBuffer = workPngBuffer;
+  if (workScale < 1) {
+    console.log(`[photo-id] removeBackgroundWithModel: 把结果放大回原始尺寸 (scale ${(1/workScale).toFixed(3)})`);
+    // 把工作图片上应用完 mask 的结果放大回原始尺寸
+    resultBuffer = await sharp(workPngBuffer)
+      .resize(sourceMetadata.width, sourceMetadata.height, {
+        fit: 'fill',
+        kernel: sharp.kernel.lanczos3
+      })
+      .png()
+      .toBuffer();
+    
+    // 用放大后的透明图片和原始图片合成，保留原始质量
+    console.log("[photo-id] removeBackgroundWithModel: 和原始图片合成以获得更好质量");
+    const scaledResult = sharp(resultBuffer);
+    const finalResult = await applyAlphaMask(inputBuffer, 
+      await scaledResult.extractChannel('alpha').raw().toBuffer(),
+      sourceMetadata.width, 
+      sourceMetadata.height);
+    console.log("[photo-id] removeBackgroundWithModel: 完成");
+    return finalResult;
+  }
+  
   console.log("[photo-id] removeBackgroundWithModel: 完成");
-  return resultMask;
+  return workResult;
 }
 
 function runImglyWorker(inputPath, outputPath) {
