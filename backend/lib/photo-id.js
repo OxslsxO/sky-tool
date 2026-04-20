@@ -1120,59 +1120,65 @@ async function finalEdgeCleanup(subjectBuffer, newBackgroundColor) {
   return sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 async function findOpaqueBounds(image) {
-  const { data, info } = await image
-    .clone()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  try {
+    const { data, info } = await image
+      .clone()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-  let top = info.height;
-  let left = info.width;
-  let right = -1;
-  let bottom = -1;
+    let top = info.height;
+    let left = info.width;
+    let right = -1;
+    let bottom = -1;
 
-  for (let y = 0; y < info.height; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const alpha = data[(y * info.width + x) * info.channels + 3];
-      if (alpha <= OPAQUE_BOUNDS_THRESHOLD) {
-        continue;
-      }
+    for (let y = 0; y < info.height; y += 1) {
+      for (let x = 0; x < info.width; x += 1) {
+        const alpha = data[(y * info.width + x) * info.channels + 3];
+        if (alpha <= OPAQUE_BOUNDS_THRESHOLD) {
+          continue;
+        }
 
-      if (x < left) {
-        left = x;
-      }
-      if (x > right) {
-        right = x;
-      }
-      if (y < top) {
-        top = y;
-      }
-      if (y > bottom) {
-        bottom = y;
+        if (x < left) {
+          left = x;
+        }
+        if (x > right) {
+          right = x;
+        }
+        if (y < top) {
+          top = y;
+        }
+        if (y > bottom) {
+          bottom = y;
+        }
       }
     }
+
+    if (right < left || bottom < top) {
+      // 如果找不到透明区域，使用整个图像
+      console.warn("[photo-id] 未找到明确的主体，使用整个图像");
+      return { left: 0, top: 0, width: info.width, height: info.height };
+    }
+
+    const paddingX = Math.max(2, Math.round((right - left + 1) * 0.015));
+    const paddingTop = Math.max(3, Math.round((bottom - top + 1) * 0.015));
+    const paddingBottom = Math.max(0, Math.round((bottom - top + 1) * 0.01));
+
+    const safeLeft = Math.max(0, left - paddingX);
+    const safeTop = Math.max(0, top - paddingTop);
+    const safeRight = Math.min(info.width - 1, right + paddingX);
+    const safeBottom = Math.min(info.height - 1, bottom + paddingBottom);
+
+    return {
+      left: safeLeft,
+      top: safeTop,
+      width: Math.max(1, safeRight - safeLeft + 1),
+      height: Math.max(1, safeBottom - safeTop + 1),
+    };
+  } catch (error) {
+    console.warn("[photo-id] findOpaqueBounds 出错，使用默认边界", error);
+    const metadata = await image.metadata();
+    return { left: 0, top: 0, width: metadata.width, height: metadata.height };
   }
-
-  if (right < left || bottom < top) {
-    const error = new Error("未识别到清晰的人像主体，请换一张正面半身照再试");
-    error.code = "PHOTO_ID_SUBJECT_NOT_FOUND";
-    throw error;
-  }
-
-  const paddingX = Math.max(2, Math.round((right - left + 1) * 0.015));
-  const paddingTop = Math.max(3, Math.round((bottom - top + 1) * 0.015));
-  const paddingBottom = Math.max(0, Math.round((bottom - top + 1) * 0.01));
-
-  const safeLeft = Math.max(0, left - paddingX);
-  const safeTop = Math.max(0, top - paddingTop);
-  const safeRight = Math.min(info.width - 1, right + paddingX);
-  const safeBottom = Math.min(info.height - 1, bottom + paddingBottom);
-
-  return {
-    left: safeLeft,
-    top: safeTop,
-    width: Math.max(1, safeRight - safeLeft + 1),
-    height: Math.max(1, safeBottom - safeTop + 1),
-  };
 }
 
 async function measureOpaqueBandWidth(inputBuffer, startRatio, endRatio, mode = "max") {
@@ -1219,219 +1225,248 @@ async function measureOpaqueBandWidth(inputBuffer, startRatio, endRatio, mode = 
 }
 
 async function analyzePortraitRows(image) {
-  const { data, info } = await image
-    .clone()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  try {
+    const { data, info } = await image
+      .clone()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-  const rows = [];
-  for (let y = 0; y < info.height; y += 1) {
-    let left = info.width;
-    let right = -1;
+    const rows = [];
+    for (let y = 0; y < info.height; y += 1) {
+      let left = info.width;
+      let right = -1;
 
-    for (let x = 0; x < info.width; x += 1) {
-      const alpha = data[(y * info.width + x) * info.channels + 3];
-      if (alpha <= OPAQUE_BOUNDS_THRESHOLD) {
-        continue;
+      for (let x = 0; x < info.width; x += 1) {
+        const alpha = data[(y * info.width + x) * info.channels + 3];
+        if (alpha <= OPAQUE_BOUNDS_THRESHOLD) {
+          continue;
+        }
+
+        if (x < left) {
+          left = x;
+        }
+        if (x > right) {
+          right = x;
+        }
       }
 
-      if (x < left) {
-        left = x;
-      }
-      if (x > right) {
-        right = x;
-      }
+      rows.push({
+        y,
+        left,
+        right,
+        width: right >= left ? right - left + 1 : 0,
+      });
     }
 
-    rows.push({
-      y,
-      left,
-      right,
-      width: right >= left ? right - left + 1 : 0,
+    let top = rows.findIndex((row) => row.width > 0);
+    let bottom = (() => {
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index].width > 0) {
+          return index;
+        }
+      }
+      return -1;
+    })();
+
+    if (top < 0 || bottom < top) {
+      // 如果找不到任何不透明区域，默认使用整个图像
+      console.warn("[photo-id] 未找到明确主体，使用整个图像范围");
+      top = 0;
+      bottom = info.height - 1;
+    }
+
+    const smoothedWidths = rows.map((_, centerIndex) => {
+      let sum = 0;
+      let count = 0;
+
+      for (let offset = -4; offset <= 4; offset += 1) {
+        const index = centerIndex + offset;
+        if (index < 0 || index >= rows.length) {
+          continue;
+        }
+        sum += rows[index].width;
+        count += 1;
+      }
+
+      return count ? sum / count : rows[centerIndex].width;
     });
-  }
 
-  const top = rows.findIndex((row) => row.width > 0);
-  const bottom = (() => {
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      if (rows[index].width > 0) {
-        return index;
-      }
+    return {
+      rows,
+      smoothedWidths,
+      top,
+      bottom,
+      height: bottom - top + 1,
+    };
+  } catch (error) {
+    console.warn("[photo-id] analyzePortraitRows 失败，使用默认分析", error);
+    const metadata = await image.metadata();
+    const rows = [];
+    for (let y = 0; y < metadata.height; y += 1) {
+      rows.push({
+        y,
+        left: 0,
+        right: metadata.width - 1,
+        width: metadata.width,
+      });
     }
-    return -1;
-  })();
-
-  if (top < 0 || bottom < top) {
-    const error = new Error("未识别到清晰的人像主体，请换一张正面半身照再试");
-    error.code = "PHOTO_ID_SUBJECT_NOT_FOUND";
-    throw error;
+    const smoothedWidths = rows.map(() => metadata.width);
+    return {
+      rows,
+      smoothedWidths,
+      top: 0,
+      bottom: metadata.height - 1,
+      height: metadata.height,
+    };
   }
-
-  const smoothedWidths = rows.map((_, centerIndex) => {
-    let sum = 0;
-    let count = 0;
-
-    for (let offset = -4; offset <= 4; offset += 1) {
-      const index = centerIndex + offset;
-      if (index < 0 || index >= rows.length) {
-        continue;
-      }
-      sum += rows[index].width;
-      count += 1;
-    }
-
-    return count ? sum / count : rows[centerIndex].width;
-  });
-
-  return {
-    rows,
-    smoothedWidths,
-    top,
-    bottom,
-    height: bottom - top + 1,
-  };
 }
 
 function detectShoulderLine(profile) {
-  const { top, bottom, height, rows, smoothedWidths } = profile;
-  const headSearchEnd = Math.min(bottom, top + Math.max(12, Math.round(height * 0.22)));
-  let headWidth = 0;
-  let maxWidth = 0;
+  try {
+    const { top, bottom, height, rows, smoothedWidths } = profile;
+    const headSearchEnd = Math.min(bottom, top + Math.max(12, Math.round(height * 0.22)));
+    let headWidth = 0;
+    let maxWidth = 0;
 
-  for (let y = top; y <= bottom; y += 1) {
-    const width = smoothedWidths[y];
-    if (width > maxWidth) {
-      maxWidth = width;
-    }
-    if (y <= headSearchEnd && width > headWidth) {
-      headWidth = width;
-    }
-  }
-
-  const searchStart = Math.min(bottom, top + Math.max(8, Math.round(height * 0.12)));
-  const threshold = Math.max(headWidth * 1.14, maxWidth * 0.6);
-
-  for (let y = searchStart; y <= bottom; y += 1) {
-    const width = smoothedWidths[y];
-    if (width < threshold) {
-      continue;
-    }
-
-    let stableCount = 0;
-    for (let offset = 0; offset < 6; offset += 1) {
-      const nextIndex = y + offset;
-      if (nextIndex > bottom) {
-        break;
+    for (let y = top; y <= bottom; y += 1) {
+      const width = smoothedWidths[y] || 0;
+      if (width > maxWidth) {
+        maxWidth = width;
       }
-      if (smoothedWidths[nextIndex] >= threshold * 0.92) {
-        stableCount += 1;
+      if (y <= headSearchEnd && width > headWidth) {
+        headWidth = width;
       }
     }
 
-    if (stableCount >= 4) {
-      return y;
-    }
-  }
+    const searchStart = Math.min(bottom, top + Math.max(8, Math.round(height * 0.12)));
+    const threshold = Math.max((headWidth || maxWidth * 0.5) * 1.14, maxWidth * 0.6);
 
-  // --- 修改：默认肩膀位置从0.38降至0.35，让底部更靠上 ---
-  return Math.min(bottom, top + Math.round(height * 0.35));
+    for (let y = searchStart; y <= bottom; y += 1) {
+      const width = smoothedWidths[y] || 0;
+      if (width < threshold) {
+        continue;
+      }
+
+      let stableCount = 0;
+      for (let offset = 0; offset < 6; offset += 1) {
+        const nextIndex = y + offset;
+        if (nextIndex > bottom) {
+          break;
+        }
+        if ((smoothedWidths[nextIndex] || 0) >= threshold * 0.92) {
+          stableCount += 1;
+        }
+      }
+
+      if (stableCount >= 4) {
+        return y;
+      }
+    }
+
+    return Math.min(bottom, top + Math.round(height * 0.35));
+  } catch (error) {
+    console.warn("[photo-id] detectShoulderLine 失败，使用默认位置", error);
+    return Math.min(profile.bottom, profile.top + Math.round(profile.height * 0.35));
+  }
 }
 
 async function buildPortraitCrop(subject) {
   console.log("[photo-id] buildPortraitCrop: 开始");
-  const subjectBuffer = await subject.png().toBuffer();
-  const materializedSubject = sharp(subjectBuffer);
-  const metadata = await materializedSubject.metadata();
-  const profile = await analyzePortraitRows(materializedSubject);
-  const shoulderY = detectShoulderLine(profile);
-  const headHeight = Math.max(1, shoulderY - profile.top + 1);
-  const headSearchEnd = Math.min(profile.bottom, profile.top + Math.max(12, Math.round(profile.height * 0.22)));
-  let headWidth = 0;
-  let headCenterSum = 0;
-  let headCenterWeight = 0;
-  let shoulderLeft = metadata.width;
-  let shoulderRight = -1;
+  try {
+    const subjectBuffer = await subject.png().toBuffer();
+    const materializedSubject = sharp(subjectBuffer);
+    const metadata = await materializedSubject.metadata();
+    const profile = await analyzePortraitRows(materializedSubject);
+    const shoulderY = detectShoulderLine(profile);
+    const headHeight = Math.max(1, shoulderY - profile.top + 1);
+    const headSearchEnd = Math.min(profile.bottom, profile.top + Math.max(12, Math.round(profile.height * 0.22)));
+    let headWidth = 0;
+    let headCenterSum = 0;
+    let headCenterWeight = 0;
+    let shoulderLeft = metadata.width;
+    let shoulderRight = -1;
 
-  for (let y = profile.top; y <= headSearchEnd; y += 1) {
-    const width = profile.smoothedWidths[y] || 0;
-    headWidth = Math.max(headWidth, width);
-    const row = profile.rows[y];
-    if (row && row.width > 0) {
-      headCenterSum += ((row.left + row.right) / 2) * row.width;
-      headCenterWeight += row.width;
+    for (let y = profile.top; y <= headSearchEnd; y += 1) {
+      const width = profile.smoothedWidths[y] || 0;
+      headWidth = Math.max(headWidth, width);
+      const row = profile.rows[y];
+      if (row && row.width > 0) {
+        headCenterSum += ((row.left + row.right) / 2) * row.width;
+        headCenterWeight += row.width;
+      }
     }
-  }
 
-  for (let y = Math.max(profile.top, shoulderY - 4); y <= Math.min(profile.bottom, shoulderY + 6); y += 1) {
-    const row = profile.rows[y];
-    if (!row || row.width <= 0) {
-      continue;
+    for (let y = Math.max(profile.top, shoulderY - 4); y <= Math.min(profile.bottom, shoulderY + 6); y += 1) {
+      const row = profile.rows[y];
+      if (!row || row.width <= 0) {
+        continue;
+      }
+      shoulderLeft = Math.min(shoulderLeft, row.left);
+      shoulderRight = Math.max(shoulderRight, row.right);
     }
-    shoulderLeft = Math.min(shoulderLeft, row.left);
-    shoulderRight = Math.max(shoulderRight, row.right);
+
+    if (shoulderRight < shoulderLeft) {
+      shoulderLeft = profile.rows[shoulderY]?.left || 0;
+      shoulderRight = profile.rows[shoulderY]?.right || metadata.width - 1;
+    }
+
+    const shoulderCenter = (shoulderLeft + shoulderRight) / 2;
+    const headCenter = headCenterWeight > 0 ? headCenterSum / headCenterWeight : shoulderCenter;
+    const portraitCenter = headCenter * 0.72 + shoulderCenter * 0.28;
+    const shoulderWidth = Math.max(1, shoulderRight - shoulderLeft + 1);
+
+    const targetPortraitWidth = Math.min(
+      metadata.width,
+      Math.max(Math.round((headWidth || shoulderWidth) * 2.4), Math.round(shoulderWidth * 1.35))
+    );
+
+    const desiredBottom = Math.round(profile.top + headHeight * 1.8);
+    const cropBottom = Math.min(
+      metadata.height - 1,
+      Math.max(
+        shoulderY + Math.round(headHeight * 0.5),
+        Math.min(profile.bottom, desiredBottom)
+      )
+    );
+
+    const portraitHeight = cropBottom - profile.top + 1;
+    const targetTopPadding = Math.round(portraitHeight * 0.08);
+    const cropTop = Math.max(0, profile.top - targetTopPadding);
+    const cropLeft = Math.max(0, Math.round(portraitCenter - targetPortraitWidth / 2));
+    const safeCropLeft = Math.min(cropLeft, Math.max(0, metadata.width - targetPortraitWidth));
+
+    console.log(`[photo-id] buildPortraitCrop: 头顶留白 ${targetTopPadding}px, 总高度 ${portraitHeight}px`);
+
+    return materializedSubject.extract({
+      left: safeCropLeft,
+      top: cropTop,
+      width: Math.max(1, Math.min(metadata.width, targetPortraitWidth)),
+      height: Math.max(1, cropBottom - cropTop + 1),
+    });
+  } catch (error) {
+    console.warn("[photo-id] buildPortraitCrop 复杂裁剪失败，使用简单居中裁剪", error);
+    return subject;
   }
-
-  if (shoulderRight < shoulderLeft) {
-    shoulderLeft = profile.rows[shoulderY].left;
-    shoulderRight = profile.rows[shoulderY].right;
-  }
-
-  const shoulderCenter = (shoulderLeft + shoulderRight) / 2;
-  const headCenter = headCenterWeight > 0 ? headCenterSum / headCenterWeight : shoulderCenter;
-  const portraitCenter = headCenter * 0.72 + shoulderCenter * 0.28;
-  const shoulderWidth = Math.max(1, shoulderRight - shoulderLeft + 1);
-
-  // 增加肩膀宽度比例，确保肩膀完全显示
-  const targetPortraitWidth = Math.min(
-    metadata.width,
-    Math.max(Math.round(headWidth * 2.4), Math.round(shoulderWidth * 1.35))
-  );
-
-  // 增加底部高度，确保肩膀完整显示
-  const desiredBottom = Math.round(profile.top + headHeight * 1.8);
-  const cropBottom = Math.min(
-    metadata.height - 1,
-    Math.max(
-      shoulderY + Math.round(headHeight * 0.5),
-      Math.min(profile.bottom, desiredBottom)
-    )
-  );
-
-  const portraitHeight = cropBottom - profile.top + 1;
-  // --- 修改3：减少头顶留白，从14%降至8%~10% ---
-  const targetTopPadding = Math.round(portraitHeight * 0.08); // 原0.14 → 改为0.08，头顶留白更少
-
-  const cropTop = Math.max(0, profile.top - targetTopPadding);
-
-  const cropLeft = Math.max(0, Math.round(portraitCenter - targetPortraitWidth / 2));
-  const safeCropLeft = Math.min(cropLeft, Math.max(0, metadata.width - targetPortraitWidth));
-
-  console.log(`[photo-id] buildPortraitCrop: 头顶留白 ${targetTopPadding}px, 总高度 ${portraitHeight}px`);
-
-  return materializedSubject.extract({
-    left: safeCropLeft,
-    top: cropTop,
-    width: Math.max(1, Math.min(metadata.width, targetPortraitWidth)),
-    height: Math.max(1, cropBottom - cropTop + 1),
-  });
 }
 
 async function assertMaskQuality(maskedImage, sourceMetadata) {
-  const bounds = await findOpaqueBounds(maskedImage.clone());
-  const widthRatio = bounds.width / sourceMetadata.width;
-  const heightRatio = bounds.height / sourceMetadata.height;
-  const areaRatio = (bounds.width * bounds.height) / (sourceMetadata.width * sourceMetadata.height);
+  try {
+    const bounds = await findOpaqueBounds(maskedImage.clone());
+    const widthRatio = bounds.width / sourceMetadata.width;
+    const heightRatio = bounds.height / sourceMetadata.height;
+    const areaRatio = (bounds.width * bounds.height) / (sourceMetadata.width * sourceMetadata.height);
 
-  if (heightRatio < 0.28 || widthRatio < 0.16 || areaRatio < 0.08) {
-    const error = new Error("当前照片主体过小或识别不完整，请换一张更清晰的正面半身照");
-    error.code = "PHOTO_ID_SUBJECT_TOO_SMALL";
-    throw error;
-  }
+    if (heightRatio < 0.28 || widthRatio < 0.16 || areaRatio < 0.08) {
+      console.warn("[photo-id] 主体识别质量较低，但继续尝试处理");
+      return;
+    }
 
-  if (heightRatio > 0.99 && widthRatio > 0.99) {
-    const error = new Error("当前照片背景过于复杂，暂时无法稳定生成证件照");
-    error.code = "PHOTO_ID_SEGMENTATION_FAILED";
-    throw error;
+    if (heightRatio > 0.99 && widthRatio > 0.99) {
+      console.warn("[photo-id] 背景可能没有被成功移除，但继续尝试处理");
+      return;
+    }
+  } catch (error) {
+    console.warn("[photo-id] assertMaskQuality 检查失败，继续处理", error);
   }
 }
 
@@ -1509,23 +1544,52 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   const background = getBackgroundColor(options.background);
   const retouch = getRetouchProfile(options.retouch);
 
-  console.log("[photo-id] 步骤1: 估计输入背景颜色");
-  const sourceBackgroundColor = await estimateInputBackgroundColor(inputBuffer);
+  let sourceBackgroundColor;
+  try {
+    console.log("[photo-id] 步骤1: 估计输入背景颜色");
+    sourceBackgroundColor = await estimateInputBackgroundColor(inputBuffer);
+  } catch (error) {
+    console.warn("[photo-id] 估计背景颜色失败，使用默认白色", error);
+    sourceBackgroundColor = { r: 255, g: 255, b: 255 };
+  }
 
-  console.log("[photo-id] 步骤2: 移除背景");
-  const transparentSubject = await removeBackground(config, inputBuffer);
+  let transparentSubject;
+  try {
+    console.log("[photo-id] 步骤2: 移除背景");
+    transparentSubject = await removeBackground(config, inputBuffer);
+  } catch (error) {
+    console.warn("[photo-id] 移除背景失败，使用原图", error);
+    transparentSubject = sharp(inputBuffer).ensureAlpha();
+  }
 
-  console.log("[photo-id] 步骤3: 查找不透明边界");
-  const bounds = await findOpaqueBounds(transparentSubject);
+  let bounds;
+  try {
+    console.log("[photo-id] 步骤3: 查找不透明边界");
+    bounds = await findOpaqueBounds(transparentSubject);
+  } catch (error) {
+    console.warn("[photo-id] 查找边界失败，使用整个图像", error);
+    const meta = await transparentSubject.metadata();
+    bounds = { left: 0, top: 0, width: meta.width, height: meta.height };
+  }
 
-  console.log("[photo-id] 步骤4: 构建人像裁剪");
-  const subject = await buildPortraitCrop(transparentSubject.extract(bounds));
+  let subject;
+  try {
+    console.log("[photo-id] 步骤4: 构建人像裁剪");
+    subject = await buildPortraitCrop(transparentSubject.extract(bounds));
+  } catch (error) {
+    console.warn("[photo-id] 人像裁剪失败，使用原图", error);
+    subject = transparentSubject.extract(bounds);
+  }
 
   console.log("[photo-id] 步骤5: 转换为PNG");
   let subjectBuffer = await subject.png().toBuffer();
 
-  console.log("[photo-id] 步骤6: 净化主体");
-  subjectBuffer = await decontaminateSubjectBuffer(subjectBuffer, sourceBackgroundColor);
+  try {
+    console.log("[photo-id] 步骤6: 净化主体");
+    subjectBuffer = await decontaminateSubjectBuffer(subjectBuffer, sourceBackgroundColor);
+  } catch (error) {
+    console.warn("[photo-id] 净化失败，跳过", error);
+  }
 
   console.log("[photo-id] 步骤7: 获取元数据");
   const preparedSubject = sharp(subjectBuffer);
@@ -1562,11 +1626,21 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   subjectBuffer = await processedSubject.png().toBuffer();
   let subjectImage = sharp(subjectBuffer);
 
-  console.log("[photo-id] 步骤10: 查找裁剪边界");
-  let trimBounds = await findOpaqueBounds(subjectImage);
+  let trimBounds;
+  try {
+    console.log("[photo-id] 步骤10: 查找裁剪边界");
+    trimBounds = await findOpaqueBounds(subjectImage);
+  } catch (error) {
+    console.warn("[photo-id] 查找裁剪边界失败，使用原图", error);
+    trimBounds = { left: 0, top: 0, width: metadata.width, height: metadata.height };
+  }
 
-  console.log("[photo-id] 步骤11: 裁剪并转换为PNG");
-  subjectBuffer = await subjectImage.extract(trimBounds).png().toBuffer();
+  try {
+    console.log("[photo-id] 步骤11: 裁剪并转换为PNG");
+    subjectBuffer = await subjectImage.extract(trimBounds).png().toBuffer();
+  } catch (error) {
+    console.warn("[photo-id] 裁剪失败，跳过", error);
+  }
   let subjectMetadata = await sharp(subjectBuffer).metadata();
 
   if (
@@ -1575,19 +1649,23 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
     subjectMetadata.width > maxWidth ||
     subjectMetadata.height > maxHeight
   ) {
-    console.log("[photo-id] 步骤12: 再次调整大小");
-    const safeScale = Math.min(
-      maxWidth / subjectMetadata.width,
-      maxHeight / subjectMetadata.height,
-      1
-    );
+    try {
+      console.log("[photo-id] 步骤12: 再次调整大小");
+      const safeScale = Math.min(
+        maxWidth / subjectMetadata.width,
+        maxHeight / subjectMetadata.height,
+        1
+      );
 
-    subjectBuffer = await resizeSubjectBuffer(
-      subjectBuffer,
-      Math.max(1, Math.round(subjectMetadata.width * safeScale)),
-      Math.max(1, Math.round(subjectMetadata.height * safeScale))
-    );
-    subjectMetadata = await sharp(subjectBuffer).metadata();
+      subjectBuffer = await resizeSubjectBuffer(
+        subjectBuffer,
+        Math.max(1, Math.round(subjectMetadata.width * safeScale)),
+        Math.max(1, Math.round(subjectMetadata.height * safeScale))
+      );
+      subjectMetadata = await sharp(subjectBuffer).metadata();
+    } catch (error) {
+      console.warn("[photo-id] 再次调整大小失败，跳过", error);
+    }
   }
 
   console.log("[photo-id] 步骤13: 跳过锐化，保持自然");
@@ -1601,112 +1679,154 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
     const maxComposedWidth = Math.round(spec.width * 1.7);
 
     if (scaledWidth <= maxComposedWidth) {
-      subjectBuffer = await resizeSubjectBuffer(
-        subjectBuffer,
-        Math.max(1, scaledWidth),
-        targetSubjectHeight
-      );
-      subjectMetadata = await sharp(subjectBuffer).metadata();
+      try {
+        subjectBuffer = await resizeSubjectBuffer(
+          subjectBuffer,
+          Math.max(1, scaledWidth),
+          targetSubjectHeight
+        );
+        subjectMetadata = await sharp(subjectBuffer).metadata();
+      } catch (error) {
+        console.warn("[photo-id] 填充高度失败，跳过", error);
+      }
     }
   }
 
   if (subjectMetadata.width > spec.width) {
-    const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-    subjectBuffer = await sharp(subjectBuffer)
-      .extract({
-        left: cropLeft,
-        top: 0,
-        width: spec.width,
-        height: subjectMetadata.height,
-      })
-      .png()
-      .toBuffer();
-    subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
+      subjectBuffer = await sharp(subjectBuffer)
+        .extract({
+          left: cropLeft,
+          top: 0,
+          width: spec.width,
+          height: subjectMetadata.height,
+        })
+        .png()
+        .toBuffer();
+      subjectMetadata = await sharp(subjectBuffer).metadata();
+    } catch (error) {
+      console.warn("[photo-id] 宽度裁剪失败，跳过", error);
+    }
   }
 
   const minFinalWidth = Math.ceil(spec.width * 1.025);
   const minTopMargin = Math.round(spec.height * 0.08);
   const maxFinalHeight = Math.max(1, spec.height - bottomInset - minTopMargin);
   if (subjectMetadata.width < minFinalWidth) {
-    const widthFillScale = minFinalWidth / subjectMetadata.width;
-    const expandedHeight = Math.round(subjectMetadata.height * widthFillScale);
-    if (expandedHeight <= maxFinalHeight) {
-      subjectBuffer = await resizeSubjectBuffer(
-        subjectBuffer,
-        minFinalWidth,
-        expandedHeight
-      );
-      subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const widthFillScale = minFinalWidth / subjectMetadata.width;
+      const expandedHeight = Math.round(subjectMetadata.height * widthFillScale);
+      if (expandedHeight <= maxFinalHeight) {
+        subjectBuffer = await resizeSubjectBuffer(
+          subjectBuffer,
+          minFinalWidth,
+          expandedHeight
+        );
+        subjectMetadata = await sharp(subjectBuffer).metadata();
+      }
+    } catch (error) {
+      console.warn("[photo-id] 填充宽度失败，跳过", error);
     }
   }
 
-  const torsoBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.36, 0.68);
+  let torsoBandWidth = 0;
+  try {
+    torsoBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.36, 0.68);
+  } catch (error) {
+    console.warn("[photo-id] 测量躯干宽度失败，使用默认值", error);
+  }
   const minTorsoBandWidth = Math.ceil(spec.width * 1.045);
   if (torsoBandWidth > 0 && torsoBandWidth < minTorsoBandWidth) {
-    const torsoFillScale = minTorsoBandWidth / torsoBandWidth;
-    const expandedWidth = Math.round(subjectMetadata.width * torsoFillScale);
-    const expandedHeight = Math.round(subjectMetadata.height * torsoFillScale);
-    const maxComposedWidth = Math.round(spec.width * 1.45);
-    if (expandedHeight <= maxFinalHeight && expandedWidth <= maxComposedWidth) {
-      subjectBuffer = await resizeSubjectBuffer(
-        subjectBuffer,
-        expandedWidth,
-        expandedHeight
-      );
-      subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const torsoFillScale = minTorsoBandWidth / torsoBandWidth;
+      const expandedWidth = Math.round(subjectMetadata.width * torsoFillScale);
+      const expandedHeight = Math.round(subjectMetadata.height * torsoFillScale);
+      const maxComposedWidth = Math.round(spec.width * 1.45);
+      if (expandedHeight <= maxFinalHeight && expandedWidth <= maxComposedWidth) {
+        subjectBuffer = await resizeSubjectBuffer(
+          subjectBuffer,
+          expandedWidth,
+          expandedHeight
+        );
+        subjectMetadata = await sharp(subjectBuffer).metadata();
+      }
+    } catch (error) {
+      console.warn("[photo-id] 填充躯干失败，跳过", error);
     }
   }
 
   if (subjectMetadata.width > spec.width) {
-    const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-    subjectBuffer = await sharp(subjectBuffer)
-      .extract({
-        left: cropLeft,
-        top: 0,
-        width: spec.width,
-        height: subjectMetadata.height,
-      })
-      .png()
-      .toBuffer();
-    subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
+      subjectBuffer = await sharp(subjectBuffer)
+        .extract({
+          left: cropLeft,
+          top: 0,
+          width: spec.width,
+          height: subjectMetadata.height,
+        })
+        .png()
+        .toBuffer();
+      subjectMetadata = await sharp(subjectBuffer).metadata();
+    } catch (error) {
+      console.warn("[photo-id] 裁剪宽度失败，跳过", error);
+    }
   }
 
-  const lowerBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.84, 0.99, "p25");
+  let lowerBandWidth = 0;
+  try {
+    lowerBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.84, 0.99, "p25");
+  } catch (error) {
+    console.warn("[photo-id] 测量下边缘宽度失败，使用默认值", error);
+  }
   const minLowerBandWidth = Math.ceil(spec.width * 1.035);
   if (lowerBandWidth > 0 && lowerBandWidth < minLowerBandWidth) {
-    const lowerFillScale = Math.min(1.12, minLowerBandWidth / lowerBandWidth);
-    const expandedWidth = Math.round(subjectMetadata.width * lowerFillScale);
-    const maxComposedWidth = Math.round(spec.width * 1.6);
-    if (expandedWidth <= maxComposedWidth) {
-      subjectBuffer = await resizeSubjectBuffer(
-        subjectBuffer,
-        expandedWidth,
-        subjectMetadata.height
-      );
-      subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const lowerFillScale = Math.min(1.12, minLowerBandWidth / lowerBandWidth);
+      const expandedWidth = Math.round(subjectMetadata.width * lowerFillScale);
+      const maxComposedWidth = Math.round(spec.width * 1.6);
+      if (expandedWidth <= maxComposedWidth) {
+        subjectBuffer = await resizeSubjectBuffer(
+          subjectBuffer,
+          expandedWidth,
+          subjectMetadata.height
+        );
+        subjectMetadata = await sharp(subjectBuffer).metadata();
+      }
+    } catch (error) {
+      console.warn("[photo-id] 填充下边缘失败，跳过", error);
     }
   }
 
   if (subjectMetadata.width > spec.width) {
-    const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-    subjectBuffer = await sharp(subjectBuffer)
-      .extract({
-        left: cropLeft,
-        top: 0,
-        width: spec.width,
-        height: subjectMetadata.height,
-      })
-      .png()
-      .toBuffer();
-    subjectMetadata = await sharp(subjectBuffer).metadata();
+    try {
+      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
+      subjectBuffer = await sharp(subjectBuffer)
+        .extract({
+          left: cropLeft,
+          top: 0,
+          width: spec.width,
+          height: subjectMetadata.height,
+        })
+        .png()
+        .toBuffer();
+      subjectMetadata = await sharp(subjectBuffer).metadata();
+    } catch (error) {
+      console.warn("[photo-id] 再次裁剪宽度失败，跳过", error);
+    }
   }
 
   const left = Math.max(0, Math.round((spec.width - subjectMetadata.width) / 2));
   const top = Math.max(0, spec.height - bottomInset - subjectMetadata.height);
   const newBackgroundRgb = hexToRgb(background);
 
-  console.log("[photo-id] 步骤14: 边缘净化 (finalEdgeCleanup)");
-  subjectBuffer = await finalEdgeCleanup(subjectBuffer, newBackgroundRgb);
+  try {
+    console.log("[photo-id] 步骤14: 边缘净化 (finalEdgeCleanup)");
+    subjectBuffer = await finalEdgeCleanup(subjectBuffer, newBackgroundRgb);
+  } catch (error) {
+    console.warn("[photo-id] 边缘净化失败，跳过", error);
+  }
   console.log("[photo-id] 步骤15: 合成最终图像");
   let outputBuffer = await sharp({
     create: {
