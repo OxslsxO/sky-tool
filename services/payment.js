@@ -7,6 +7,15 @@ const {
   updateOrder,
 } = require("../utils/task-store");
 
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  retryDelay: 1000,
+};
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function requestPayment(orderInfo) {
   return new Promise((resolve, reject) => {
     wx.requestPayment({
@@ -34,63 +43,77 @@ function requestPayment(orderInfo) {
   });
 }
 
-function createOrder(type, itemId) {
+async function createOrder(type, itemId, retryCount = 0) {
   const user = getUserState();
 
-  return new Promise((resolve, reject) => {
-    wx.request({
-      url: buildServiceUrl("/api/pay/create"),
-      method: "POST",
-      header: {
-        "content-type": "application/json",
-        ...getServiceHeaders(),
-      },
-      data: {
-        type,
-        itemId,
-        userId: user.userId,
-        deviceId: user.deviceId,
-      },
-      success: (response) => {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve(response.data);
-          return;
-        }
-
-        reject(response.data || new Error("CREATE_ORDER_FAILED"));
-      },
-      fail: reject,
+  try {
+    const response = await new Promise((resolve, reject) => {
+      wx.request({
+        url: buildServiceUrl("/api/pay/create"),
+        method: "POST",
+        header: {
+          "content-type": "application/json",
+          ...getServiceHeaders(),
+        },
+        data: {
+          type,
+          itemId,
+          userId: user.userId,
+          deviceId: user.deviceId,
+        },
+        success: resolve,
+        fail: reject,
+      });
     });
-  });
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.data;
+    }
+
+    throw response.data || new Error("CREATE_ORDER_FAILED");
+  } catch (error) {
+    if (retryCount < RETRY_CONFIG.maxRetries) {
+      await delay(RETRY_CONFIG.retryDelay);
+      return createOrder(type, itemId, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
-function verifyPayment(orderId) {
+async function verifyPayment(orderId, retryCount = 0) {
   const user = getUserState();
 
-  return new Promise((resolve, reject) => {
-    wx.request({
-      url: buildServiceUrl("/api/pay/verify"),
-      method: "POST",
-      header: {
-        "content-type": "application/json",
-        ...getServiceHeaders(),
-      },
-      data: {
-        orderId,
-        userId: user.userId,
-        deviceId: user.deviceId,
-      },
-      success: (response) => {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve(response.data);
-          return;
-        }
-
-        reject(response.data || new Error("VERIFY_FAILED"));
-      },
-      fail: reject,
+  try {
+    const response = await new Promise((resolve, reject) => {
+      wx.request({
+        url: buildServiceUrl("/api/pay/verify"),
+        method: "POST",
+        header: {
+          "content-type": "application/json",
+          ...getServiceHeaders(),
+        },
+        data: {
+          orderId,
+          userId: user.userId,
+          deviceId: user.deviceId,
+        },
+        success: resolve,
+        fail: reject,
+      });
     });
-  });
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.data;
+    }
+
+    throw response.data || new Error("VERIFY_FAILED");
+  } catch (error) {
+    if (retryCount < RETRY_CONFIG.maxRetries) {
+      await delay(RETRY_CONFIG.retryDelay);
+      return verifyPayment(orderId, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
 function parsePeriodDays(period) {
@@ -102,47 +125,84 @@ function parsePeriodDays(period) {
   return parseInt(match[1], 10);
 }
 
-function simulateMemberPurchase(plan) {
+function activateMemberDirectly(plan) {
   const now = new Date();
-  const periodDays = parsePeriodDays(plan.period);
-  const expireDate = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1000);
+  const periodDays = plan.durationDays || parsePeriodDays(plan.period);
+  let newExpireDate;
 
-  updateUserState({
-    memberPlan: plan.name,
-    memberActive: true,
-    memberExpire: expireDate.toISOString().split("T")[0],
-  });
+  try {
+    const currentUser = getUserState();
 
-  addPointsRecord({
-    type: "member",
-    title: `开通${plan.name}`,
-    change: 0,
-    planId: plan.id,
-    price: plan.price,
-  });
+    if (currentUser.memberActive && currentUser.memberExpire) {
+      const currentExpire = new Date(currentUser.memberExpire);
+      newExpireDate = new Date(Math.max(now.getTime(), currentExpire.getTime()) + periodDays * 24 * 60 * 60 * 1000);
+    } else {
+      newExpireDate = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1000);
+    }
 
-  return { success: true, message: `已开通${plan.name}` };
+    let newPoints = currentUser.points || 0;
+    
+    if (plan.id === 'month' || plan.id === 'season' || plan.id === 'year') {
+      const bonusPoints = plan.id === 'year' ? 100 : (plan.id === 'season' ? 50 : 20);
+      newPoints += bonusPoints;
+    }
+
+    const updatedUser = updateUserState({
+      memberPlan: plan.name,
+      memberActive: true,
+      memberExpire: newExpireDate.toISOString().split("T")[0],
+      points: newPoints
+    });
+
+    addPointsRecord({
+      type: "member",
+      title: `开通${plan.name}`,
+      change: 0,
+      planId: plan.id,
+      price: plan.price,
+    });
+
+    if (plan.id === 'month' || plan.id === 'season' || plan.id === 'year') {
+      const bonusPoints = plan.id === 'year' ? 100 : (plan.id === 'season' ? 50 : 20);
+      addPointsRecord({
+        type: 'earn',
+        title: '开通会员礼包',
+        change: bonusPoints,
+      });
+    }
+
+    console.log("✅ 会员开通成功，已标记同步:", updatedUser);
+    return { success: true, message: `已开通${plan.name}` };
+  } catch (e) {
+    console.error("❌ 开通会员失败:", e);
+    return { success: false, message: "开通会员失败" };
+  }
 }
 
-function simulatePointsPurchase(packageItem) {
-  const bonusMatch = String(packageItem.bonus || "").match(/(\d+)/);
-  const bonusPoints = bonusMatch ? parseInt(bonusMatch[1], 10) : 0;
-  const totalPoints = packageItem.points + bonusPoints;
-  const user = getUserState();
+function addPointsDirectly(packageItem) {
+  const totalPoints = packageItem.points + (packageItem.bonusPoints || 0);
+  
+  try {
+    const currentUser = getUserState();
 
-  updateUserState({
-    points: user.points + totalPoints,
-  });
+    const updatedUser = updateUserState({
+      points: (currentUser.points || 0) + totalPoints
+    });
 
-  addPointsRecord({
-    type: "recharge",
-    title: `充值${packageItem.points}积分`,
-    change: totalPoints,
-    packageId: packageItem.id,
-    price: packageItem.price,
-  });
+    addPointsRecord({
+      type: "recharge",
+      title: `充值${packageItem.points}积分`,
+      change: totalPoints,
+      packageId: packageItem.id,
+      price: packageItem.price,
+    });
 
-  return { success: true, message: `已充值${totalPoints}积分` };
+    console.log("✅ 积分充值成功，已标记同步:", updatedUser);
+    return { success: true, message: `已充值${totalPoints}积分` };
+  } catch (e) {
+    console.error("❌ 积分充值失败:", e);
+    return { success: false, message: "积分充值失败" };
+  }
 }
 
 function createLocalOrder(orderResult, payload) {
@@ -175,7 +235,7 @@ async function purchaseMember(plan) {
     const verifyResult = await verifyPayment(orderResult.orderId);
     if (verifyResult.success) {
       updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
-      return simulateMemberPurchase(plan);
+      return activateMemberDirectly(plan);
     }
 
     throw new Error("支付验证失败");
@@ -191,7 +251,7 @@ async function purchaseMember(plan) {
       if (localOrder) {
         updateOrder(localOrder.id, { status: "paid", paidAt: Date.now(), simulated: true });
       }
-      return simulateMemberPurchase(plan);
+      return activateMemberDirectly(plan);
     }
 
     if (localOrder) {
@@ -226,7 +286,7 @@ async function purchasePoints(packageItem) {
     const verifyResult = await verifyPayment(orderResult.orderId);
     if (verifyResult.success) {
       updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
-      return simulatePointsPurchase(packageItem);
+      return addPointsDirectly(packageItem);
     }
 
     throw new Error("支付验证失败");
@@ -242,7 +302,7 @@ async function purchasePoints(packageItem) {
       if (localOrder) {
         updateOrder(localOrder.id, { status: "paid", paidAt: Date.now(), simulated: true });
       }
-      return simulatePointsPurchase(packageItem);
+      return addPointsDirectly(packageItem);
     }
 
     if (localOrder) {
@@ -281,6 +341,6 @@ module.exports = {
   purchaseMember,
   purchasePoints,
   checkMemberExpired,
-  simulateMemberPurchase,
-  simulatePointsPurchase,
+  activateMemberFromPlan: activateMemberDirectly,
+  addPointsFromPackage: addPointsDirectly,
 };

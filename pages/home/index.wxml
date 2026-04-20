@@ -186,7 +186,8 @@
     </view>
   </view>
 
-  <view class="section" wx:if="{{!keyword}}">
+  <!-- 专题推荐暂时隐藏，有需求再开启 -->
+  <!-- <view class="section" wx:if="{{!keyword && false}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Packs</text>
@@ -216,7 +217,7 @@
         </view>
       </view>
     </view>
-  </view>
+  </view> -->
 
   <view class="section">
     <view class="card member-card">

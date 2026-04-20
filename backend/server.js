@@ -1136,15 +1136,299 @@ app.post("/api/pay/notify", async (req, res) => {
   res.json({ code: "SUCCESS", message: "" });
 });
 
+// ==================== 登录 API ====================
+app.post("/api/auth/login", async (req, res) => {
+  const { code, userInfo } = req.body;
+
+  if (!code) {
+    sendError(res, 400, "MISSING_CODE", "Missing login code");
+    return;
+  }
+
+  try {
+    // 这里是模拟微信登录
+    // 实际生产环境需要调用微信 code2Session 接口
+    
+    // 查找或创建用户
+    let user = null;
+    let isNewUser = false;
+    const collections = await clientStateRepository.getCollections();
+    
+    let mockOpenid = null;
+    
+    if (collections) {
+      // MongoDB 模式
+      
+      // 1. 先尝试查找最近有活动的用户（有积分或会员的）
+      const recentActiveUser = await collections.users.findOne(
+        { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
+        { sort: { updatedAt: -1 } }
+      );
+      
+      if (recentActiveUser) {
+        // 找到了有数据的用户，直接用这个用户！
+        user = recentActiveUser;
+        mockOpenid = user.openid;
+        console.log(`[Auth] 找到有数据的用户，直接登录: ${mockOpenid}`);
+      } else {
+        // 没找到有数据的用户，生成一个新 openid
+        mockOpenid = `wx_user_${crypto.createHash('md5').update(code).digest('hex').substring(0, 12)}`;
+        console.log(`[Auth] 微信登录模拟: ${mockOpenid}`);
+        
+        // 查找是否已有这个 openid 的用户
+        user = await collections.users.findOne({ openid: mockOpenid });
+        
+        if (!user) {
+          // 新用户，创建
+          isNewUser = true;
+          const now = new Date().toISOString();
+          const newUser = {
+            userId: mockOpenid, // 用 openid 作为 userId
+            openid: mockOpenid,
+            nickname: userInfo?.nickName || "微信用户",
+            avatar: userInfo?.avatarUrl || "",
+            gender: userInfo?.gender || 0,
+            points: 0,
+            memberPlan: null,
+            memberActive: false,
+            memberExpire: null,
+            phoneNumber: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          
+          await collections.users.insertOne(newUser);
+          user = newUser;
+          
+          console.log(`[Auth] 创建新用户: ${mockOpenid}`);
+        }
+      }
+      
+      if (user && user.openid) {
+        // 老用户，更新一下信息
+        const now = new Date().toISOString();
+        await collections.users.updateOne(
+          { openid: user.openid },
+          {
+            $set: {
+              updatedAt: now,
+              ...(userInfo?.nickName && { nickname: userInfo.nickName }),
+              ...(userInfo?.avatarUrl && { avatar: userInfo.avatarUrl }),
+            },
+          }
+        );
+        
+        // 重新获取最新的用户信息
+        user = await collections.users.findOne({ openid: user.openid });
+        
+        console.log(`[Auth] 老用户登录: ${user.openid}`);
+      }
+    } else {
+      // 文件模式（简单模拟）
+      if (!mockOpenid) {
+        mockOpenid = `wx_user_${crypto.createHash('md5').update(code).digest('hex').substring(0, 12)}`;
+      }
+      user = {
+        userId: mockOpenid,
+        openid: mockOpenid,
+        nickname: userInfo?.nickName || "微信用户",
+        avatar: userInfo?.avatarUrl || "",
+        points: 0,
+        memberActive: false,
+        phoneNumber: null,
+      };
+    }
+
+    await recordOperation(req, {
+      toolId: "auth-login",
+      status: "success",
+      meta: { openid: mockOpenid },
+    });
+
+    // 返回用户信息（不包含敏感字段）
+    const safeUser = {
+      userId: user.userId,
+      openid: user.openid,
+      nickname: user.nickname,
+      avatar: user.avatar,
+      points: user.points,
+      memberPlan: user.memberPlan,
+      memberActive: user.memberActive,
+      memberExpire: user.memberExpire,
+      phoneNumber: user.phoneNumber,
+    };
+
+    res.json({
+      ok: true,
+      user: safeUser,
+      isNewUser: isNewUser,
+    });
+  } catch (error) {
+    console.error("[Auth] 登录失败:", error);
+    await recordOperation(req, {
+      toolId: "auth-login",
+      status: "failed",
+      errorCode: error.code || "LOGIN_FAILED",
+      errorMessage: error.message,
+    });
+
+    sendError(res, 500, "LOGIN_FAILED", "Login failed");
+  }
+});
+
+app.post("/api/auth/bind-phone", async (req, res) => {
+  const { code, userId: reqUserId, openid: reqOpenid } = req.body;
+
+  try {
+    // 模拟获取手机号（实际需要调用微信手机号接口）
+    // 为了演示，我们用一个模拟的手机号
+    const mockPhone = `138${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
+    
+    console.log(`[Auth] 绑定手机号模拟: ${reqOpenid || reqUserId} -> ${mockPhone}`);
+
+    // 更新用户
+    const collections = await clientStateRepository.getCollections();
+    let user = null;
+    
+    if (collections) {
+      // 查找用户策略：
+      // 1. 先用 openid 查找（如果有）
+      // 2. 再用 userId 查找（如果有）
+      // 3. 最后找最近更新的有数据的用户
+      if (reqOpenid) {
+        user = await collections.users.findOne({ openid: reqOpenid });
+      }
+      if (!user && reqUserId) {
+        user = await collections.users.findOne({ userId: reqUserId });
+      }
+      if (!user) {
+        // 找最近有数据的用户
+        const recentUser = await collections.users.findOne(
+          { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
+          { sort: { updatedAt: -1 } }
+        );
+        user = recentUser;
+      }
+      // 如果还没有，找最近更新的任意用户
+      if (!user) {
+        const recentUser = await collections.users
+          .find({})
+          .sort({ updatedAt: -1 })
+          .limit(1)
+          .toArray();
+        user = recentUser.length > 0 ? recentUser[0] : null;
+      }
+      
+      if (user) {
+        // 更新手机号
+        await collections.users.updateOne(
+          { userId: user.userId },
+          {
+            $set: {
+              phoneNumber: mockPhone,
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        );
+        
+        // 重新获取完整用户信息
+        user = await collections.users.findOne({ userId: user.userId });
+        
+        console.log(`[Auth] 手机号绑定成功: ${user.userId} -> ${mockPhone}`);
+      }
+    }
+
+    if (!user) {
+      sendError(res, 404, "USER_NOT_FOUND", "User not found");
+      return;
+    }
+
+    await recordOperation(req, {
+      toolId: "auth-bind-phone",
+      status: "success",
+      meta: { userId: user.userId },
+    });
+
+    // 返回用户信息
+    const safeUser = {
+      userId: user.userId,
+      openid: user.openid,
+      nickname: user.nickname,
+      avatar: user.avatar,
+      points: user.points,
+      memberPlan: user.memberPlan,
+      memberActive: user.memberActive,
+      memberExpire: user.memberExpire,
+      phoneNumber: user.phoneNumber,
+    };
+
+    res.json({
+      ok: true,
+      user: safeUser,
+    });
+  } catch (error) {
+    console.error("[Auth] 绑定手机失败:", error);
+    await recordOperation(req, {
+      toolId: "auth-bind-phone",
+      status: "failed",
+      errorCode: error.code || "BIND_FAILED",
+      errorMessage: error.message,
+    });
+
+    sendError(res, 500, "BIND_FAILED", "Bind failed");
+  }
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  const { userId } = req.query;
+
+  try {
+    const state = await clientStateRepository.getState({ userId });
+    if (!state || !state.user) {
+      sendError(res, 404, "USER_NOT_FOUND", "User not found");
+      return;
+    }
+
+    res.json({
+      ok: true,
+      user: {
+        userId: state.user.userId,
+        openid: state.user.openid,
+        nickname: state.user.nickname,
+        avatar: state.user.avatar,
+        points: state.user.points,
+        memberPlan: state.user.memberPlan,
+        memberActive: state.user.memberActive,
+        memberExpire: state.user.memberExpire,
+        phoneNumber: state.user.phoneNumber,
+      },
+    });
+  } catch (error) {
+    sendError(res, 500, "FETCH_FAILED", "Failed to fetch user");
+  }
+});
+// ==================== 登录 API 结束 ====================
+
 app.get("/api/client/state", async (req, res) => {
   const userId = String(req.query.userId || "").trim();
   const deviceId = String(req.query.deviceId || "").trim();
+  const tryRecover = req.query.tryRecover === "1";
 
   try {
-    const state = await clientStateRepository.getState({
+    let state = await clientStateRepository.getState({
       userId,
       deviceId,
     });
+
+    // 如果没找到，但在恢复模式，尝试查找最近的用户
+    if (!state && tryRecover) {
+      console.log("🔄 恢复模式：未找到精确匹配，尝试查找最近用户...");
+      state = await clientStateRepository.tryFindRecentState();
+      
+      if (state) {
+        console.log("✅ 恢复模式：找到最近用户:", state.user && state.user.userId);
+      }
+    }
 
     if (!state) {
       sendError(res, 404, "CLIENT_STATE_NOT_FOUND", "Client state was not found");
@@ -1158,6 +1442,7 @@ app.get("/api/client/state", async (req, res) => {
         userId: state.user && state.user.userId ? state.user.userId : userId,
         deviceId: state.user && state.user.deviceId ? state.user.deviceId : deviceId,
         taskCount: (state.tasks || []).length,
+        tryRecover,
       },
     });
 
@@ -1174,6 +1459,7 @@ app.get("/api/client/state", async (req, res) => {
       meta: {
         userId,
         deviceId,
+        tryRecover,
       },
     });
 

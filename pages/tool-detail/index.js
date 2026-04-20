@@ -1,4 +1,4 @@
-const qrcode = require("../../utils/vendor/qrcode-generator");
+﻿﻿const qrcode = require("../../utils/vendor/qrcode-generator");
 const { PDFDocument } = require("../../utils/vendor/pdf-lib");
 const { getToolById, getCategoryById } = require("../../data/mock");
 
@@ -535,6 +535,15 @@ Page({
     pdfToWordResultHeadline: "",
     pdfToWordResultDetail: "",
     pdfToWordResultMetaLines: [],
+    imageToPdfResultReady: false,
+    imageToPdfResultPath: "",
+    imageToPdfResultRemoteUrl: "",
+    imageToPdfResultName: "",
+    imageToPdfResultHeadline: "",
+    imageToPdfResultDetail: "",
+    imageToPdfResultMetaLines: [],
+    imageToPdfCurrentIndex: 0,
+    imageToPdfSorting: false,
     photoIdIsProcessing: false,
     backgroundColorMap: BACKGROUND_COLOR_MAP,
     processingProgress: 0,
@@ -1890,6 +1899,10 @@ Page({
   async previewAudioConvertResult() {
     const current = this.data.audioConvertResultPath || this.data.audioConvertResultRemoteUrl;
     if (!current) {
+      wx.showToast({
+        title: "文件不存在",
+        icon: "none",
+      });
       return;
     }
 
@@ -1908,7 +1921,8 @@ Page({
         context.onEnded(() => {
           this.setData({ audioConvertIsPlaying: false });
         });
-        context.onError(() => {
+        context.onError((err) => {
+          console.error('Audio play error:', err);
           this.setData({ audioConvertIsPlaying: false });
           wx.showToast({
             title: "播放失败",
@@ -1924,18 +1938,51 @@ Page({
       return;
     }
 
-    if (wx.previewMedia) {
-      wx.previewMedia({
-        sources: [{
-          url: current,
-          type: "video",
-        }],
-      });
-    } else {
-      wx.showToast({
-        title: "可在上方播放预览",
-        icon: "none",
-      });
+    // 对于视频，优先尝试打开文档预览，兼容性更好
+    try {
+      if (this.data.audioConvertResultPath) {
+        await new Promise((resolve, reject) => {
+          wx.openDocument({
+            filePath: this.data.audioConvertResultPath,
+            fileType: 'mp4',
+            success: resolve,
+            fail: reject,
+          });
+        });
+      } else {
+        // 如果没有本地路径，直接告诉用户可以在播放器中播放
+        wx.showToast({
+          title: "可在上方播放器中播放",
+          icon: "none",
+          duration: 2000,
+        });
+      }
+    } catch (e) {
+      console.error('Open document failed:', e);
+      // 如果 openDocument 失败，尝试 previewMedia
+      if (wx.previewMedia && this.data.audioConvertResultRemoteUrl) {
+        try {
+          wx.previewMedia({
+            sources: [{
+              url: this.data.audioConvertResultRemoteUrl,
+              type: "video",
+            }],
+          });
+        } catch (previewErr) {
+          console.error('Preview media failed:', previewErr);
+          wx.showToast({
+            title: "可在上方播放器中播放",
+            icon: "none",
+            duration: 2000,
+          });
+        }
+      } else {
+        wx.showToast({
+          title: "可在上方播放器中播放",
+          icon: "none",
+          duration: 2000,
+        });
+      }
     }
   },
 
@@ -1998,19 +2045,13 @@ Page({
   },
 
   async previewPdfToWordResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.pdfToWordResultPath;
     const url = this.data.pdfToWordResultRemoteUrl;
-    if (!url) {
+
+    if (!filePath && !url) {
       wx.showToast({
         title: "预览链接不存在",
-        icon: "none",
-      });
-      return;
-    }
-
-    // 检查是否有后端服务
-    if (!hasBackendService()) {
-      wx.showToast({
-        title: "后端服务未配置",
         icon: "none",
       });
       return;
@@ -2022,25 +2063,31 @@ Page({
     });
 
     try {
-      // 先下载文件
-      const downloadRes = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url: url,
-          success: (res) => {
-            if (res.statusCode === 200) {
-              resolve(res);
-            } else {
-              reject(new Error(`下载失败: ${res.statusCode}`));
-            }
-          },
-          fail: (err) => reject(err),
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[PDF转Word] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
         });
-      });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ pdfToWordResultPath: filePath });
+      }
 
       // 打开文档
       await new Promise((resolve, reject) => {
         wx.openDocument({
-          filePath: downloadRes.tempFilePath,
+          filePath: filePath,
           fileType: 'docx',
           showMenu: true,
           success: resolve,
@@ -2062,19 +2109,13 @@ Page({
   },
 
   async downloadPdfToWordResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.pdfToWordResultPath;
     const url = this.data.pdfToWordResultRemoteUrl;
-    if (!url) {
+
+    if (!filePath && !url) {
       wx.showToast({
         title: "下载链接不存在",
-        icon: "none",
-      });
-      return;
-    }
-
-    // 检查是否有后端服务
-    if (!hasBackendService()) {
-      wx.showToast({
-        title: "后端服务未配置",
         icon: "none",
       });
       return;
@@ -2086,25 +2127,31 @@ Page({
     });
 
     try {
-      // 先下载文件
-      const downloadRes = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url: url,
-          success: (res) => {
-            if (res.statusCode === 200) {
-              resolve(res);
-            } else {
-              reject(new Error(`下载失败: ${res.statusCode}`));
-            }
-          },
-          fail: (err) => reject(err),
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[PDF转Word] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
         });
-      });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ pdfToWordResultPath: filePath });
+      }
 
       // 打开文档（用户可以在文档预览中选择保存）
       await new Promise((resolve, reject) => {
         wx.openDocument({
-          filePath: downloadRes.tempFilePath,
+          filePath: filePath,
           fileType: 'docx',
           showMenu: true,
           success: resolve,
@@ -2420,6 +2467,25 @@ Page({
       });
       return;
     }
+    
+    // 设置整体 5 分钟超时，防止无限卡住
+    let isTimeout = false;
+    const timeoutId = setTimeout(() => {
+      isTimeout = true;
+      logger.error("[照片转证件照] 请求超时");
+      this.setData({
+        isWorking: false,
+        photoIdIsProcessing: false,
+        showProcessingOverlay: false,
+        processingProgress: 0,
+        processingStatus: "",
+      });
+      wx.showModal({
+        title: "处理超时",
+        content: "处理时间过长，请稍后重试",
+        showCancel: false,
+      });
+    }, 300000);
 
     try {
       this.updateProcessingProgress(5, "正在准备图片...");
@@ -2447,6 +2513,10 @@ Page({
         size: imageInput.size,
       });
       logger.log("[照片转证件照] 文件打包完成");
+      
+      if (isTimeout) {
+        return;
+      }
 
       logger.log("[照片转证件照] 发送请求到 /api/photo-id");
       const remoteResponse = await this.requestJsonWithProgress("/api/photo-id", {
@@ -2459,7 +2529,7 @@ Page({
         status: "正在智能抠图...",
         sizeBytes: imageInput.size,
         requestOptions: {
-          timeout: 180000,
+          timeout: 120000, // 减少到 2 分钟
           includeMeta: true,
         },
       });
@@ -2596,6 +2666,7 @@ Page({
         duration: 2000
       });
     } finally {
+      clearTimeout(timeoutId);
       logger.log("[照片转证件照] 处理流程结束");
     }
   },
@@ -2857,6 +2928,31 @@ Page({
 
       const fileResponse = response.file || {};
       const remoteUrl = fileResponse.url || "";
+      let localPath = "";
+
+      // 如果有远程URL，先下载到本地
+      if (remoteUrl) {
+        try {
+          console.log("[PDF转Word] 正在下载文件:", remoteUrl);
+          const downloadRes = await new Promise((resolve, reject) => {
+            wx.downloadFile({
+              url: remoteUrl,
+              success: (res) => {
+                if (res.statusCode === 200) {
+                  resolve(res);
+                } else {
+                  reject(new Error(`下载失败: ${res.statusCode}`));
+                }
+              },
+              fail: (err) => reject(err),
+            });
+          });
+          localPath = downloadRes.tempFilePath;
+          console.log("[PDF转Word] 文件已下载:", localPath);
+        } catch (downloadError) {
+          console.warn("[PDF转Word] 下载文件失败，仅保留远程链接:", downloadError);
+        }
+      }
 
       // 使用原文件名，替换扩展名为 .docx
       const originalName = backendFiles[0].name || "文档";
@@ -2866,12 +2962,9 @@ Page({
       const afterBytes = fileResponse.sizeBytes || null;
       const beforeBytes = backendFiles[0].size || 0;
 
-      const beforeSizeText = formatFileSize(beforeBytes);
-      const afterSizeText = afterBytes ? formatFileSize(afterBytes) : "";
-
       this.setData({
         pdfToWordResultReady: true,
-        pdfToWordResultPath: "",
+        pdfToWordResultPath: localPath,
         pdfToWordResultRemoteUrl: remoteUrl,
         pdfToWordResultName: fileName,
         pdfToWordResultHeadline: response.headline || "PDF 转 Word 已完成",
@@ -3113,15 +3206,30 @@ Page({
     const exportFormat = selections.target.toLowerCase();
     this.updateProcessingProgress(18, "正在读取图片...");
 
+    // 如果是相同格式，提示用户
+    if (imageInput.extension && imageInput.extension.toLowerCase() === exportFormat) {
+      wx.showModal({
+        title: "提示",
+        content: "原图格式已是目标格式，是否继续？",
+        confirmText: "继续",
+        success: (res) => {
+          if (!res.confirm) return;
+        }
+      });
+    }
+
+    // 使用 canvas 绘制，保持图片原样
     const tempFile = await this.withCanvas(imageInput.width, imageInput.height, (ctx) => {
+      // 对于 JPG 导出，填充白色背景保持原样，否则透明背景
       if (exportFormat === "jpg") {
         setFillStyle(ctx, "#ffffff");
         ctx.fillRect(0, 0, imageInput.width, imageInput.height);
       }
+      // 不做任何尺寸或色彩调整，直接原样绘制
       ctx.drawImage(imageInput.path, 0, 0, imageInput.width, imageInput.height);
     }, {
       fileType: exportFormat,
-      quality: exportFormat === "jpg" ? qualityMap[selections.quality] : 1,
+      quality: exportFormat === "jpg" ? qualityMap[selections.quality] : 1, // PNG 等格式使用 1（最高质量）
     });
 
     this.updateProcessingProgress(62, "正在导出图片...");
@@ -3161,6 +3269,7 @@ Page({
       convertResultMetaLines: [
         `原图尺寸 ${imageInput.width} × ${imageInput.height}`,
         `输出质量 ${selections.quality}`,
+        `已保持图片原样导出`,
       ],
     });
     this.updateProcessingProgress(100, "转换完成");
@@ -3785,9 +3894,164 @@ Page({
       return;
     }
 
-    wx.navigateTo({
-      url: `/pages/task-detail/index?id=${result.task.id}`,
+    // 直接在当前页面展示结果，不跳转
+    const resultName = "图片合集.pdf";
+    const afterBytes = fileInfo ? fileInfo.size : null;
+    const beforeBytes = totalInputSize;
+    
+    const beforeSizeText = formatFileSize(beforeBytes);
+    const afterSizeText = afterBytes ? formatFileSize(afterBytes) : "";
+
+    this.setData({
+      imageToPdfResultReady: true,
+      imageToPdfResultPath: outputPath,
+      imageToPdfResultRemoteUrl: remoteFile ? remoteFile.url : "",
+      imageToPdfResultName: resultName,
+      imageToPdfResultHeadline: "图片转 PDF 已完成",
+      imageToPdfResultDetail: `已把 ${imageInputs.length} 张图片整理成单个 PDF，可直接打开查看。`,
+      imageToPdfResultMetaLines: [
+        `纸张 ${selections.paper}`,
+        `布局 ${selections.layout}`,
+        remoteFile ? `云端存储 ${remoteFile.provider === "qiniu" ? "七牛云" : "后端"}` : "云端存储 待同步",
+      ],
     });
+
     this.updateProcessingProgress(100, "生成完成");
+  },
+
+  handleSwiperChange(e) {
+    const current = e.detail.current;
+    this.setData({
+      imageToPdfCurrentIndex: current,
+    });
+  },
+
+  handleThumbClick(e) {
+    const index = e.currentTarget.dataset.index;
+    this.setData({
+      imageToPdfCurrentIndex: index,
+    });
+  },
+
+  handleThumbLongPress(e) {
+    const index = e.currentTarget.dataset.index;
+    wx.showModal({
+      title: "调整图片顺序",
+      content: "长按后可拖动调整顺序，点击完成保存。",
+      showCancel: false,
+      confirmText: "知道了",
+      success: () => {
+        this.setData({
+          imageToPdfSorting: true,
+        });
+      },
+    });
+  },
+
+  finishSorting() {
+    this.setData({
+      imageToPdfSorting: false,
+    });
+  },
+
+  async previewImageToPdfResult() {
+    const path = this.data.imageToPdfResultPath;
+    if (!path) {
+      wx.showToast({
+        title: "文件不存在",
+        icon: "none",
+      });
+      return;
+    }
+    wx.openDocument({
+      filePath: path,
+      fileType: "pdf",
+    });
+  },
+
+  async saveImageToPdfResult() {
+    const path = this.data.imageToPdfResultPath;
+    if (!path) {
+      wx.showToast({
+        title: "文件不存在",
+        icon: "none",
+      });
+      return;
+    }
+    wx.openDocument({
+      filePath: path,
+      fileType: "pdf",
+      showMenu: true,
+    });
+  },
+
+  async copyImageToPdfUrl() {
+    const url = this.data.imageToPdfResultRemoteUrl;
+    if (!url) {
+      wx.showToast({
+        title: "链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+    wx.setClipboardData({
+      data: url,
+      success: () => {
+        wx.showToast({
+          title: "链接已复制",
+          icon: "success",
+        });
+      },
+    });
+  },
+
+  handleDeleteCurrentImage() {
+    const index = this.data.imageToPdfCurrentIndex;
+    this.deleteImage(index);
+  },
+
+  handleDeleteThumbImage(e) {
+    const index = e.currentTarget.dataset.index;
+    this.deleteImage(index);
+  },
+
+  deleteImage(index) {
+    if (this.data.imageInputs.length <= 1) {
+      wx.showModal({
+        title: "提示",
+        content: "至少需要保留一张图片",
+        showCancel: false,
+      });
+      return;
+    }
+
+    wx.showModal({
+      title: "删除图片",
+      content: "确定要删除这张图片吗？",
+      success: (res) => {
+        if (res.confirm) {
+          const newInputs = [...this.data.imageInputs];
+          newInputs.splice(index, 1);
+          
+          let newCurrentIndex = this.data.imageToPdfCurrentIndex;
+          if (newCurrentIndex >= newInputs.length) {
+            newCurrentIndex = newInputs.length - 1;
+          }
+          if (newCurrentIndex < 0) {
+            newCurrentIndex = 0;
+          }
+
+          this.setData({
+            imageInputs: newInputs,
+            imageToPdfCurrentIndex: newCurrentIndex,
+          });
+
+          wx.showToast({
+            title: "已删除",
+            icon: "success",
+          });
+        }
+      },
+    });
   },
 });

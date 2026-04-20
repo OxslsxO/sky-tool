@@ -393,14 +393,24 @@ const featuredBundles = [
 const visibleTools = tools.filter((tool) => !hiddenToolIds.includes(tool.id));
 
 const memberPlans = [
-  { id: "trial", name: "体验周卡", price: "9.9", period: "7 天", highlight: "低门槛体验高频工具", recommended: false },
-  { id: "month", name: "月度会员", price: "29", period: "30 天", highlight: "主推，适合高频使用图片与 PDF 工具", recommended: true },
-  { id: "season", name: "季度会员", price: "68", period: "90 天", highlight: "单日成本更低，适合上班族和学生季节性需求", recommended: false },
+  { id: "trial", name: "体验周卡", price: "9.9", period: "7 天", durationDays: 7, highlight: "低门槛体验高频工具", recommended: false },
+  { id: "month", name: "月度会员", price: "29", period: "30 天", durationDays: 30, highlight: "主推，适合高频使用图片与 PDF 工具", recommended: true },
+  { id: "season", name: "季度会员", price: "68", period: "90 天", durationDays: 90, highlight: "单日成本更低，适合上班族和学生季节性需求", recommended: false },
+  { id: "year", name: "年度会员", price: "198", period: "365 天", durationDays: 365, highlight: "年度超值套餐，适合长期高频使用", recommended: false },
 ];
 
 const pointPackages = [
-  { id: "p-80", points: 80, price: "12", bonus: "送 10 积分" },
-  { id: "p-200", points: 200, price: "28", bonus: "送 40 积分" },
+  { id: "p-50", points: 50, price: "8", bonus: "送 5 积分", bonusPoints: 5 },
+  { id: "p-100", points: 100, price: "15", bonus: "送 15 积分", bonusPoints: 15 },
+  { id: "p-200", points: 200, price: "28", bonus: "送 40 积分", bonusPoints: 40 },
+  { id: "p-500", points: 500, price: "68", bonus: "送 120 积分", bonusPoints: 120 },
+];
+
+const redeemCodeSamples = [
+  { code: "WELCOME100", description: "新用户专属100积分礼包", type: "points", value: 100 },
+  { code: "VIP7DAYS", description: "7天会员免费体验", type: "member", value: 7 },
+  { code: "POINTS50", description: "50积分奖励兑换码", type: "points", value: 50 },
+  { code: "FREETRIAL", description: "3天免费会员体验", type: "member", value: 3 },
 ];
 
 const heroStats = [
@@ -437,6 +447,7 @@ module.exports = {
   featuredBundles,
   memberPlans,
   pointPackages,
+  redeemCodeSamples,
   heroStats,
   getCategoryById,
   getToolById,

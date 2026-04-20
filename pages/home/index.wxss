@@ -185,13 +185,15 @@
 }
 
 .tools-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20rpx;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .tool-grid-item {
-  width: calc(50% - 10rpx);
+  width: 100%;
   min-height: 220rpx;
   border-radius: 28rpx;
   padding: 24rpx;

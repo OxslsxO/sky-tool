@@ -20,10 +20,9 @@ const STORAGE_KEYS = {
 const DEFAULT_USER = {
   nickname: "微信用户",
   points: 100,
-  freeQuota: 3,
-  memberPlan: "体验会员",
-  memberExpire: "2026-04-30",
-  memberActive: true,
+  memberPlan: "普通会员",
+  memberExpire: null,
+  memberActive: false,
   userId: "",
   deviceId: "",
   authMode: "guest",
@@ -35,12 +34,23 @@ const DEFAULT_USER = {
 };
 
 function readStorage(key, fallback) {
-  const value = wx.getStorageSync(key);
-  return value || fallback;
+  try {
+    const value = wx.getStorageSync(key);
+    if (value === undefined || value === null || value === "") {
+      return fallback;
+    }
+    return value;
+  } catch (e) {
+    return fallback;
+  }
 }
 
 function writeStorage(key, value) {
-  wx.setStorageSync(key, value);
+  try {
+    wx.setStorageSync(key, value);
+  } catch (e) {
+    console.error("写入存储失败:", e);
+  }
 }
 
 function makeLocalId(prefix) {
@@ -68,11 +78,46 @@ function getSyncDirtyStamp() {
   return wx.getStorageSync(STORAGE_KEYS.syncDirty) || "";
 }
 
+function normalizeRecords(records, limit) {
+  const recordMap = new Map();
+
+  (records || []).forEach((record) => {
+    if (!record || !record.id) {
+      return;
+    }
+
+    const previous = recordMap.get(record.id);
+    const previousUpdatedAt = Number(
+      previous && (previous.updatedAt || previous.createdAt)
+        ? previous.updatedAt || previous.createdAt
+        : 0
+    );
+    const nextUpdatedAt = Number(record.updatedAt || record.createdAt || 0);
+
+    if (!previous || nextUpdatedAt >= previousUpdatedAt) {
+      recordMap.set(record.id, {
+        ...record,
+        createdAt: record.createdAt || Date.now(),
+        updatedAt: record.updatedAt || record.createdAt || Date.now(),
+      });
+    }
+  });
+
+  return Array.from(recordMap.values())
+    .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))
+    .slice(0, limit);
+}
+
 function normalizeUserState(user) {
-  const next = {
-    ...DEFAULT_USER,
-    ...(user || {}),
-  };
+  if (!user) {
+    const newUser = { ...DEFAULT_USER };
+    newUser.deviceId = makeLocalId("device");
+    newUser.createdAt = nowIso();
+    newUser.updatedAt = newUser.createdAt;
+    return newUser;
+  }
+
+  const next = { ...user };
 
   if (!next.deviceId) {
     next.deviceId = makeLocalId("device");
@@ -135,26 +180,30 @@ function triggerBackgroundSync() {
 }
 
 function seedUserState() {
-  const current = wx.getStorageSync(STORAGE_KEYS.user);
-  const next = normalizeUserState(current || DEFAULT_USER);
-
-  if (!current || JSON.stringify(current) !== JSON.stringify(next)) {
-    writeStorage(STORAGE_KEYS.user, next);
+  const current = readStorage(STORAGE_KEYS.user, null);
+  if (current) {
+    return normalizeUserState(current);
   }
 
-  return next;
+  const newUser = normalizeUserState(null);
+  writeStorage(STORAGE_KEYS.user, newUser);
+  return newUser;
 }
 
 function getUserState() {
-  return normalizeUserState(readStorage(STORAGE_KEYS.user, DEFAULT_USER));
+  const current = readStorage(STORAGE_KEYS.user, null);
+  return normalizeUserState(current);
 }
 
 function updateUserState(patch, options = {}) {
-  const next = normalizeUserState({
-    ...getUserState(),
+  const current = readStorage(STORAGE_KEYS.user, null);
+  const base = normalizeUserState(current);
+  
+  const next = {
+    ...base,
     ...patch,
     updatedAt: nowIso(),
-  });
+  };
 
   writeStorage(STORAGE_KEYS.user, next);
 
@@ -273,64 +322,96 @@ function refreshStoredTasks() {
 }
 
 function getBillingPreview(tool) {
-  const user = getUserState();
+  try {
+    const membership = require('../services/membership');
+    const priority = membership.getUsagePriority(tool);
+    
+    if (priority.priority === 'free') {
+      return {
+        usable: true,
+        mode: 'free',
+        text: '本次使用今日免费次数（每个工具每日限1次）',
+        costText: '免费使用',
+      };
+    }
 
-  if (tool.memberFree && user.memberActive) {
+    if (priority.priority === 'member') {
+      return {
+        usable: true,
+        mode: 'member',
+        text: '本次使用会员权益',
+        costText: '会员免费',
+      };
+    }
+
+    if (priority.priority === 'points') {
+      const user = getUserState();
+      return {
+        usable: true,
+        mode: 'points',
+        text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
+        costText: `消耗 ${tool.points} 积分`,
+      };
+    }
+
     return {
-      usable: true,
-      mode: "member",
-      text: "本次使用体验会员权益",
-      costText: "会员内可用",
+      usable: false,
+      mode: 'locked',
+      text: priority.text || '积分不足，请先开通会员或购买积分包',
+      costText: '资源不足',
+      needUpgrade: true,
+    };
+  } catch {
+    const user = getUserState();
+    if (user.points >= tool.points) {
+      return {
+        usable: true,
+        mode: 'points',
+        text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
+        costText: `消耗 ${tool.points} 积分`,
+      };
+    }
+    return {
+      usable: false,
+      mode: 'locked',
+      text: '积分不足，请先开通会员或购买积分包',
+      costText: '积分不足',
+      needUpgrade: true,
     };
   }
-
-  if (user.freeQuota > 0) {
-    return {
-      usable: true,
-      mode: "free",
-      text: `本次将消耗 1 次免费体验，剩余 ${user.freeQuota} 次`,
-      costText: "消耗 1 次免费体验",
-    };
-  }
-
-  if (user.points >= tool.points) {
-    return {
-      usable: true,
-      mode: "points",
-      text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
-      costText: `消耗 ${tool.points} 积分`,
-    };
-  }
-
-  return {
-    usable: false,
-    mode: "locked",
-    text: "积分不足，可先开通会员或购买积分包",
-    costText: "积分不足",
-  };
 }
 
 function commitUsage(tool) {
-  const preview = getBillingPreview(tool);
-  const user = getUserState();
+  try {
+    const membership = require('../services/membership');
+    const result = membership.commitToolUsage(tool);
+    
+    if (!result.success) {
+      return { usable: false, mode: 'locked', text: result.reason };
+    }
 
-  if (!preview.usable) {
+    return { usable: true, mode: result.mode, text: result.text };
+  } catch {
+    const preview = getBillingPreview(tool);
+    const user = getUserState();
+
+    if (!preview.usable) {
+      return preview;
+    }
+
+    if (preview.mode === 'points') {
+      updateUserState({
+        points: Math.max(user.points - tool.points, 0),
+      });
+      addPointsRecord({
+        type: 'consume',
+        title: tool.name,
+        change: -tool.points,
+      });
+    }
+
     return preview;
   }
-
-  if (preview.mode === "free") {
-    updateUserState({
-      freeQuota: Math.max(user.freeQuota - 1, 0),
-    });
-  }
-
-  if (preview.mode === "points") {
-    updateUserState({
-      points: Math.max(user.points - tool.points, 0),
-    });
-  }
-
-  return preview;
 }
 
 function toMegabytes(value, bytes) {
@@ -901,14 +982,39 @@ function getMemberStatus() {
 }
 
 function applyRemoteState(state) {
+  console.log("🔄 应用云端状态，智能合并（本地用户数据优先）");
+  
   const snapshot = state || {};
-  const nextUser = normalizeUserState({
-    ...getUserState(),
-    ...(snapshot.user || {}),
-  });
-
-  writeStorage(STORAGE_KEYS.user, nextUser);
-
+  const currentUser = readStorage(STORAGE_KEYS.user, null);
+  
+  // 智能合并用户数据：优先本地，缺失字段从云端补充
+  if (snapshot.user) {
+    if (currentUser) {
+      // 都存在时：本地优先，但比较更新时间
+      const localTime = new Date(currentUser.updatedAt || 0).getTime();
+      const remoteTime = new Date(snapshot.user.updatedAt || 0).getTime();
+      
+      const mergedUser = {
+        ...snapshot.user,           // 基础信息从云端
+        ...currentUser,             // 本地覆盖
+        // 积分、会员状态永远优先本地（本地更新触发同步）
+        points: currentUser.points ?? snapshot.user.points,
+        memberPlan: currentUser.memberPlan ?? snapshot.user.memberPlan,
+        memberActive: currentUser.memberActive ?? snapshot.user.memberActive,
+        memberExpire: currentUser.memberExpire ?? snapshot.user.memberExpire,
+        // 更新时间取最新的
+        updatedAt: new Date(Math.max(localTime, remoteTime)).toISOString()
+      };
+      writeStorage(STORAGE_KEYS.user, mergedUser);
+      console.log("✅ 用户数据已合并（本地优先）");
+    } else {
+      // 本地没有，用云端
+      writeStorage(STORAGE_KEYS.user, snapshot.user);
+      console.log("✅ 首次从云端获取用户数据");
+    }
+  }
+  
+  // 其他数据正常同步
   if (Array.isArray(snapshot.tasks)) {
     saveTasks(mergeTaskLists(getRawTasks(), snapshot.tasks), { silent: true });
   }
@@ -922,11 +1028,17 @@ function applyRemoteState(state) {
   }
 
   if (Array.isArray(snapshot.pointsRecords)) {
-    writeStorage(STORAGE_KEYS.pointsRecords, snapshot.pointsRecords);
+    // 合并积分记录，去重
+    const localRecords = readStorage(STORAGE_KEYS.pointsRecords, []);
+    const mergedRecords = normalizeRecords([...localRecords, ...snapshot.pointsRecords], 200);
+    writeStorage(STORAGE_KEYS.pointsRecords, mergedRecords);
   }
 
   if (Array.isArray(snapshot.orders)) {
-    writeStorage(STORAGE_KEYS.orders, snapshot.orders);
+    // 合并订单记录
+    const localOrders = readStorage(STORAGE_KEYS.orders, []);
+    const mergedOrders = normalizeRecords([...localOrders, ...snapshot.orders], 100);
+    writeStorage(STORAGE_KEYS.orders, mergedOrders);
   }
 
   clearSyncDirty();

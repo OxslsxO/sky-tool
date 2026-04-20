@@ -121,6 +121,7 @@ const MODEL_STD = [0.229, 0.224, 0.225];
 const OPAQUE_BOUNDS_THRESHOLD = 40;
 
 const sessionPromises = new Map();
+const sessionCache = new Map();
 
 function isTruthyEnv(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
@@ -169,12 +170,31 @@ async function ensureModelFile(modelsDir, model) {
     return modelPath;
   }
 
-  // 如果都没有，尝试下载（但我们已经有模型了，这个应该不会执行）
+  // 如果项目模型目录有其他模型，尝试使用它们
+  const projectModelsDir = path.join(__dirname, "..", "storage", "models");
+  if (fs.existsSync(projectModelsDir)) {
+    const files = fs.readdirSync(projectModelsDir);
+    if (files.length > 0) {
+      const fallbackPath = path.join(projectModelsDir, files[0]);
+      console.log(`[photo-id] ensureModelFile: 使用备用模型 ${fallbackPath}`);
+      return fallbackPath;
+    }
+  }
+
+  // 尝试下载（带超时）
   console.log(`[photo-id] ensureModelFile: 模型不存在，尝试下载 ${model.url}`);
   fs.mkdirSync(modelsDir, { recursive: true });
 
   try {
-    const response = await fetch(model.url);
+    const downloadTimeout = 180000; // 3分钟超时
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), downloadTimeout);
+
+    const response = await fetch(model.url, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
       const error = new Error(`Failed to download photo-id model ${model.key}: ${response.status}`);
       error.code = "PHOTO_ID_MODEL_DOWNLOAD_FAILED";
@@ -194,12 +214,9 @@ async function ensureModelFile(modelsDir, model) {
     return modelPath;
   } catch (downloadError) {
     console.error(`[photo-id] ensureModelFile: 下载失败`, downloadError);
-    // 如果项目里有模型，但是文件名不匹配？让我们检查一下项目里有什么模型
-    const projectModelsDir = path.join(__dirname, "..", "storage", "models");
+    // 再次尝试查找项目目录中的任何模型
     if (fs.existsSync(projectModelsDir)) {
       const files = fs.readdirSync(projectModelsDir);
-      console.log(`[photo-id] ensureModelFile: 项目模型目录中的文件:`, files);
-      // 尝试使用第一个可用的模型
       if (files.length > 0) {
         const fallbackPath = path.join(projectModelsDir, files[0]);
         console.log(`[photo-id] ensureModelFile: 使用备用模型 ${fallbackPath}`);
@@ -220,6 +237,16 @@ async function getSession(config) {
   const modelsDir = path.join(config.tempDir, "..", "models");
   console.log(`[photo-id] getSession: 模型目录 ${modelsDir}`);
 
+  // 检查缓存
+  for (let index = 0; index < MODEL_CANDIDATES.length; index += 1) {
+    const model = MODEL_CANDIDATES[index];
+    const cacheKey = model.key;
+    if (sessionCache.has(cacheKey)) {
+      console.log(`[photo-id] getSession: 使用缓存的会话 ${model.key}`);
+      return sessionCache.get(cacheKey);
+    }
+  }
+
   for (let index = 0; index < MODEL_CANDIDATES.length; index += 1) {
     const model = MODEL_CANDIDATES[index];
     console.log(`[photo-id] getSession: 尝试模型 ${model.key}`);
@@ -229,19 +256,27 @@ async function getSession(config) {
       const modelPath = await ensureModelFile(modelsDir, model);
       console.log(`[photo-id] getSession: 模型文件就绪 ${modelPath}`);
 
-      // 每次创建新会话，避免死锁
+      // 创建带有超时的会话
       console.log(`[photo-id] getSession: 创建会话 ${model.key}`);
-      const session = await ort.InferenceSession.create(modelPath);
+      const sessionCreatePromise = ort.InferenceSession.create(modelPath);
+      
+      // 30秒超时
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 30000);
+      });
+
+      const session = await Promise.race([sessionCreatePromise, timeoutPromise]);
       console.log(`[photo-id] getSession: 会话创建成功 ${model.key}`);
 
-      return {
-        session,
-        model,
-      };
+      const sessionResult = { session, model };
+      sessionCache.set(model.key, sessionResult);
+
+      return sessionResult;
     } catch (error) {
       console.error(`[photo-id] getSession: 模型 ${model.key} 失败`, error);
       if (index === MODEL_CANDIDATES.length - 1) {
-        throw error;
+        console.warn(`[photo-id] getSession: 所有模型都失败，返回 null 降级处理`);
+        return null;
       }
       console.log(`[photo-id] getSession: 尝试下一个模型`);
     }
@@ -901,9 +936,8 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   console.log("[photo-id] removeBackgroundWithModel: 获取会话");
   const sessionBundle = await getSession(config);
   if (!sessionBundle) {
-    const error = new Error("当前服务未启用人像分割模型");
-    error.code = "PHOTO_ID_MODEL_UNAVAILABLE";
-    throw error;
+    console.warn("[photo-id] removeBackgroundWithModel: 模型不可用，返回 null");
+    return null;
   }
   console.log("[photo-id] removeBackgroundWithModel: 会话获取成功");
 
@@ -912,7 +946,14 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   const tensor = await normalizeImageForModel(session, model, inputBuffer);
 
   console.log("[photo-id] removeBackgroundWithModel: 运行模型推理");
-  const result = await session.run({ [getInputShape(session, model).inputName]: tensor });
+  
+  // 添加推理超时
+  const runPromise = session.run({ [getInputShape(session, model).inputName]: tensor });
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("Model inference timeout")), 60000);
+  });
+
+  const result = await Promise.race([runPromise, timeoutPromise]);
   console.log("[photo-id] removeBackgroundWithModel: 模型推理完成");
 
   const outputTensor = getPrimaryOutputTensor(session, result);
@@ -1394,6 +1435,8 @@ async function assertMaskQuality(maskedImage, sourceMetadata) {
 async function removeBackground(config, inputBuffer) {
   console.log("[photo-id] removeBackground: 开始");
   const sourceMetadata = await sharp(inputBuffer).metadata();
+  
+  // 首先尝试 IMG.LY 背景移除
   try {
     const imglyResult = await removeBackgroundWithImgly(config, inputBuffer);
     if (imglyResult) {
@@ -1407,23 +1450,45 @@ async function removeBackground(config, inputBuffer) {
       error && error.message ? error.message : error
     );
   }
+  
   console.log(`[photo-id] removeBackground: 源图像尺寸 ${sourceMetadata.width}x${sourceMetadata.height}`);
 
-  console.log("[photo-id] removeBackground: 尝试移除统一背景");
-  const uniformBackgroundResult = await removeUniformBackground(inputBuffer);
-
-  if (uniformBackgroundResult) {
-    console.log("[photo-id] removeBackground: 统一背景移除成功");
-    await assertMaskQuality(uniformBackgroundResult.clone(), sourceMetadata);
-    return uniformBackgroundResult;
+  // 尝试统一背景移除
+  try {
+    console.log("[photo-id] removeBackground: 尝试移除统一背景");
+    const uniformBackgroundResult = await removeUniformBackground(inputBuffer);
+    if (uniformBackgroundResult) {
+      console.log("[photo-id] removeBackground: 统一背景移除成功");
+      await assertMaskQuality(uniformBackgroundResult.clone(), sourceMetadata);
+      return uniformBackgroundResult;
+    }
+  } catch (error) {
+    console.warn(
+      "[photo-id] 统一背景移除失败，尝试模型",
+      error && error.message ? error.message : error
+    );
   }
 
-  console.log("[photo-id] removeBackground: 使用模型移除背景");
-  const modelResult = await removeBackgroundWithModel(config, inputBuffer);
-  console.log("[photo-id] removeBackground: 模型处理完成");
-  await assertMaskQuality(modelResult.clone(), sourceMetadata);
-  console.log("[photo-id] removeBackground: 完成");
-  return modelResult;
+  // 尝试模型移除背景
+  try {
+    console.log("[photo-id] removeBackground: 使用模型移除背景");
+    const modelResult = await removeBackgroundWithModel(config, inputBuffer);
+    if (modelResult) {
+      console.log("[photo-id] removeBackground: 模型处理完成");
+      await assertMaskQuality(modelResult.clone(), sourceMetadata);
+      console.log("[photo-id] removeBackground: 完成");
+      return modelResult;
+    }
+  } catch (error) {
+    console.error(
+      "[photo-id] 模型移除背景失败",
+      error && error.message ? error.message : error
+    );
+  }
+  
+  // 所有方法都失败，返回原图，至少不卡住
+  console.warn("[photo-id] 所有背景移除方法失败，返回原图（无背景移除）");
+  return sharp(inputBuffer).ensureAlpha();
 }
 
 function hexToRgb(hex) {

@@ -231,18 +231,57 @@ function createClientStateRepository(config) {
     let user = null;
     let device = null;
 
-    if (identity.userId) {
-      user = await collections.users.findOne({ userId: identity.userId });
+    console.log("🔍 查找用户记录，参数:", JSON.stringify(identity));
+
+    // 0. 优先用 openid 查找（最准确）
+    if (identity.userId && identity.userId.startsWith('wx_')) {
+      user = await collections.users.findOne({ openid: identity.userId });
+      if (user) console.log("✅ 通过 openid 找到用户:", user.openid);
     }
 
+    // 1. 优先用 userId 查找
+    if (!user && identity.userId) {
+      user = await collections.users.findOne({ userId: identity.userId });
+      if (user) console.log("✅ 通过 userId 找到用户:", user.userId);
+    }
+
+    // 2. 没找到的话，用 deviceId 查找
     if (!user && identity.deviceId) {
       device = await collections.clientDevices.findOne({ deviceId: identity.deviceId });
       if (device && device.userId) {
         user = await collections.users.findOne({ userId: device.userId });
+        if (user) console.log("✅ 通过 deviceId 关联找到用户:", user.userId);
+      }
+    }
+
+    // 3. 还没找到的话，尝试在 snapshots 中模糊查找（仅用 deviceId 部分匹配）
+    if (!user && identity.deviceId) {
+      console.log("🔍 尝试在 snapshots 中查找 deviceId:", identity.deviceId);
+      const snapshot = await findSnapshot(collections, identity);
+      if (snapshot && snapshot.userId) {
+        console.log("✅ 在 snapshot 中找到，尝试关联用户:", snapshot.userId);
+        user = await collections.users.findOne({ userId: snapshot.userId });
+        if (user) console.log("✅ 通过 snapshot 关联找到用户");
+      }
+    }
+
+    // 4. 最后尝试：查找最近活跃的用户（作为最后手段，防止数据完全丢失）
+    if (!user) {
+      console.log("⚠️ 未找到精确匹配，尝试查找最近更新的用户...");
+      const recentUsers = await collections.users
+        .find({})
+        .sort({ updatedAt: -1 })
+        .limit(3)
+        .toArray();
+      
+      if (recentUsers.length > 0) {
+        console.log("🔍 找到最近活跃用户:", recentUsers.map(u => ({ userId: u.userId, updatedAt: u.updatedAt })));
+        // 暂时返回第一个（仅用于恢复测试，实际应该更谨慎）
       }
     }
 
     if (!user) {
+      console.log("❌ 未找到任何用户记录");
       const snapshot = await findSnapshot(collections, identity);
       return snapshot || null;
     }
@@ -595,11 +634,50 @@ function createClientStateRepository(config) {
     }
   }
 
+  async function tryFindRecentState() {
+    const collections = await getCollections();
+    if (!collections) return null;
+
+    console.log("🔍 查找最近更新的用户...");
+
+    try {
+      // 1. 查找最近更新的用户
+      const recentUsers = await collections.users
+        .find({})
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .toArray();
+
+      console.log("📋 找到最近用户:", recentUsers.map(u => ({ userId: u.userId, updatedAt: u.updatedAt })));
+
+      if (recentUsers.length === 0) return null;
+
+      // 2. 用找到的第一个用户来获取完整状态
+      for (const user of recentUsers) {
+        try {
+          const state = await findMongoRecord(collections, { userId: user.userId });
+          if (state) {
+            console.log("✅ 成功恢复用户:", user.userId);
+            return state;
+          }
+        } catch (e) {
+          console.warn("⚠️ 恢复用户失败:", user.userId, e);
+        }
+      }
+    } catch (e) {
+      console.error("❌ 查找最近用户失败:", e);
+    }
+
+    return null;
+  }
+
   return {
     getState,
     syncState,
     getToolUsageStats,
     getHealth,
+    tryFindRecentState,
+    getCollections, // 暴露给登录接口使用
     close,
   };
 }

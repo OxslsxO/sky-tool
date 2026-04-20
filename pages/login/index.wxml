@@ -1,0 +1,60 @@
+<view class="login-container">
+  <!-- 登录页 -->
+  <view class="step-content" wx:if="{{step === 'login'}}">
+    <view class="logo-area">
+      <text class="logo-text">🧰</text>
+      <text class="app-name">晴空工具箱</text>
+      <text class="app-desc">便捷实用的多功能工具集</text>
+    </view>
+    
+    <view class="action-area">
+      <button 
+        class="wechat-login-btn"
+        open-type="getUserInfo"
+        bindgetuserinfo="onGetUserInfo"
+        loading="{{loading}}"
+      >
+        <text class="btn-icon">💬</text>
+        微信登录
+      </button>
+    </view>
+    
+    <view class="bottom-tip">
+      <text class="tip-text">登录即表示同意用户协议和隐私政策</text>
+    </view>
+  </view>
+
+  <!-- 手机号绑定页 -->
+  <view class="step-content" wx:if="{{step === 'bind-phone'}}">
+    <view class="logo-area">
+      <text class="logo-text">📱</text>
+      <text class="app-name">绑定手机号</text>
+      <text class="app-desc">为了保障您的数据安全</text>
+    </view>
+    
+    <view class="action-area">
+      <button 
+        class="phone-bind-btn"
+        open-type="getPhoneNumber"
+        bindgetphonenumber="onGetPhoneNumber"
+        loading="{{loading}}"
+      >
+        <text class="btn-icon">🔑</text>
+        获取手机号
+      </button>
+      
+      <view class="test-hint">
+        <text class="test-text" bindtap="onGetPhoneNumber">（开发测试：点击这里跳过）</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 成功页 -->
+  <view class="step-content" wx:if="{{step === 'success'}}">
+    <view class="logo-area">
+      <text class="logo-text success-icon">✅</text>
+      <text class="app-name">登录成功</text>
+      <text class="app-desc">正在跳转...</text>
+    </view>
+  </view>
+</view>

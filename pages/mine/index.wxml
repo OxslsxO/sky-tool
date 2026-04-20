@@ -29,29 +29,11 @@
     </view>
   </view>
 
-  <view class="section">
-    <view class="card profile-card">
-      <view class="row space-between profile-card__head">
-        <view>
-          <text class="eyebrow">Account</text>
-          <text class="profile-card__title">{{authModeText}} Account</text>
-        </view>
-        <text class="pill">{{backendConfigured ? 'Cloud Ready' : 'Local Only'}}</text>
-      </view>
+  <!-- 完全移除账户卡片 -->
+  <!-- 数据恢复功能暂时隐藏 -->
+  
+  <!-- 如果后续需要恢复功能，可以在这里添加 -->
 
-      <view class="profile-card__meta">
-        <text class="profile-card__line">Account ID: {{shortUserId}}</text>
-        <text class="profile-card__line">Sync: {{syncHint}}</text>
-      </view>
-
-      <view class="profile-card__actions">
-        <view class="btn-primary profile-card__button" bindtap="syncNow">
-          {{syncBusy ? 'Syncing...' : 'Sync Now'}}
-        </view>
-        <view class="btn-ghost profile-card__button" bindtap="openProfileEdit">Edit Profile</view>
-      </view>
-    </view>
-  </view>
 
   <view class="section" wx:if="{{favorites.length}}">
     <view class="section-head">
