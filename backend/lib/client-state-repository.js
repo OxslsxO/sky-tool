@@ -366,6 +366,74 @@ function createClientStateRepository(config) {
     };
   }
 
+  function buildUsageStatsFromTasks(tasks) {
+    const counts = new Map();
+
+    (tasks || []).forEach((task) => {
+      if (!task || !task.toolId || task.status === "failed") {
+        return;
+      }
+
+      counts.set(task.toolId, (counts.get(task.toolId) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .map(([toolId, count]) => ({ toolId, count }))
+      .sort((left, right) => right.count - left.count || left.toolId.localeCompare(right.toolId));
+  }
+
+  async function getMongoToolUsageStats() {
+    const collections = await getCollections();
+    if (!collections) {
+      return null;
+    }
+
+    const stats = await collections.tasks
+      .aggregate([
+        {
+          $match: {
+            toolId: { $exists: true, $ne: "" },
+            status: { $ne: "failed" },
+          },
+        },
+        {
+          $group: {
+            _id: "$toolId",
+            count: { $sum: 1 },
+          },
+        },
+        {
+          $sort: {
+            count: -1,
+            _id: 1,
+          },
+        },
+      ])
+      .toArray();
+
+    return stats.map((item) => ({
+      toolId: item._id,
+      count: item.count,
+    }));
+  }
+
+  async function getToolUsageStats() {
+    const mongoStats = await getMongoToolUsageStats();
+    if (mongoStats) {
+      return {
+        provider: "mongodb",
+        stats: mongoStats,
+      };
+    }
+
+    const state = readLocalFile();
+    const tasks = (state.records || []).flatMap((record) => record.tasks || []);
+    return {
+      provider: "local-file",
+      stats: buildUsageStatsFromTasks(tasks),
+    };
+  }
+
   async function upsertSnapshot(collections, nextRecord) {
     await collections.snapshots.updateOne(
       { userId: nextRecord.userId },
@@ -530,6 +598,7 @@ function createClientStateRepository(config) {
   return {
     getState,
     syncState,
+    getToolUsageStats,
     getHealth,
     close,
   };

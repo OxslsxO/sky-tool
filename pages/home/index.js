@@ -1,23 +1,28 @@
 const { tools, featuredBundles, categories, getToolsByIds } = require("../../data/mock");
-const { getRecentTools, getTaskDashboard, getUserState } = require("../../utils/task-store");
+const { getRecentTools, getTaskDashboard, getUserState, getRawTasks } = require("../../utils/task-store");
+const { fetchToolUsageStats } = require("../../services/tool-usage");
 
 const TOOL_ICONS = {
   "photo-id": "📷",
-  "image-compress": "🗜️",
-  "image-convert": "🔄",
+  "universal-compress": "🗜️",
+  "image-convert": "🔁",
   "resize-crop": "📐",
   "image-to-pdf": "📄",
-  "pdf-compress": "📉",
   "pdf-merge": "➕",
   "pdf-split": "✂️",
-  "office-to-pdf": "📋",
-  "ocr-text": "🔍",
-  "qr-maker": "🔲",
+  "office-to-pdf": "📑",
+  "ocr-text": "🔎",
+  "qr-maker": "▦",
   "unit-convert": "📏",
   "audio-convert": "🎵",
 };
 
-const HOT_SEARCHES = ["证件照", "PDF压缩", "OCR", "二维码", "图片转PDF", "音频转换"];
+const HOT_SEARCHES = ["证件照", "PDF压缩", "OCR", "二维码", "图片转PDF", "音视频转换"];
+
+const TOOL_ORDER = tools.reduce((map, tool, index) => {
+  map[tool.id] = index;
+  return map;
+}, {});
 
 Page({
   data: {
@@ -27,16 +32,18 @@ Page({
     displayTools: [],
     recentTools: [],
     bundles: [],
-    categories: categories,
+    categories,
     dashboard: {},
     user: {},
+    toolUsageStats: {},
+    toolUsageTotal: 0,
+    toolUsageProvider: "",
     viewMode: "grid",
     selectedCategory: "all",
     memberExpireText: "",
   },
 
   onLoad() {
-    console.log("[首页] onLoad, 刷新所有数据");
     this.setData({
       displayTools: this.filterTools(""),
     });
@@ -44,6 +51,7 @@ Page({
 
   onShow() {
     this.refreshPage();
+    this.refreshToolUsageStats();
     this.updateGreeting();
   },
 
@@ -51,7 +59,7 @@ Page({
     const bundles = featuredBundles.map((bundle) => ({
       ...bundle,
       toolNames: getToolsByIds(bundle.toolIds).map((tool) => tool.name).join(" / "),
-      toolIcons: bundle.toolIds.map((id) => TOOL_ICONS[id] || "🔧"),
+      toolIcons: bundle.toolIds.map((id) => TOOL_ICONS[id] || "🛠"),
       toolCount: bundle.toolIds.length,
     }));
 
@@ -69,22 +77,43 @@ Page({
   },
 
   enhanceTool(tool) {
+    const globalUsageCount = this.data.toolUsageStats[tool.id] || 0;
+    const personalUsageCount = this.getPersonalToolUsageCount(tool.id);
+    const usageCount = globalUsageCount || personalUsageCount;
+
+    let usageText = "";
+    if (globalUsageCount > 0) {
+      usageText = `全站 ${this.formatUsageCount(globalUsageCount)} 次`;
+    } else if (personalUsageCount > 0) {
+      usageText = `已使用 ${this.formatUsageCount(personalUsageCount)} 次`;
+    }
+
     return {
       ...tool,
-      icon: TOOL_ICONS[tool.id] || "🔧",
+      usageCount,
+      usageText,
+      icon: TOOL_ICONS[tool.id] || "🛠",
     };
+  },
+
+  getPersonalToolUsageCount(toolId) {
+    const tasks = getRawTasks();
+    return tasks.filter((task) => task.toolId === toolId && task.status === "success").length;
+  },
+
+  formatUsageCount(count) {
+    const value = Number(count) || 0;
+    if (value >= 10000) {
+      return `${(value / 10000).toFixed(value >= 100000 ? 0 : 1)}万`;
+    }
+    return String(value);
   },
 
   filterTools(keyword) {
     let filtered = [...tools];
 
-    console.log("[首页筛选] 开始筛选, selectedCategory:", this.data.selectedCategory);
-    console.log("[首页筛选] 原始工具数量:", filtered.length);
-
     if (this.data.selectedCategory !== "all") {
       filtered = filtered.filter((tool) => tool.categoryId === this.data.selectedCategory);
-      console.log("[首页筛选] 按分类筛选后工具数量:", filtered.length);
-      console.log("[首页筛选] 筛选后工具:", filtered.map(t => ({id: t.id, name: t.name, categoryId: t.categoryId})));
     }
 
     if (keyword) {
@@ -95,7 +124,47 @@ Page({
       });
     }
 
+    filtered.sort((left, right) => {
+      const leftGlobal = this.data.toolUsageStats[left.id] || 0;
+      const rightGlobal = this.data.toolUsageStats[right.id] || 0;
+      const leftPersonal = this.getPersonalToolUsageCount(left.id);
+      const rightPersonal = this.getPersonalToolUsageCount(right.id);
+      const leftCount = leftGlobal || leftPersonal;
+      const rightCount = rightGlobal || rightPersonal;
+
+      if (rightCount !== leftCount) {
+        return rightCount - leftCount;
+      }
+
+      return (TOOL_ORDER[left.id] || 0) - (TOOL_ORDER[right.id] || 0);
+    });
+
     return filtered.map((tool) => this.enhanceTool(tool));
+  },
+
+  async refreshToolUsageStats() {
+    try {
+      const response = await fetchToolUsageStats();
+      const stats = Array.isArray(response.stats) ? response.stats : [];
+      const toolUsageStats = stats.reduce((map, item) => {
+        if (item && item.toolId) {
+          map[item.toolId] = Number(item.count) || 0;
+        }
+        return map;
+      }, {});
+
+      this.setData({
+        toolUsageStats,
+        toolUsageTotal: Number(response.totalUsageCount) || stats.reduce((sum, item) => sum + (Number(item.count) || 0), 0),
+        toolUsageProvider: response.provider || "",
+        displayTools: this.filterTools(this.data.keyword),
+      });
+    } catch (error) {
+      console.warn("[home] failed to fetch tool usage stats", error);
+      this.setData({
+        displayTools: this.filterTools(this.data.keyword),
+      });
+    }
   },
 
   updateGreeting() {
@@ -153,11 +222,9 @@ Page({
 
   selectCategory(event) {
     const category = event.currentTarget.dataset.category;
-    console.log("[首页分类] 选中分类:", category);
     this.setData({
       selectedCategory: category,
     }, () => {
-      console.log("[首页分类] 数据更新完成，重新筛选工具");
       this.setData({
         displayTools: this.filterTools(this.data.keyword),
       });
@@ -171,7 +238,7 @@ Page({
     });
   },
 
-  goBundleDetail(event) {
+  goBundleDetail() {
     wx.showToast({
       title: "套装功能开发中",
       icon: "none",

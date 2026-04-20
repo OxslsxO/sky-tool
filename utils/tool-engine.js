@@ -1,5 +1,4 @@
 const CLIENT_TOOL_IDS = [
-  "image-compress",
   "image-convert",
   "resize-crop",
   "image-to-pdf",

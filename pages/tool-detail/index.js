@@ -6,7 +6,7 @@ const BACKGROUND_COLOR_MAP = {
   "白色": "#ffffff",
   "蓝色": "#2d6ec9",
   "红色": "#cf5446",
-  "淡蓝": "#87ceeb",
+  "浅蓝": "#87ceeb",
   "天蓝": "#2d6ec9",
   "藏蓝": "#1e3a5f",
   "大红": "#cf5446",
@@ -17,6 +17,10 @@ const BACKGROUND_COLOR_MAP = {
 };
 
 const DEFAULT_BACKGROUND_COLORS = ["白色", "蓝色", "红色"];
+const AUDIO_CONVERT_AUDIO_FORMATS = ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC"];
+const AUDIO_CONVERT_VIDEO_FORMATS = ["MP4", "MOV", "WEBM"];
+const AUDIO_CONVERT_AUDIO_EXTS = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
+const AUDIO_CONVERT_VIDEO_EXTS = ["mp4", "mov", "webm", "avi", "mkv", "wmv", "flv"];
 const {
   createTask,
   getBillingPreview,
@@ -78,7 +82,7 @@ function getImageInfo(src) {
 
 function getFileInfo(filePath) {
   return new Promise((resolve) => {
-    wx.getFileInfo({
+    wx.getFileSystemManager().getFileInfo({
       filePath,
       success: resolve,
       fail: () => resolve(null),
@@ -110,6 +114,114 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function estimateRemoteDurationMs(toolId, sizeBytes) {
+  const mb = Math.max(Number(sizeBytes || 0) / 1024 / 1024, 0.1);
+  const baseMap = {
+    "photo-id": 15000,
+    "ocr-text": 9000,
+    "pdf-merge": 9000,
+    "pdf-split": 9000,
+    "pdf-compress": 11000,
+    "office-to-pdf": 18000,
+    "pdf-to-word": 24000,
+    "audio-convert": 18000,
+    "universal-compress": 14000,
+  };
+  const perMbMap = {
+    "photo-id": 900,
+    "ocr-text": 700,
+    "pdf-merge": 700,
+    "pdf-split": 650,
+    "pdf-compress": 900,
+    "office-to-pdf": 1200,
+    "pdf-to-word": 1500,
+    "audio-convert": 1300,
+    "universal-compress": 1200,
+  };
+  const base = baseMap[toolId] || 8000;
+  const perMb = perMbMap[toolId] || 800;
+  return Math.min(65000, Math.max(5000, Math.round(base + mb * perMb)));
+}
+
+function buildOcrLineItems(lines, fallbackText) {
+  const sourceLines = Array.isArray(lines) && lines.length
+    ? lines
+    : String(fallbackText || "").split(/\r?\n/);
+
+  const cleanLines = sourceLines
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  const blocks = [];
+
+  cleanLines.forEach((line) => {
+    const previous = blocks[blocks.length - 1];
+    if (!previous) {
+      blocks.push(line);
+      return;
+    }
+
+    if (shouldMergeOcrLine(previous, line)) {
+      blocks[blocks.length - 1] = mergeOcrLines(previous, line);
+      return;
+    }
+
+    blocks.push(line);
+  });
+
+  return blocks.map((line, index) => ({
+    id: `${index}-${line.slice(0, 12)}`,
+    text: line,
+  }));
+}
+
+function shouldMergeOcrLine(previous, current) {
+  const prev = String(previous || "").trim();
+  const next = String(current || "").trim();
+
+  if (!prev || !next) {
+    return false;
+  }
+
+  if (/^https?:\/\//i.test(prev) && !/[。！？!?]$/.test(prev)) {
+    return /^[A-Za-z0-9&?=._:/-]+$/.test(next);
+  }
+
+  if ((/[&?=/_-]$/.test(prev) || /^[&?=/_-]/.test(next)) && /^[A-Za-z0-9&?=._:/-]+$/.test(next)) {
+    return true;
+  }
+
+  const prevHasCjk = /[\u4e00-\u9fff]/.test(prev);
+  const nextHasCjk = /[\u4e00-\u9fff]/.test(next);
+  if (prevHasCjk !== nextHasCjk) {
+    return false;
+  }
+
+  if (prevHasCjk && prev.length <= 28 && next.length <= 14 && (prev.length + next.length) <= 34 && !/[。！？!?]$/.test(prev)) {
+    return true;
+  }
+
+  if (!prevHasCjk && /^[A-Za-z0-9\s&?=._:/-]+$/.test(prev) && /^[A-Za-z0-9\s&?=._:/-]+$/.test(next) && (prev.length + next.length) < 80) {
+    return true;
+  }
+
+  return false;
+}
+
+function mergeOcrLines(previous, current) {
+  const prev = String(previous || "").trim();
+  const next = String(current || "").trim();
+
+  if (/[&?=/_-]$/.test(prev) || /^[&?=/_-]/.test(next)) {
+    return `${prev}${next}`;
+  }
+
+  if (/[\u4e00-\u9fff]$/.test(prev) && /^[\u4e00-\u9fff]/.test(next)) {
+    return `${prev} / ${next}`;
+  }
+
+  return `${prev} ${next}`;
 }
 
 function readFileArrayBuffer(filePath) {
@@ -219,6 +331,42 @@ function getToolOption(tool, key, index) {
   return param && param.options ? param.options[index] : "";
 }
 
+function getFileExtension(fileName) {
+  return String(fileName || "").split(".").pop().toLowerCase();
+}
+
+function getAudioConvertInputKind(fileName) {
+  const ext = getFileExtension(fileName);
+  if (AUDIO_CONVERT_AUDIO_EXTS.includes(ext)) {
+    return "audio";
+  }
+  if (AUDIO_CONVERT_VIDEO_EXTS.includes(ext)) {
+    return "video";
+  }
+  return "";
+}
+
+function getAudioConvertTargetOptions(inputKind) {
+  if (inputKind === "audio") {
+    return AUDIO_CONVERT_AUDIO_FORMATS;
+  }
+  if (inputKind === "video") {
+    return AUDIO_CONVERT_AUDIO_FORMATS.concat(AUDIO_CONVERT_VIDEO_FORMATS);
+  }
+  return [];
+}
+
+function getAudioConvertResultKind(fileName, target) {
+  const ext = getFileExtension(fileName || target);
+  if (AUDIO_CONVERT_AUDIO_EXTS.includes(ext)) {
+    return "audio";
+  }
+  if (AUDIO_CONVERT_VIDEO_FORMATS.map((item) => item.toLowerCase()).includes(ext)) {
+    return "video";
+  }
+  return "";
+}
+
 const PHOTO_ID_SESSION_KEY = "tool-detail-photo-id-session";
 
 function isRemoteUrl(value) {
@@ -281,6 +429,7 @@ Page({
     heroScenario: "",
     isClientTool: false,
     isBackendTool: false,
+    visibleParams: [],
     showImageUpload: false,
     showTextInput: false,
     showUnitConverter: false,
@@ -312,6 +461,18 @@ Page({
     showBackendRangeInput: false,
     backendPickerTitle: "",
     backendPickerButtonText: "",
+    audioTargetOptions: [],
+    audioInputKind: "",
+    audioConvertResultReady: false,
+    audioConvertResultPath: "",
+    audioConvertResultRemoteUrl: "",
+    audioConvertResultName: "",
+    audioConvertResultHeadline: "",
+    audioConvertResultDetail: "",
+    audioConvertResultMetaLines: [],
+    audioConvertResultKind: "",
+    audioConvertIsPlaying: false,
+    audioConvertAudioContext: null,
     showRecentTasks: true,
     photoIdResultReady: false,
     photoIdResultPath: "",
@@ -320,6 +481,12 @@ Page({
     photoIdResultHeadline: "",
     photoIdResultDetail: "",
     photoIdResultMetaLines: [],
+    ocrResultReady: false,
+    ocrResultText: "",
+    ocrResultLines: [],
+    ocrResultHeadline: "",
+    ocrResultDetail: "",
+    ocrResultProviderText: "",
     compressResultReady: false,
     compressResultPath: "",
     compressResultRemoteUrl: "",
@@ -339,6 +506,28 @@ Page({
     convertResultFromFormat: "",
     convertResultToFormat: "",
     convertResultMetaLines: [],
+    resizeResultReady: false,
+    resizeResultPath: "",
+    resizeResultRemoteUrl: "",
+    resizeResultName: "",
+    resizeResultHeadline: "",
+    resizeResultDetail: "",
+    resizeResultMetaLines: [],
+    resizeBeforeWidth: 0,
+    resizeBeforeHeight: 0,
+    resizeAfterWidth: 0,
+    resizeAfterHeight: 0,
+    universalCompressResultReady: false,
+    universalCompressResultPath: "",
+    universalCompressResultRemoteUrl: "",
+    universalCompressResultName: "",
+    universalCompressResultHeadline: "",
+    universalCompressResultDetail: "",
+    universalCompressResultBeforeSizeText: "",
+    universalCompressResultAfterSizeText: "",
+    universalCompressResultSavedText: "",
+    universalCompressResultMetaLines: [],
+    universalCompressFileType: "",
     pdfToWordResultReady: false,
     pdfToWordResultPath: "",
     pdfToWordResultRemoteUrl: "",
@@ -349,6 +538,12 @@ Page({
     photoIdIsProcessing: false,
     backgroundColorMap: BACKGROUND_COLOR_MAP,
     processingProgress: 0,
+    processingDisplayProgress: 0,
+    processingDisplayProgressText: 0,
+    processingEstimateFrom: 0,
+    processingEstimateTo: 0,
+    processingEstimateStartedAt: 0,
+    processingEstimateDurationMs: 0,
     processingStatus: "",
     processingTitle: "",
     processingKind: "",
@@ -375,7 +570,7 @@ Page({
     const viewState = this.buildViewState(tool, selections);
     const photoIdSession = tool.id === "photo-id" ? readPhotoIdSession() : null;
     const photoIdStats = tool.id === "photo-id" ? getPhotoIdStats() : null;
-    // 添加silent选项，避免触发同步操作导致页面刷新
+    // 添加 silent 选项，避免触发同步操作导致页面刷新
     touchRecentTool(tool.id, { silent: true });
 
     const nextState = {
@@ -433,6 +628,10 @@ Page({
   },
 
   onUnload() {
+    this.stopProcessingProgressTicker();
+    if (this.data.audioConvertAudioContext) {
+      this.data.audioConvertAudioContext.destroy();
+    }
     logger.log("[tool-detail] onUnload", {
       toolId: this.data.tool ? this.data.tool.id : "",
       photoIdResultReady: this.data.photoIdResultReady,
@@ -443,6 +642,8 @@ Page({
     const selections = {};
     tool.params.forEach((param) => {
       if (tool.id === "image-compress" && param.key === "mode") {
+        selections[param.key] = "体积优先";
+      } else if (tool.id === "universal-compress" && param.key === "mode") {
         selections[param.key] = "体积优先";
       } else if (tool.id === "image-convert" && param.key === "quality") {
         selections[param.key] = "高清";
@@ -461,10 +662,32 @@ Page({
     const pageRangeValue = getToolOption(tool, "splitMode", 0);
     const backendConfigured = hasBackendService();
     const clientTool = isClientTool(tool.id);
+    const backendFiles = this.data && this.data.backendFiles ? this.data.backendFiles : [];
+    const audioInputKind = tool.id === "audio-convert" && backendFiles.length
+      ? getAudioConvertInputKind(backendFiles[0].name)
+      : "";
+    const audioTargetOptions = getAudioConvertTargetOptions(audioInputKind);
+    const visibleParams = (tool.params || [])
+      .filter((param) => !(tool.id === "audio-convert" && param.key === "target" && !audioTargetOptions.length))
+      .map((param) => {
+        if (tool.id === "audio-convert" && param.key === "target") {
+          return {
+            ...param,
+            options: audioTargetOptions,
+          };
+        }
+        return param;
+      });
+
+    // 万能压缩同时支持图片和文件选择
+    const isUniversalCompress = tool.id === "universal-compress";
 
     return {
-      isClientTool: clientTool,
-      isBackendTool: !clientTool,
+      isClientTool: clientTool || isUniversalCompress,
+      isBackendTool: !clientTool && !isUniversalCompress,
+      visibleParams,
+      audioTargetOptions,
+      audioInputKind,
       showImageUpload: ["photo-id", "image-compress", "image-convert", "resize-crop", "image-to-pdf", "ocr-text"].includes(tool.id),
       showTextInput: tool.id === "qr-maker",
       showUnitConverter: tool.id === "unit-convert",
@@ -479,18 +702,18 @@ Page({
         : (unitOptions[1] || unitOptions[0] || ""),
       backendConfigured,
       actionTitle: this.getActionTitle({
-        isClientTool: clientTool,
+        isClientTool: clientTool || isUniversalCompress,
         backendConfigured,
       }),
       actionHint: this.getActionHint({
-        isClientTool: clientTool,
+        isClientTool: clientTool || isUniversalCompress,
         backendConfigured,
       }),
       primaryActionText: this.getPrimaryActionText({
-        isClientTool: clientTool,
+        isClientTool: clientTool || isUniversalCompress,
         backendConfigured,
       }),
-      primaryActionDisabled: !clientTool && !backendConfigured,
+      primaryActionDisabled: !clientTool && !backendConfigured && !isUniversalCompress,
     };
   },
 
@@ -542,10 +765,10 @@ Page({
       "image-compress": "客户端即时压缩",
       "image-convert": "客户端即时转换",
       "resize-crop": "画布与比例调整",
-      "image-to-pdf": "图片整理成 PDF",
+      "image-to-pdf": "图片整理为 PDF",
       "qr-maker": "二维码即时生成",
       "unit-convert": "即时换算结果",
-      "audio-convert": "音频格式转换",
+      "audio-convert": "音视频格式转换",
     };
 
     return map[toolId] || "云处理能力";
@@ -557,7 +780,7 @@ Page({
       "pdf-split": "选择要拆分的 PDF",
       "pdf-compress": "选择要优化的 PDF",
       "office-to-pdf": "选择 Office 文件",
-      "audio-convert": "选择音频文件",
+      "audio-convert": "选择音视频文件",
     };
 
     return map[toolId] || "选择文件";
@@ -569,7 +792,7 @@ Page({
       "pdf-split": "选择 PDF",
       "pdf-compress": "选择 PDF",
       "office-to-pdf": "选择 Office 文件",
-      "audio-convert": "选择音频文件",
+      "audio-convert": "选择音视频文件",
     };
 
     return map[toolId] || "选择文件";
@@ -579,12 +802,12 @@ Page({
     const map = {
       "photo-id": "将调用后端自动抠图、规范留白并输出证件照，底色切换会直接走云端处理。",
       "image-compress": "不依赖后端，直接在小程序内完成压缩和导出。",
-      "image-convert": "当前客户端稳定支持 JPG 与 PNG 之间互转。",
+      "image-convert": "当前客户端稳定支持 JPG 和 PNG 之间互转。",
       "resize-crop": "支持居中裁切、完整缩放和留白版式，适合社媒与商品图。",
       "image-to-pdf": "当前版本支持把一组图片直接整理成单个 PDF，适合作业、票据和资料提交。",
       "qr-maker": "输入链接或文本即可生成二维码，并可保存到相册。",
       "unit-convert": "输入数值后生成可复制结果，适合日常碎片场景。",
-      "audio-convert": "支持 MP3、WAV、FLAC、OGG、M4A、AAC 等音频格式互转，适合不同设备使用。",
+      "audio-convert": "支持 MP3、WAV、FLAC、OGG、M4A、AAC、MP4、MOV、WEBM 等音视频格式转换，适合不同设备使用。",
     };
 
     return map[toolId] || "这类功能依赖云端处理服务，当前仓库已经预留前端结构，后续接后端即可启用。";
@@ -638,6 +861,18 @@ Page({
         }
       }
 
+      if (this.data.tool && this.data.tool.id === "resize-crop") {
+        Object.assign(nextState, this.getClearedResizeResult());
+      }
+
+      if (this.data.tool && this.data.tool.id === "ocr-text") {
+        Object.assign(nextState, this.getClearedOcrResult());
+      }
+
+      if (this.data.tool && this.data.tool.id === "universal-compress") {
+        Object.assign(nextState, this.getClearedUniversalCompressResult());
+      }
+
       this.setData(nextState);
       if (this.data.tool && this.data.tool.id === "photo-id") {
         persistPhotoIdSession({
@@ -656,6 +891,74 @@ Page({
         icon: "none",
       });
     }
+  },
+
+  // 万能压缩选择文件
+  async chooseUniversalCompressFile() {
+    wx.showActionSheet({
+      itemList: ['选择图片', '选择文件(PDF/Office)'],
+      success: async (res) => {
+        try {
+          this.ignoreOnShowRefreshUntil = Date.now() + 3000;
+
+          const nextState = {};
+
+          if (res.tapIndex === 0) {
+            // 选择图片
+            const medias = await chooseImage(1);
+            const imageInputs = [];
+
+            for (let index = 0; index < medias.length; index += 1) {
+              const media = medias[index];
+              const imageInfo = await getImageInfo(media.tempFilePath);
+              const fileInfo = await getFileInfo(media.tempFilePath);
+              imageInputs.push({
+                path: media.tempFilePath,
+                size: fileInfo ? fileInfo.size : media.size,
+                sizeText: formatFileSize(fileInfo ? fileInfo.size : media.size),
+                width: imageInfo.width,
+                height: imageInfo.height,
+                extension: getImageExtension(media.tempFilePath),
+              });
+            }
+
+            Object.assign(nextState, {
+              imageInput: imageInputs[0] || null,
+              imageInputs,
+              backendFiles: [],
+            });
+          } else {
+            // 选择文件
+            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
+            Object.assign(nextState, {
+              imageInput: null,
+              imageInputs: [],
+              backendFiles: files.map((file) => ({
+                path: file.path,
+                name: file.name || getFileName(file.path),
+                size: file.size || 0,
+                sizeText: formatFileSize(file.size || 0),
+              })),
+            });
+          }
+
+          // 清除之前的结果
+          Object.assign(nextState, this.getClearedUniversalCompressResult());
+
+          this.setData(nextState);
+        } catch (error) {
+          this.ignoreOnShowRefreshUntil = 0;
+          if (error && error.errMsg && error.errMsg.indexOf("cancel") > -1) {
+            return;
+          }
+
+          wx.showToast({
+            title: "选择文件失败",
+            icon: "none",
+          });
+        }
+      }
+    });
   },
 
   async chooseQrLogo() {
@@ -726,6 +1029,10 @@ Page({
 
     if (this.data.tool && this.data.tool.id === "image-compress") {
       Object.assign(nextState, this.getClearedCompressResult());
+    }
+
+    if (this.data.tool && this.data.tool.id === "audio-convert") {
+      Object.assign(nextState, this.getClearedAudioConvertResult());
     }
 
     this.setData(nextState);
@@ -805,9 +1112,50 @@ Page({
     });
   },
 
+  getProcessingTitle(tool) {
+    const titleMap = {
+      "photo-id": "证件照处理中",
+      "image-compress": "图片压缩中",
+      "image-convert": "图片转换中",
+      "resize-crop": "图片调整中",
+      "universal-compress": "文件压缩中",
+      "image-to-pdf": "PDF 生成中",
+      "ocr-text": "文字识别中",
+      "pdf-merge": "PDF 合并中",
+      "pdf-split": "PDF 拆分中",
+      "pdf-compress": "PDF 压缩中",
+      "office-to-pdf": "文档转换中",
+      "pdf-to-word": "Word 转换中",
+      "audio-convert": "音视频转换中",
+      "qr-maker": "二维码生成中",
+      "unit-convert": "单位换算中",
+    };
+
+    return titleMap[tool && tool.id] || "处理中";
+  },
+
+  showProcessingPanel(tool, options = {}) {
+    this.setData({
+      isWorking: true,
+      photoIdIsProcessing: tool && tool.id === "photo-id",
+      showProcessingOverlay: true,
+      processingProgress: options.progress || 6,
+      processingDisplayProgress: 0,
+      processingDisplayProgressText: 0,
+      processingEstimateFrom: 0,
+      processingEstimateTo: options.progress || 6,
+      processingEstimateStartedAt: Date.now(),
+      processingEstimateDurationMs: 0,
+      processingStatus: options.status || "正在准备...",
+      processingTitle: options.title || this.getProcessingTitle(tool),
+      processingKind: tool ? tool.id : "",
+    });
+    this.startProcessingProgressTicker();
+  },
+
   async handleExecute() {
     logger.log("[处理执行] 开始执行处理");
-    
+
     if (this.data.isWorking) {
       logger.log("[处理执行] 已经在处理中，跳过");
       return;
@@ -816,9 +1164,9 @@ Page({
     logger.log("[处理执行] 检查计费信息");
     const billing = getBillingPreview(this.data.tool);
     logger.log("[处理执行] 计费信息:", billing);
-    
+
     if (!billing.usable) {
-      logger.log("[处理执行] 计费不可用:", billing.costText);
+      logger.log("[处理执行] 计费不可用", billing.costText);
       wx.showToast({
         title: billing.costText,
         icon: "none",
@@ -859,30 +1207,13 @@ Page({
     }
 
     logger.log("[处理执行] 开始设置处理状态");
-    this.setData(tool && tool.id === "photo-id"
-      ? {
-        isWorking: true,
-        photoIdIsProcessing: true,
-        showProcessingOverlay: true,
-        processingProgress: 0,
-        processingStatus: "正在初始化...",
-        processingTitle: "证件照处理中",
-        processingKind: "photo-id",
-      }
-      : tool && tool.id === "image-compress"
-        ? {
-          isWorking: true,
-          showProcessingOverlay: true,
-          processingProgress: 8,
-          processingStatus: "正在读取原图...",
-          processingTitle: "图片压缩中",
-          processingKind: "compress",
-      }
-      : {
-        isWorking: true,
-      });
+    this.showProcessingPanel(tool, {
+      progress: tool && tool.id === "image-compress" ? 8 : 6,
+      status: tool && tool.id === "image-compress" ? "正在读取原图..." : "正在初始化...",
+    });
     logger.log("[处理执行] 处理状态设置完成");
 
+    let executionSucceeded = false;
     try {
       const { tool } = this.data;
       logger.log("[处理执行] 当前工具:", tool.id);
@@ -910,6 +1241,9 @@ Page({
       } else if (tool.id === "resize-crop") {
         logger.log("[处理执行] 执行图片调整");
         await this.runImageResize();
+      } else if (tool.id === "universal-compress") {
+        logger.log("[处理执行] 执行万能压缩");
+        await this.runUniversalCompress();
       } else if (tool.id === "image-to-pdf") {
         logger.log("[处理执行] 执行图片转PDF");
         await this.runImageToPdf();
@@ -920,6 +1254,7 @@ Page({
         logger.log("[处理执行] 执行单位转换");
         await this.runUnitConvert();
       }
+      executionSucceeded = true;
     } catch (error) {
       logger.error("[处理执行] 执行失败:", error.message);
       this.setData({
@@ -933,7 +1268,16 @@ Page({
       });
     }
     finally {
-      logger.log("[处理执行] 进入finally块");
+      logger.log("[处理执行] 进入 finally 块");
+      if (executionSucceeded && this.data.showProcessingOverlay) {
+        this.updateProcessingProgress(100, "处理完成");
+        this.setData({
+          processingDisplayProgress: 100,
+          processingDisplayProgressText: 100,
+        });
+        await wait(220);
+      }
+
       const nextState = {
         isWorking: false,
         photoIdIsProcessing: false,
@@ -941,11 +1285,20 @@ Page({
       if (!this.data.photoIdResultReady) {
         nextState.showProcessingOverlay = false;
         nextState.processingProgress = 0;
+        nextState.processingDisplayProgress = 0;
+        nextState.processingDisplayProgressText = 0;
+        nextState.processingEstimateFrom = 0;
+        nextState.processingEstimateTo = 0;
+        nextState.processingEstimateStartedAt = 0;
+        nextState.processingEstimateDurationMs = 0;
         nextState.processingStatus = "";
         nextState.processingTitle = "";
         nextState.processingKind = "";
       }
       this.setData(nextState);
+      if (!nextState.showProcessingOverlay) {
+        this.stopProcessingProgressTicker();
+      }
       logger.log("[处理执行] 重置处理状态");
       this.ignoreOnShowRefreshUntil = true;
       logger.log("[处理执行] 设置页面锁定标志");
@@ -967,11 +1320,11 @@ Page({
         "pdf-compress": ["pdf"],
         "office-to-pdf": ["doc", "docx", "xls", "xlsx", "ppt", "pptx"],
         "pdf-to-word": ["pdf"],
-        "audio-convert": ["mp3", "wav", "flac", "ogg", "m4a", "aac"],
+        "audio-convert": ["mp3", "wav", "flac", "ogg", "m4a", "aac", "mp4", "mov", "webm", "avi", "mkv", "wmv", "flv"],
       };
 
       const files = await chooseMessageFiles(count, extensionMap[tool.id] || []);
-      
+
       const nextState = {
         backendFiles: files.map((file) => ({
           path: file.path,
@@ -980,11 +1333,34 @@ Page({
           sizeText: formatFileSize(file.size || 0),
         })),
       };
-      
+
       if (tool.id === "pdf-to-word") {
         Object.assign(nextState, this.getClearedPdfToWordResult());
       }
-      
+
+      if (tool.id === "audio-convert") {
+        if (this.data.audioConvertAudioContext) {
+          this.data.audioConvertAudioContext.stop();
+        }
+        const firstFile = nextState.backendFiles[0] || {};
+        const inputKind = getAudioConvertInputKind(firstFile.name);
+        const targetOptions = getAudioConvertTargetOptions(inputKind);
+        const selections = {
+          ...this.data.selections,
+          target: targetOptions[0] || "",
+        };
+        Object.assign(nextState, {
+          selections,
+          ...this.buildViewState(tool, selections),
+          audioTargetOptions: targetOptions,
+          audioInputKind: inputKind,
+          visibleParams: (tool.params || [])
+            .filter((param) => !(param.key === "target" && !targetOptions.length))
+            .map((param) => param.key === "target" ? { ...param, options: targetOptions } : param),
+          ...this.getClearedAudioConvertResult(),
+        });
+      }
+
       this.setData(nextState);
     } catch (error) {
       this.ignoreOnShowRefreshUntil = 0;
@@ -1076,11 +1452,11 @@ Page({
     });
   },
 
-  async createImageTask(taskOptions) {
+  async createImageTask(taskOptions, options = {}) {
     const { tool, selections } = this.data;
     let remoteFile = null;
 
-    if (taskOptions.outputPath) {
+    if (taskOptions.outputPath && !options.skipUpload) {
       remoteFile = await this.uploadGeneratedOutput(taskOptions.outputPath, {
         name: taskOptions.outputName,
         folder: `client-outputs/${tool.id}`,
@@ -1116,10 +1492,12 @@ Page({
       latestCreatedTaskId: result.task.id,
     });
 
-    wx.showToast({
-      title: "处理完成，结果已保存",
-      icon: "none",
-    });
+    if (!options.skipToast) {
+      wx.showToast({
+        title: "处理完成，结果已保存",
+        icon: "none",
+      });
+    }
 
     return {
       task: result.task,
@@ -1156,6 +1534,49 @@ Page({
     };
   },
 
+  getClearedResizeResult() {
+    return {
+      resizeResultReady: false,
+      resizeResultPath: "",
+      resizeResultRemoteUrl: "",
+      resizeResultName: "",
+      resizeResultHeadline: "",
+      resizeResultDetail: "",
+      resizeResultMetaLines: [],
+      resizeBeforeWidth: 0,
+      resizeBeforeHeight: 0,
+      resizeAfterWidth: 0,
+      resizeAfterHeight: 0,
+    };
+  },
+
+  getClearedUniversalCompressResult() {
+    return {
+      universalCompressResultReady: false,
+      universalCompressResultPath: "",
+      universalCompressResultRemoteUrl: "",
+      universalCompressResultName: "",
+      universalCompressResultHeadline: "",
+      universalCompressResultDetail: "",
+      universalCompressResultBeforeSizeText: "",
+      universalCompressResultAfterSizeText: "",
+      universalCompressResultSavedText: "",
+      universalCompressResultMetaLines: [],
+      universalCompressFileType: "",
+    };
+  },
+
+  getClearedOcrResult() {
+    return {
+      ocrResultReady: false,
+      ocrResultText: "",
+      ocrResultLines: [],
+      ocrResultHeadline: "",
+      ocrResultDetail: "",
+      ocrResultProviderText: "",
+    };
+  },
+
   getClearedPdfToWordResult() {
     return {
       pdfToWordResultReady: false,
@@ -1165,6 +1586,20 @@ Page({
       pdfToWordResultHeadline: "",
       pdfToWordResultDetail: "",
       pdfToWordResultMetaLines: [],
+    };
+  },
+
+  getClearedAudioConvertResult() {
+    return {
+      audioConvertResultReady: false,
+      audioConvertResultPath: "",
+      audioConvertResultRemoteUrl: "",
+      audioConvertResultName: "",
+      audioConvertResultHeadline: "",
+      audioConvertResultDetail: "",
+      audioConvertResultMetaLines: [],
+      audioConvertResultKind: "",
+      audioConvertIsPlaying: false,
     };
   },
 
@@ -1222,6 +1657,153 @@ Page({
 
     wx.setClipboardData({
       data: this.data.compressResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  previewResizeResult() {
+    const current = this.data.resizeResultPath || this.data.resizeResultRemoteUrl;
+    if (!current) {
+      return;
+    }
+
+    wx.previewImage({
+      current,
+      urls: [current],
+    });
+  },
+
+  async saveResizeResult() {
+    let filePath = this.data.resizeResultPath;
+
+    try {
+      if (!filePath && this.data.resizeResultRemoteUrl) {
+        const download = await downloadRemoteFile(this.data.resizeResultRemoteUrl);
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      }
+
+      if (!filePath) {
+        throw new Error("RESIZE_FILE_MISSING");
+      }
+
+      await new Promise((resolve, reject) => {
+        wx.saveImageToPhotosAlbum({
+          filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.showToast({
+        title: "已保存到相册",
+        icon: "none",
+      });
+    } catch (error) {
+      wx.showToast({
+        title: "保存失败，请检查相册权限",
+        icon: "none",
+      });
+    }
+  },
+
+  copyResizeResultLink() {
+    if (!this.data.resizeResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.resizeResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  previewUniversalCompressResult() {
+    const current = this.data.universalCompressResultPath || this.data.universalCompressResultRemoteUrl;
+    if (!current) {
+      return;
+    }
+
+    // 如果是图片，使用图片预览
+    if (this.data.universalCompressFileType === "image") {
+      wx.previewImage({
+        current,
+        urls: [current],
+      });
+    } else {
+      // 其他文件直接打开
+      wx.openDocument({
+        filePath: current,
+        showMenu: true,
+      });
+    }
+  },
+
+  async saveUniversalCompressResult() {
+    let filePath = this.data.universalCompressResultPath;
+
+    try {
+      if (!filePath && this.data.universalCompressResultRemoteUrl) {
+        const download = await downloadRemoteFile(this.data.universalCompressResultRemoteUrl);
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      }
+
+      if (!filePath) {
+        throw new Error("UNIVERSAL_COMPRESS_FILE_MISSING");
+      }
+
+      // 如果是图片，保存到相册
+      if (this.data.universalCompressFileType === "image") {
+        await new Promise((resolve, reject) => {
+          wx.saveImageToPhotosAlbum({
+            filePath,
+            success: resolve,
+            fail: reject,
+          });
+        });
+        wx.showToast({
+          title: "已保存到相册",
+          icon: "none",
+        });
+      } else {
+        // 其他文件通过文档方式打开，让用户自己保存
+        await new Promise((resolve, reject) => {
+          wx.openDocument({
+            filePath,
+            showMenu: true,
+            success: resolve,
+            fail: reject,
+          });
+        });
+      }
+    } catch (error) {
+      wx.showToast({
+        title: "保存失败，请重试",
+        icon: "none",
+      });
+    }
+  },
+
+  copyUniversalCompressResultLink() {
+    if (!this.data.universalCompressResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.universalCompressResultRemoteUrl,
       success: () => {
         wx.showToast({
           title: "已复制下载链接",
@@ -1294,6 +1876,191 @@ Page({
     });
   },
 
+  async getAudioConvertResultFilePath() {
+    let filePath = this.data.audioConvertResultPath;
+    if (!filePath && this.data.audioConvertResultRemoteUrl) {
+      const download = await downloadRemoteFile(this.data.audioConvertResultRemoteUrl);
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        filePath = download.tempFilePath || "";
+      }
+    }
+    return filePath;
+  },
+
+  async previewAudioConvertResult() {
+    const current = this.data.audioConvertResultPath || this.data.audioConvertResultRemoteUrl;
+    if (!current) {
+      return;
+    }
+
+    if (this.data.audioConvertResultKind === "audio") {
+      let context = this.data.audioConvertAudioContext;
+      if (this.data.audioConvertIsPlaying) {
+        if (context) {
+          context.pause();
+        }
+        this.setData({ audioConvertIsPlaying: false });
+        return;
+      }
+
+      if (!context) {
+        context = wx.createInnerAudioContext();
+        context.onEnded(() => {
+          this.setData({ audioConvertIsPlaying: false });
+        });
+        context.onError(() => {
+          this.setData({ audioConvertIsPlaying: false });
+          wx.showToast({
+            title: "播放失败",
+            icon: "none",
+          });
+        });
+        this.setData({ audioConvertAudioContext: context });
+      }
+
+      context.src = current;
+      context.play();
+      this.setData({ audioConvertIsPlaying: true });
+      return;
+    }
+
+    if (wx.previewMedia) {
+      wx.previewMedia({
+        sources: [{
+          url: current,
+          type: "video",
+        }],
+      });
+    } else {
+      wx.showToast({
+        title: "可在上方播放预览",
+        icon: "none",
+      });
+    }
+  },
+
+  async saveAudioConvertResult() {
+    try {
+      const filePath = await this.getAudioConvertResultFilePath();
+      if (!filePath) {
+        throw new Error("MEDIA_FILE_MISSING");
+      }
+
+      if (this.data.audioConvertResultKind === "video") {
+        await new Promise((resolve, reject) => {
+          wx.saveVideoToPhotosAlbum({
+            filePath,
+            success: resolve,
+            fail: reject,
+          });
+        });
+        wx.showToast({
+          title: "已保存到相册",
+          icon: "none",
+        });
+        return;
+      }
+
+      await new Promise((resolve, reject) => {
+        wx.saveFile({
+          tempFilePath: filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.showToast({
+        title: "已保存到手机",
+        icon: "none",
+      });
+    } catch (error) {
+      wx.showToast({
+        title: "保存失败，请重试",
+        icon: "none",
+      });
+    }
+  },
+
+  copyAudioConvertResultLink() {
+    if (!this.data.audioConvertResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.audioConvertResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  async previewPdfToWordResult() {
+    const url = this.data.pdfToWordResultRemoteUrl;
+    if (!url) {
+      wx.showToast({
+        title: "预览链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    // 检查是否有后端服务
+    if (!hasBackendService()) {
+      wx.showToast({
+        title: "后端服务未配置",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在加载",
+      mask: true,
+    });
+
+    try {
+      // 先下载文件
+      const downloadRes = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url: url,
+          success: (res) => {
+            if (res.statusCode === 200) {
+              resolve(res);
+            } else {
+              reject(new Error(`下载失败: ${res.statusCode}`));
+            }
+          },
+          fail: (err) => reject(err),
+        });
+      });
+
+      // 打开文档
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: downloadRes.tempFilePath,
+          fileType: 'docx',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("预览失败:", error);
+      wx.showModal({
+        title: "预览失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
   async downloadPdfToWordResult() {
     const url = this.data.pdfToWordResultRemoteUrl;
     if (!url) {
@@ -1304,29 +2071,41 @@ Page({
       return;
     }
 
+    // 检查是否有后端服务
+    if (!hasBackendService()) {
+      wx.showToast({
+        title: "后端服务未配置",
+        icon: "none",
+      });
+      return;
+    }
+
     wx.showLoading({
-      title: "正在下载",
+      title: "正在打开",
       mask: true,
     });
 
     try {
-      const download = await new Promise((resolve, reject) => {
+      // 先下载文件
+      const downloadRes = await new Promise((resolve, reject) => {
         wx.downloadFile({
-          url,
+          url: url,
           success: (res) => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
+            if (res.statusCode === 200) {
               resolve(res);
             } else {
-              reject(new Error("下载失败"));
+              reject(new Error(`下载失败: ${res.statusCode}`));
             }
           },
-          fail: reject,
+          fail: (err) => reject(err),
         });
       });
 
+      // 打开文档（用户可以在文档预览中选择保存）
       await new Promise((resolve, reject) => {
         wx.openDocument({
-          filePath: download.tempFilePath,
+          filePath: downloadRes.tempFilePath,
+          fileType: 'docx',
           showMenu: true,
           success: resolve,
           fail: reject,
@@ -1336,10 +2115,12 @@ Page({
       wx.hideLoading();
     } catch (error) {
       wx.hideLoading();
-      console.error("下载失败:", error);
-      wx.showToast({
-        title: "下载失败，请重试",
-        icon: "none",
+      console.error("打开失败:", error);
+      wx.showModal({
+        title: "打开失败",
+        content: "请尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
       });
     }
   },
@@ -1420,6 +2201,7 @@ Page({
   },
 
   async createRemoteDocumentTask(tool, selections, response, inputName, beforeBytes) {
+    this.updateProcessingProgress(88, "正在保存结果...");
     const file = response.file || {};
     const result = createTask(tool, selections, {
       instant: true,
@@ -1442,6 +2224,7 @@ Page({
     });
 
     this.navigateWithCreatedTask(result);
+    this.updateProcessingProgress(100, "处理完成");
   },
 
   async runRemoteOcr() {
@@ -1454,6 +2237,7 @@ Page({
       return;
     }
 
+    this.updateProcessingProgress(16, "正在读取图片...");
     const payload = {
       file: await packLocalFile({
         path: imageInput.path,
@@ -1464,7 +2248,14 @@ Page({
       layout: selections.layout,
     };
 
-    const response = await requestJson("/api/ocr/image", payload);
+    const response = await this.requestJsonWithProgress("/api/ocr/image", payload, {
+      target: 82,
+      status: "正在识别文字...",
+      sizeBytes: imageInput.size,
+    });
+    this.updateProcessingProgress(84, "正在整理文字...");
+    const resultText = response.text || "";
+    const resultLines = buildOcrLineItems(response.lines, resultText);
     const result = createTask(tool, selections, {
       instant: true,
       resultType: "text",
@@ -1478,14 +2269,146 @@ Page({
       metaLines: response.metaLines || [],
     });
 
-    this.navigateWithCreatedTask(result);
+    if (result.task) {
+      this.latestCreatedTaskId = result.task.id;
+    }
+
+    this.setData({
+      latestCreatedTaskId: result.task ? result.task.id : this.data.latestCreatedTaskId,
+      ocrResultReady: true,
+      ocrResultText: resultText,
+      ocrResultLines: resultLines,
+      ocrResultHeadline: response.headline || "文字识别已完成",
+      ocrResultDetail: response.detail || `识别 ${resultText.length} 个字符`,
+      ocrResultProviderText: response.provider === "baidu" ? "百度 OCR" : "Tesseract",
+    });
+
+    wx.showToast({
+      title: "识别完成",
+      icon: "none",
+    });
+    this.updateProcessingProgress(100, "识别完成");
   },
 
-  updateProcessingProgress(progress, status) {
-    this.setData({
-      processingProgress: Math.min(100, Math.max(0, Math.round(progress))),
-      processingStatus: status || "",
+  copyOcrLine(event) {
+    const text = event.currentTarget.dataset.text || "";
+    if (!text) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: text,
+      success: () => {
+        wx.showToast({
+          title: "已复制",
+          icon: "none",
+        });
+      },
     });
+  },
+
+  copyOcrAll() {
+    if (!this.data.ocrResultText) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.ocrResultText,
+      success: () => {
+        wx.showToast({
+          title: "已复制全部文字",
+          icon: "none",
+        });
+      },
+    });
+  },
+
+  updateProcessingProgress(progress, status, options = {}) {
+    const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
+    const currentDisplay = Number(this.data.processingDisplayProgress || 0);
+    this.setData({
+      processingProgress: nextProgress,
+      processingStatus: status || "",
+      processingEstimateFrom: currentDisplay,
+      processingEstimateTo: nextProgress,
+      processingEstimateStartedAt: Date.now(),
+      processingEstimateDurationMs: Math.max(0, Number(options.durationMs || 0)),
+    });
+    this.startProcessingProgressTicker();
+  },
+
+  updateProcessingDisplayProgress(progress, status) {
+    const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
+    this.setData({
+      processingProgress: nextProgress,
+      processingDisplayProgress: nextProgress,
+      processingDisplayProgressText: nextProgress,
+      processingStatus: status || this.data.processingStatus,
+      processingEstimateFrom: nextProgress,
+      processingEstimateTo: nextProgress,
+      processingEstimateStartedAt: Date.now(),
+      processingEstimateDurationMs: 0,
+    });
+    this.startProcessingProgressTicker();
+  },
+
+  async requestJsonWithProgress(pathname, data, options = {}) {
+    const target = options.target || 86;
+    const status = options.status || "正在处理...";
+    const durationMs = options.durationMs || estimateRemoteDurationMs(
+      this.data.tool ? this.data.tool.id : "",
+      options.sizeBytes || 0
+    );
+
+    this.updateProcessingProgress(target, status, { durationMs });
+    const response = await requestJson(pathname, data, options.requestOptions || {});
+    this.updateProcessingDisplayProgress(target, status);
+    return response;
+  },
+
+  startProcessingProgressTicker() {
+    if (this.processingProgressTimer) {
+      return;
+    }
+
+    this.processingProgressTimer = setInterval(() => {
+      if (!this.data.showProcessingOverlay) {
+        this.stopProcessingProgressTicker();
+        return;
+      }
+
+      const target = Math.min(100, Math.max(0, this.data.processingProgress || 0));
+      const current = Number(this.data.processingDisplayProgress || 0);
+      const durationMs = Number(this.data.processingEstimateDurationMs || 0);
+      let next = current;
+
+      if (target >= 100) {
+        next = Math.min(100, current + Math.max(2, Math.ceil((100 - current) * 0.35)));
+      } else if (durationMs > 0) {
+        const from = Number(this.data.processingEstimateFrom || current);
+        const to = Number(this.data.processingEstimateTo || target);
+        const elapsed = Date.now() - Number(this.data.processingEstimateStartedAt || Date.now());
+        const ratio = Math.min(0.98, Math.max(0, elapsed / durationMs));
+        next = Math.max(current, from + (to - from) * ratio);
+      } else if (current < target) {
+        next = Math.min(target, current + Math.max(1, Math.ceil((target - current) * 0.28)));
+      }
+
+      const rounded = Math.min(100, Math.round(next));
+      if (Math.abs(next - current) >= 0.1 || rounded !== this.data.processingDisplayProgressText) {
+        this.setData({
+          processingDisplayProgress: next,
+          processingDisplayProgressText: rounded,
+        });
+      }
+    }, 180);
+  },
+
+  stopProcessingProgressTicker() {
+    if (this.processingProgressTimer) {
+      clearInterval(this.processingProgressTimer);
+      this.processingProgressTimer = null;
+    }
   },
 
   async runRemotePhotoId() {
@@ -1504,7 +2427,7 @@ Page({
 
       wx.getNetworkType({
         success: function(res) {
-          logger.log("[照片转证件照] 网络状态:", res.networkType);
+          logger.log("[照片转证件照] 网络状态", res.networkType);
         }
       });
 
@@ -1525,16 +2448,20 @@ Page({
       });
       logger.log("[照片转证件照] 文件打包完成");
 
-      this.updateProcessingProgress(30, "正在智能抠图...");
       logger.log("[照片转证件照] 发送请求到 /api/photo-id");
-      const remoteResponse = await requestJson("/api/photo-id", {
+      const remoteResponse = await this.requestJsonWithProgress("/api/photo-id", {
         file: packedFile,
         size: selections.size,
         background: selections.background,
         retouch: selections.retouch,
       }, {
-        timeout: 180000,
-        includeMeta: true,
+        target: 74,
+        status: "正在智能抠图...",
+        sizeBytes: imageInput.size,
+        requestOptions: {
+          timeout: 180000,
+          includeMeta: true,
+        },
       });
       const response = remoteResponse && remoteResponse.data ? remoteResponse.data : remoteResponse;
 
@@ -1561,7 +2488,7 @@ Page({
             file.inlineBase64
           );
           previewPath = outputPath;
-          logger.log("[照片转证件照] 已写入本地预览文件:", outputPath);
+          logger.log("[照片转证件照] 已写入本地预览文件", outputPath);
         } catch (error) {
           logger.error("[照片转证件照] 写入本地预览失败:", error.message);
         }
@@ -1570,7 +2497,7 @@ Page({
 
       if (shouldDownloadPreviewEagerly && file.url) {
         try {
-          logger.log("[照片转证件照] 开始下载文件:", file.url);
+          logger.log("[照片转证件照] 开始下载文件", file.url);
           const download = await downloadRemoteFile(file.url);
           logger.log("[照片转证件照] 下载完成:", {
             statusCode: download.statusCode,
@@ -1579,7 +2506,7 @@ Page({
           if (download.statusCode >= 200 && download.statusCode < 300) {
             outputPath = download.tempFilePath || "";
             previewPath = download.tempFilePath || previewPath;
-            logger.log("[照片转证件照] 下载成功，文件路径:", outputPath);
+            logger.log("[照片转证件照] 下载成功，文件路径", outputPath);
           } else {
             logger.log("[照片转证件照] 下载失败，状态码:", download.statusCode);
           }
@@ -1603,7 +2530,7 @@ Page({
         photoIdResultRemoteUrl: file.url || "",
         photoIdResultName: file.name || `证件照_${selections.background}.png`,
         photoIdResultHeadline: response.headline || "证件照生成成功",
-        photoIdResultDetail: response.detail || "已完成证件照的处理，可预览或保存到相册",
+        photoIdResultDetail: response.detail || "已完成证件照的处理，可预览或保存到相册。",
         photoIdResultMetaLines: response.metaLines || [],
         showProcessingOverlay: false,
         processingProgress: 100,
@@ -1641,7 +2568,7 @@ Page({
         ...nextState,
       });
 
-      logger.log("[照片转证件照] 准备更新状态:", nextState);
+      logger.log("[照片转证件照] 准备更新状态", nextState);
 
       // 更新状态
       this.setData(nextState);
@@ -1687,8 +2614,8 @@ Page({
   },
 
   async checkPhotoCompliance(imageInput) {
-    logger.log("[合规性检查] 开始检查图片:", imageInput.path);
-    
+    logger.log("[合规性检查] 开始检查图片", imageInput.path);
+
     const result = {
       passed: true,
       message: "",
@@ -1705,13 +2632,13 @@ Page({
 
       if (width < 300 || height < 300) {
         result.passed = false;
-        result.message = `图片尺寸过小（${width}×${height}），请上传至少 300×300 像素的图片。`;
+        result.message = `图片尺寸过小（${width}x${height}），请上传至少 300x300 像素的图片。`;
         return result;
       }
 
       if (width > 4096 || height > 4096) {
         result.passed = false;
-        result.message = `图片尺寸过大（${width}×${height}），请上传不超过 4096×4096 像素的图片。`;
+        result.message = `图片尺寸过大（${width}x${height}），请上传不超过 4096x4096 像素的图片。`;
         return result;
       }
 
@@ -1728,10 +2655,10 @@ Page({
         return result;
       }
 
-      logger.log("[合规性检查] 基础检查通过，尺寸:", width, "x", height, "比例:", aspectRatio.toFixed(2));
+      logger.log("[合规性检查] 基础检查通过，尺寸", width, "x", height, "比例:", aspectRatio.toFixed(2));
 
     } catch (error) {
-      logger.error("[合规性检查] 检查过程出错:", error);
+      logger.error("[合规性检查] 检查过程出错", error);
       result.passed = false;
       result.message = "图片检查过程出错，请重新选择图片。";
     }
@@ -1806,19 +2733,25 @@ Page({
     const { tool, selections, backendFiles } = this.data;
     if (backendFiles.length < 2) {
       wx.showToast({
-        title: "至少选择 2 个 PDF",
+        title: "至少选择 2 份 PDF",
         icon: "none",
       });
       return;
     }
 
+    this.updateProcessingProgress(18, "正在读取 PDF...");
     const files = [];
     for (let index = 0; index < backendFiles.length; index += 1) {
       files.push(await packLocalFile(backendFiles[index]));
+      this.updateProcessingProgress(18 + Math.round(((index + 1) / backendFiles.length) * 24), "正在读取 PDF...");
     }
 
-    const response = await requestJson("/api/pdf/merge", { files });
     const beforeBytes = backendFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+    const response = await this.requestJsonWithProgress("/api/pdf/merge", { files }, {
+      target: 84,
+      status: "正在合并 PDF...",
+      sizeBytes: beforeBytes,
+    });
     await this.createRemoteDocumentTask(tool, selections, response, `${backendFiles.length} 份 PDF`, beforeBytes);
   },
 
@@ -1826,17 +2759,22 @@ Page({
     const { tool, selections, backendFiles, pageRange } = this.data;
     if (!backendFiles.length) {
       wx.showToast({
-        title: "先选择一个 PDF",
+        title: "先选择一份 PDF",
         icon: "none",
       });
       return;
     }
 
+    this.updateProcessingProgress(24, "正在读取 PDF...");
     const file = await packLocalFile(backendFiles[0]);
-    const response = await requestJson("/api/pdf/split", {
+    const response = await this.requestJsonWithProgress("/api/pdf/split", {
       file,
       splitMode: selections.splitMode,
       pageRange,
+    }, {
+      target: 84,
+      status: "正在拆分 PDF...",
+      sizeBytes: backendFiles[0].size,
     });
 
     await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
@@ -1846,16 +2784,21 @@ Page({
     const { tool, selections, backendFiles } = this.data;
     if (!backendFiles.length) {
       wx.showToast({
-        title: "先选择一个 PDF",
+        title: "先选择一份 PDF",
         icon: "none",
       });
       return;
     }
 
+    this.updateProcessingProgress(24, "正在读取 PDF...");
     const file = await packLocalFile(backendFiles[0]);
-    const response = await requestJson("/api/pdf/compress", {
+    const response = await this.requestJsonWithProgress("/api/pdf/compress", {
       file,
       mode: selections.mode,
+    }, {
+      target: 84,
+      status: "正在压缩 PDF...",
+      sizeBytes: backendFiles[0].size,
     });
 
     await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
@@ -1865,17 +2808,22 @@ Page({
     const { tool, selections, backendFiles } = this.data;
     if (!backendFiles.length) {
       wx.showToast({
-        title: "先选择一个 Office 文件",
+        title: "先选择一份 Office 文件",
         icon: "none",
       });
       return;
     }
 
+    this.updateProcessingProgress(24, "正在读取文档...");
     const file = await packLocalFile(backendFiles[0]);
-    const response = await requestJson("/api/office/to-pdf", {
+    const response = await this.requestJsonWithProgress("/api/office/to-pdf", {
       file,
       quality: selections.quality,
       pageMode: selections.pageMode,
+    }, {
+      target: 84,
+      status: "正在转换 PDF...",
+      sizeBytes: backendFiles[0].size,
     });
 
     await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
@@ -1885,30 +2833,36 @@ Page({
     const { tool, selections, backendFiles } = this.data;
     if (!backendFiles.length) {
       wx.showToast({
-        title: "先选择一个 PDF 文件",
+        title: "先选择一份 PDF 文件",
         icon: "none",
       });
       return;
     }
 
-    wx.showLoading({
-      title: "正在转换",
-      mask: true,
-    });
-
     try {
+      this.updateProcessingProgress(22, "正在读取 PDF...");
       const file = await packLocalFile(backendFiles[0]);
-      const response = await requestJson("/api/pdf/to-word", {
+      const response = await this.requestJsonWithProgress("/api/pdf/to-word", {
         file,
         format: selections.format,
         layout: selections.layout,
+      }, {
+        target: 80,
+        status: "正在转换 Word...",
+        sizeBytes: backendFiles[0].size,
       });
 
+      this.updateProcessingProgress(82, "正在保存结果...");
       const taskResult = await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
 
       const fileResponse = response.file || {};
       const remoteUrl = fileResponse.url || "";
-      const fileName = fileResponse.name || "转换结果.docx";
+
+      // 使用原文件名，替换扩展名为 .docx
+      const originalName = backendFiles[0].name || "文档";
+      const baseName = originalName.replace(/\.pdf$/i, "");
+      const fileName = `${baseName}.docx`;
+
       const afterBytes = fileResponse.sizeBytes || null;
       const beforeBytes = backendFiles[0].size || 0;
 
@@ -1920,14 +2874,13 @@ Page({
         pdfToWordResultPath: "",
         pdfToWordResultRemoteUrl: remoteUrl,
         pdfToWordResultName: fileName,
-        pdfToWordResultHeadline: response.headline || "PDF转Word已完成",
+        pdfToWordResultHeadline: response.headline || "PDF 转 Word 已完成",
         pdfToWordResultDetail: response.detail || "",
         pdfToWordResultMetaLines: response.metaLines || [],
       });
 
-      wx.hideLoading();
+      this.updateProcessingProgress(100, "转换完成");
     } catch (error) {
-      wx.hideLoading();
       console.error("PDF转Word失败:", error);
       wx.showToast({
         title: "转换失败，请重试",
@@ -1940,15 +2893,18 @@ Page({
     const { tool, selections, backendFiles } = this.data;
     if (!backendFiles.length) {
       wx.showToast({
-        title: "先选择一个音频文件",
+        title: "先选择一个音视频文件",
         icon: "none",
       });
       return;
     }
 
-    const fileName = backendFiles[0].name || "audio.mp3";
-    const ext = fileName.split(".").pop().toLowerCase();
-    const supportedExts = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
+    const fileName = backendFiles[0].name || "media.mp4";
+    const ext = getFileExtension(fileName);
+    const inputKind = getAudioConvertInputKind(fileName);
+    const targetOptions = getAudioConvertTargetOptions(inputKind);
+    const target = selections.target || targetOptions[0] || "";
+    const supportedExts = AUDIO_CONVERT_AUDIO_EXTS.concat(AUDIO_CONVERT_VIDEO_EXTS);
     const unsupportedExts = ["ncm", "kgm", "vpr", "mgg", "qmc", "kwm", "xm", "tm", "bkcmp3", "bkcflac", "tkm"];
 
     if (unsupportedExts.includes(ext)) {
@@ -1975,14 +2931,69 @@ Page({
       }
     }
 
+    if (!target || !targetOptions.includes(target)) {
+      wx.showToast({
+        title: "请先选择目标格式",
+        icon: "none",
+      });
+      return;
+    }
+
+    this.updateProcessingProgress(22, "正在读取音视频...");
     const file = await packLocalFile(backendFiles[0]);
-    const response = await requestJson("/api/audio/convert", {
+    const response = await this.requestJsonWithProgress("/api/audio/convert", {
       file,
-      target: selections.target,
+      target,
       quality: selections.quality,
+    }, {
+      target: 84,
+      status: "正在转换音视频...",
+      sizeBytes: backendFiles[0].size,
     });
 
-    await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+    this.updateProcessingProgress(88, "正在保存结果...");
+    const fileResponse = response.file || {};
+    const outputName = fileResponse.name || `${fileName.replace(/\.[^.]+$/, "")}.${target.toLowerCase()}`;
+    const remoteUrl = fileResponse.url || "";
+    const resultKind = getAudioConvertResultKind(outputName, target);
+    const finalSelections = {
+      ...selections,
+      target,
+    };
+    const result = createTask(tool, finalSelections, {
+      instant: true,
+      resultType: "document",
+      inputName: backendFiles[0].name,
+      outputName,
+      beforeBytes: backendFiles[0].size,
+      afterBytes: fileResponse.sizeBytes || null,
+      resultHeadline: response.headline,
+      resultDetail: response.detail,
+      remoteUrl,
+      previewPath: "",
+      copyText: remoteUrl,
+      metaLines: response.metaLines || [],
+    });
+
+    if (this.data.audioConvertAudioContext) {
+      this.data.audioConvertAudioContext.stop();
+    }
+
+    this.latestCreatedTaskId = result.task ? result.task.id : this.latestCreatedTaskId;
+    this.setData({
+      latestCreatedTaskId: result.task ? result.task.id : this.data.latestCreatedTaskId,
+      relatedTasks: this.getRelatedTasks(tool.id),
+      selections: finalSelections,
+      audioConvertResultReady: true,
+      audioConvertResultPath: "",
+      audioConvertResultRemoteUrl: remoteUrl,
+      audioConvertResultName: outputName,
+      audioConvertResultHeadline: response.headline || "音视频格式转换已完成",
+      audioConvertResultDetail: response.detail || `已转换为 ${target} 格式，可预览或保存。`,
+      audioConvertResultMetaLines: response.metaLines || [],
+      audioConvertResultKind: resultKind,
+      audioConvertIsPlaying: false,
+    });
   },
 
   async runImageCompress() {
@@ -1998,15 +3009,15 @@ Page({
     this.updateProcessingProgress(18, "正在分析图片尺寸...");
 
     const scaleMap = {
-      清晰优先: 1,
-      均衡: 0.82,
-      体积优先: 0.65,
+      "清晰优先": 1,
+      "均衡": 0.82,
+      "体积优先": 0.65,
     };
 
     const qualityMap = {
-      清晰优先: 0.9,
-      均衡: 0.76,
-      体积优先: 0.56,
+      "清晰优先": 0.9,
+      "均衡": 0.76,
+      "体积优先": 0.56,
     };
     const scale = scaleMap[selections.mode] || 0.82;
     const quality = qualityMap[selections.mode] || 0.76;
@@ -2067,7 +3078,7 @@ Page({
       compressResultPath: tempFile.tempFilePath,
       compressResultRemoteUrl: taskResult && taskResult.remoteFile ? taskResult.remoteFile.url : "",
       compressResultName: `压缩结果.${exportFormat}`,
-      compressResultHeadline: `${beforeSizeText} → ${afterSizeText}`,
+      compressResultHeadline: `${beforeSizeText} -> ${afterSizeText}`,
       compressResultDetail: savedSizeText
         ? `节省 ${savedSizeText}`
         : "",
@@ -2094,12 +3105,13 @@ Page({
     }
 
     const qualityMap = {
-      标准: 0.82,
-      高清: 0.92,
-      网页优化: 0.68,
+      "标准": 0.82,
+      "高清": 0.92,
+      "网页优化": 0.68,
     };
 
     const exportFormat = selections.target.toLowerCase();
+    this.updateProcessingProgress(18, "正在读取图片...");
 
     const tempFile = await this.withCanvas(imageInput.width, imageInput.height, (ctx) => {
       if (exportFormat === "jpg") {
@@ -2112,9 +3124,11 @@ Page({
       quality: exportFormat === "jpg" ? qualityMap[selections.quality] : 1,
     });
 
+    this.updateProcessingProgress(62, "正在导出图片...");
     const fileInfo = await getFileInfo(tempFile.tempFilePath);
     const afterBytes = fileInfo ? fileInfo.size : null;
 
+    this.updateProcessingProgress(82, "正在保存结果...");
     const taskResult = await this.createImageTask({
       inputName: "原图",
       outputName: `格式转换结果.${exportFormat}`,
@@ -2140,8 +3154,8 @@ Page({
       convertResultPath: tempFile.tempFilePath,
       convertResultRemoteUrl: taskResult && taskResult.remoteFile ? taskResult.remoteFile.url : "",
       convertResultName: `格式转换结果.${exportFormat}`,
-      convertResultHeadline: `${fromFormat} → ${toFormat}`,
-      convertResultDetail: `${beforeSizeText} → ${afterSizeText}`,
+      convertResultHeadline: `${fromFormat} -> ${toFormat}`,
+      convertResultDetail: `${beforeSizeText} -> ${afterSizeText}`,
       convertResultFromFormat: fromFormat,
       convertResultToFormat: toFormat,
       convertResultMetaLines: [
@@ -2149,16 +3163,27 @@ Page({
         `输出质量 ${selections.quality}`,
       ],
     });
+    this.updateProcessingProgress(100, "转换完成");
   },
 
   getResizeTargetSize() {
     const { selections, imageInput, customWidth, customHeight } = this.data;
 
-    if (selections.size === "自定义") {
+    if (selections.size === "\u81ea\u5b9a\u4e49") {
       return {
         width: clampDimension(customWidth, imageInput ? imageInput.width : 1600),
         height: clampDimension(customHeight, imageInput ? imageInput.height : 900),
       };
+    }
+
+    const sizeMap = {
+      "\u4e00\u5bf8": { width: 295, height: 413 },
+      "\u5c0f\u4e00\u5bf8": { width: 260, height: 378 },
+      "\u4e8c\u5bf8": { width: 413, height: 579 },
+      "\u5c0f\u4e8c\u5bf8": { width: 354, height: 472 },
+    };
+    if (sizeMap[selections.size]) {
+      return sizeMap[selections.size];
     }
 
     const ratioMap = {
@@ -2210,31 +3235,282 @@ Page({
     const exportFormat = imageInput.extension === "png" ? "png" : "jpg";
     const background = selections.fit === "智能留白" ? "#f4efe6" : "#ffffff";
 
-    const tempFile = await this.withCanvas(target.width, target.height, (ctx) => {
-      setFillStyle(ctx, background);
-      ctx.fillRect(0, 0, target.width, target.height);
-      ctx.drawImage(imageInput.path, layout.x, layout.y, layout.drawWidth, layout.drawHeight);
+    this.updateProcessingProgress(16, "正在计算尺寸...");
+
+    try {
+      this.updateProcessingProgress(38, "正在绘制图片...");
+      const tempFile = await this.withCanvas(target.width, target.height, (ctx) => {
+        setFillStyle(ctx, background);
+        ctx.fillRect(0, 0, target.width, target.height);
+        ctx.drawImage(imageInput.path, layout.x, layout.y, layout.drawWidth, layout.drawHeight);
+      }, {
+        fileType: exportFormat,
+        quality: exportFormat === "jpg" ? 0.88 : 1,
+      });
+
+      this.updateProcessingProgress(66, "正在导出图片...");
+      const fileInfo = await getFileInfo(tempFile.tempFilePath);
+
+      this.setData({
+        resizeResultReady: true,
+        resizeResultPath: tempFile.tempFilePath,
+        resizeResultName: `改尺寸结果.${exportFormat}`,
+        resizeResultHeadline: "图片尺寸调整已完成",
+        resizeResultDetail: `已按 ${selections.size} 和“${selections.fit}”导出，可继续用于海报、社媒或商品图。`,
+        resizeResultMetaLines: [
+          `目标尺寸 ${target.width} × ${target.height}`,
+          `适配方式 ${selections.fit}`,
+        ],
+        resizeBeforeWidth: imageInput.width,
+        resizeBeforeHeight: imageInput.height,
+        resizeAfterWidth: target.width,
+        resizeAfterHeight: target.height,
+      });
+
+      this.updateProcessingProgress(84, "正在保存结果...");
+      const taskResult = await this.createImageTask({
+        inputName: "原图",
+        outputName: `改尺寸结果.${exportFormat}`,
+        sourcePath: imageInput.path,
+        outputPath: tempFile.tempFilePath,
+        beforeBytes: imageInput.size,
+        afterBytes: fileInfo ? fileInfo.size : null,
+        resultHeadline: "图片尺寸调整已完成",
+        resultDetail: `已按 ${selections.size} 和“${selections.fit}”导出，可继续用于海报、社媒或商品图。`,
+        metaLines: [
+          `目标尺寸 ${target.width} × ${target.height}`,
+          `适配方式 ${selections.fit}`,
+        ],
+      }, { skipToast: true });
+
+      if (taskResult.remoteFile) {
+        this.setData({
+          resizeResultRemoteUrl: taskResult.remoteFile.url,
+        });
+      }
+      this.updateProcessingProgress(100, "调整完成");
+
+    } catch (error) {
+      this.setData({
+        isWorking: false,
+        showProcessingOverlay: false,
+      });
+      wx.showToast({
+        title: "处理失败，请重试",
+        icon: "none",
+      });
+    }
+  },
+
+  // 万能压缩处理
+  async runUniversalCompress() {
+    const { tool, selections, imageInput, backendFiles } = this.data;
+
+    // 检查文件输入
+    let inputFile = null;
+    let fileType = "";
+    let fileName = "";
+    let beforeBytes = 0;
+
+    // 优先检查图片输入
+    if (imageInput) {
+      inputFile = imageInput;
+      fileType = "image";
+      fileName = imageInput.path.split('/').pop() || "image.jpg";
+      beforeBytes = imageInput.size || 0;
+    }
+    // 其次检查后端文件输入
+    else if (backendFiles.length > 0) {
+      inputFile = backendFiles[0];
+      fileName = inputFile.name || "file";
+      beforeBytes = inputFile.size || 0;
+
+      // 根据扩展名判断文件类型
+      const ext = (fileName.split('.').pop() || "").toLowerCase();
+      if (["jpg", "jpeg", "png", "webp", "bmp", "gif"].includes(ext)) {
+        fileType = "image";
+      } else if (ext === "pdf") {
+        fileType = "pdf";
+      } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) {
+        fileType = "office";
+      } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) {
+        fileType = "audio";
+      } else if (["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"].includes(ext)) {
+        fileType = "video";
+      } else {
+        // 其他文件类型
+        fileType = "file";
+      }
+    }
+
+    if (!inputFile) {
+      wx.showToast({
+        title: "请先选择文件",
+        icon: "none",
+      });
+      return;
+    }
+
+    try {
+      let response = null;
+      let resultPath = "";
+      let resultRemoteUrl = "";
+      let useResult = false;
+
+      // 优先尝试使用通用文件压缩API
+      try {
+        response = await this.processFileCompress(inputFile, selections, fileType);
+        resultPath = response.path;
+        resultRemoteUrl = response.remoteUrl || "";
+        useResult = true;
+        this.updateProcessingProgress(96, "正在生成对比...");
+      } catch (error) {
+        console.error("文件压缩失败:", error);
+        useResult = false;
+        response = {
+          path: inputFile.path,
+          remoteUrl: "",
+          name: inputFile.name || "压缩结果",
+          afterBytes: inputFile.size || 0,
+        };
+        resultPath = inputFile.path;
+
+        // 更友好的错误提示
+        const errorMsg = error.message || error.errMsg || "";
+        if (errorMsg.includes("配置") || errorMsg.includes("BACKEND_NOT_CONFIGURED")) {
+          wx.showModal({
+            title: "需要配置后端服务",
+            content: "压缩功能需要后端服务支持，请先在设置中配置后端服务地址。",
+            showCancel: false,
+          });
+        } else if (errorMsg.includes("下载")) {
+          wx.showModal({
+            title: "下载失败",
+            content: `文件下载失败，请检查网络连接或后端服务。\n错误信息: ${errorMsg}`,
+            showCancel: false,
+          });
+        } else {
+          wx.showModal({
+            title: "压缩失败",
+            content: `处理过程中出错，请重试或检查后端服务。\n错误信息: ${errorMsg}`,
+            showCancel: false,
+          });
+        }
+      }
+
+      // 计算压缩比例
+      const afterBytes = response.afterBytes || 0;
+      const savedBytes = Math.max(beforeBytes - afterBytes, 0);
+      const savedPercent = beforeBytes > 0 ? Math.round((savedBytes / beforeBytes) * 100) : 0;
+      const hasSavings = useResult && savedBytes > 0;
+
+      // 更新结果
+      this.setData({
+        universalCompressResultReady: true,
+        universalCompressResultPath: resultPath,
+        universalCompressResultRemoteUrl: resultRemoteUrl,
+        universalCompressResultName: response.name || "压缩结果",
+        universalCompressResultHeadline: hasSavings ? "压缩成功" : "文件体积未变小",
+        universalCompressResultDetail: hasSavings ? "已按照「" + selections.mode + "」策略完成压缩。" : (response.note || "当前文件未发现可进一步压缩的空间。"),
+        universalCompressResultBeforeSizeText: formatFileSize(beforeBytes),
+        universalCompressResultAfterSizeText: formatFileSize(afterBytes),
+        universalCompressResultSavedText: hasSavings ? "节省 " + formatFileSize(savedBytes) + " (" + savedPercent + "%)" : "未节省体积",
+        universalCompressResultMetaLines: [],
+        universalCompressFileType: fileType,
+      });
+
+      if (useResult) {
+        await this.createImageTask({
+          inputName: fileName,
+          outputName: response.name || "压缩结果",
+          sourcePath: fileType === "image" ? inputFile.path : "",
+          outputPath: resultPath,
+          remoteUrl: resultRemoteUrl,
+          beforeBytes,
+          afterBytes,
+          resultHeadline: hasSavings ? "压缩成功" : "文件体积未变小",
+          resultDetail: hasSavings ? "已按照「" + selections.mode + "」策略完成压缩。" : (response.note || "当前文件未发现可进一步压缩的空间。"),
+          metaLines: [],
+        }, { skipToast: true });
+      }
+
+      this.updateProcessingProgress(100, "处理完成");
+    } catch (error) {
+      console.error("万能压缩失败:", error);
+      this.setData({
+        isWorking: false,
+        showProcessingOverlay: false,
+      });
+      wx.showToast({
+        title: "压缩失败，请重试",
+        icon: "none",
+      });
+    }
+  },
+
+  // 处理通用文件压缩
+  async processFileCompress(file, selections, fileType) {
+    // 调用后端通用文件压缩API
+    this.updateProcessingProgress(12, "正在读取文件...");
+    const packedFile = await packLocalFile(file);
+    packedFile.name = packedFile.name || getFileName(file.path) || "压缩结果";
+    const response = await this.requestJsonWithProgress("/api/file/compress", {
+      file: packedFile,
+      mode: selections.mode,
     }, {
-      fileType: exportFormat,
-      quality: exportFormat === "jpg" ? 0.88 : 1,
+      target: 82,
+      status: "正在压缩文件...",
+      sizeBytes: file.size || 0,
     });
 
-    const fileInfo = await getFileInfo(tempFile.tempFilePath);
+    console.log("压缩API返回结果:", response);
+    this.updateProcessingProgress(84, "正在取回结果...");
 
-    await this.createImageTask({
-      inputName: "原图",
-      outputName: `改尺寸结果.${exportFormat}`,
-      sourcePath: imageInput.path,
-      outputPath: tempFile.tempFilePath,
-      beforeBytes: imageInput.size,
-      afterBytes: fileInfo ? fileInfo.size : null,
-      resultHeadline: "图片尺寸调整已完成",
-      resultDetail: `已按 ${selections.size} 和“${selections.fit}”导出，可继续用于海报、社媒或商品图。`,
-      metaLines: [
-        `目标尺寸 ${target.width} × ${target.height}`,
-        `适配方式 ${selections.fit}`,
-      ],
+    // 如果没有 file.url，检查是否有 externalUrl 或其他字段
+    let downloadUrl = response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
+
+    console.log("尝试下载的URL:", downloadUrl);
+
+    if (!downloadUrl) {
+      throw new Error("下载 URL 为空，请检查后端存储配置");
+    }
+
+    // 下载结果文件
+    const downloadRes = await new Promise((resolve, reject) => {
+      const task = wx.downloadFile({
+        url: downloadUrl,
+        success: (res) => {
+          console.log("下载响应:", res);
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(res);
+          } else {
+            reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+          }
+        },
+        fail: (err) => {
+          console.error("下载失败:", err);
+          reject(new Error(`下载失败: ${err.errMsg || err.message}`));
+        },
+      });
+      if (task && task.onProgressUpdate) {
+        task.onProgressUpdate((progress) => {
+          const percent = Number(progress.progress || 0);
+          this.updateProcessingDisplayProgress(84 + Math.round(percent * 0.08), "正在下载结果...");
+        });
+      }
     });
+    this.updateProcessingProgress(92, "正在整理结果...");
+
+    return {
+      path: downloadRes.tempFilePath,
+      remoteUrl: downloadUrl,
+      name: response.file.name || "压缩结果",
+      afterBytes: response.file.sizeBytes || null,
+      compressed: !!response.compressed,
+      savedBytes: response.savedBytes || 0,
+      savedPercent: response.savedPercent || 0,
+      note: response.note || response.detail || "",
+    };
   },
 
   async runQrMaker() {
@@ -2249,21 +3525,22 @@ Page({
       return;
     }
 
+    this.updateProcessingProgress(18, "正在编码内容...");
     const qr = qrcode(0, qrLogoInput ? "H" : "M");
     qr.addData(content);
     qr.make();
 
     const moduleCount = qr.getModuleCount();
     const marginMap = {
-      标准: 4,
-      紧凑: 2,
-      留白充足: 6,
+      "标准": 4,
+      "紧凑": 2,
+      "留白充足": 6,
     };
 
     const colorMap = {
-      简洁黑白: "#111111",
-      品牌绿: "#1d5c4b",
-      暖色调: "#8f6f4f",
+      "简洁黑白": "#111111",
+      "品牌绿": "#1d5c4b",
+      "暖色调": "#8f6f4f",
     };
 
     const cellSize = 8;
@@ -2271,6 +3548,7 @@ Page({
     const size = (moduleCount + margin * 2) * cellSize;
     const fillColor = colorMap[selections.style] || "#111111";
 
+    this.updateProcessingProgress(46, "正在绘制二维码...");
     const tempFile = await this.withCanvas(size, size, (ctx) => {
       setFillStyle(ctx, "#ffffff");
       ctx.fillRect(0, 0, size, size);
@@ -2297,7 +3575,9 @@ Page({
       quality: 1,
     });
 
+    this.updateProcessingProgress(72, "正在导出图片...");
     const fileInfo = await getFileInfo(tempFile.tempFilePath);
+    this.updateProcessingProgress(86, "正在保存结果...");
     const remoteFile = await this.uploadGeneratedOutput(tempFile.tempFilePath, {
       name: "二维码.png",
       folder: "client-outputs/qr-maker",
@@ -2336,10 +3616,12 @@ Page({
     wx.navigateTo({
       url: `/pages/task-detail/index?id=${result.task.id}`,
     });
+    this.updateProcessingProgress(100, "生成完成");
   },
 
   async runUnitConvert() {
     const { tool, selections, numberInput, fromUnit, toUnit } = this.data;
+    this.updateProcessingProgress(32, "正在计算...");
     const conversion = convertValue({
       group: selections.group,
       value: numberInput,
@@ -2356,6 +3638,7 @@ Page({
       return;
     }
 
+    this.updateProcessingProgress(78, "正在保存结果...");
     const result = createTask(tool, selections, {
       instant: true,
       resultType: "text",
@@ -2382,6 +3665,7 @@ Page({
     wx.navigateTo({
       url: `/pages/task-detail/index?id=${result.task.id}`,
     });
+    this.updateProcessingProgress(100, "换算完成");
   },
 
   async runImageToPdf() {
@@ -2398,12 +3682,13 @@ Page({
     const pageSizeMap = {
       A4: { width: 595, height: 842 },
       A5: { width: 420, height: 595 },
-      原图自适应: null,
+      "原图自适应": null,
     };
 
     const paperSize = pageSizeMap[selections.paper];
     const margin = selections.layout === "留白版式" ? 28 : 12;
 
+    this.updateProcessingProgress(14, "正在读取图片...");
     for (let index = 0; index < imageInputs.length; index += 1) {
       const imageItem = imageInputs[index];
       const bytes = await readFileArrayBuffer(imageItem.path);
@@ -2457,12 +3742,15 @@ Page({
           height: drawHeight,
         });
       }
+      this.updateProcessingProgress(14 + Math.round(((index + 1) / imageInputs.length) * 54), "正在排版图片...");
     }
 
+    this.updateProcessingProgress(76, "正在生成 PDF...");
     const pdfBytes = await pdfDoc.save();
     const outputPath = `${wx.env.USER_DATA_PATH}/image-to-pdf-${Date.now()}.pdf`;
     await writeArrayBufferFile(outputPath, pdfBytes);
     const fileInfo = await getFileInfo(outputPath);
+    this.updateProcessingProgress(88, "正在保存结果...");
     const remoteFile = await this.uploadGeneratedOutput(outputPath, {
       name: "图片合集.pdf",
       folder: "client-outputs/image-to-pdf",
@@ -2500,5 +3788,6 @@ Page({
     wx.navigateTo({
       url: `/pages/task-detail/index?id=${result.task.id}`,
     });
+    this.updateProcessingProgress(100, "生成完成");
   },
 });

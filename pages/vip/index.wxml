@@ -11,6 +11,7 @@
     <view class="vip-hero__points">
       <text class="vip-hero__points-value">{{user.points}}</text>
       <text class="vip-hero__points-label">积分余额</text>
+      <view class="debug-add-btn" bindtap="debugAddPoints">+10000</view>
     </view>
   </view>
 

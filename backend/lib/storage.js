@@ -60,7 +60,12 @@ function createStorage(config) {
       ? qiniuOptions.downloadExpiresSeconds
       : 3600;
     const deadline = Math.floor(Date.now() / 1000) + expiresSeconds;
-    return qiniuBucketManager.privateDownloadUrl(qiniuOptions.publicBaseUrl, key, deadline);
+    try {
+      return qiniuBucketManager.privateDownloadUrl(qiniuOptions.publicBaseUrl, key, deadline);
+    } catch (error) {
+      console.warn("[storage] failed to build qiniu download url", error);
+      return "";
+    }
   }
 
   async function putQiniuObject({ key, body, contentType }) {
@@ -74,7 +79,18 @@ function createStorage(config) {
   }
 
   async function getQiniuObject(key) {
-    const response = await fetch(getQiniuDownloadUrl(key));
+    const downloadUrl = getQiniuDownloadUrl(key);
+    if (!downloadUrl) {
+      return null;
+    }
+
+    let response;
+    try {
+      response = await fetch(downloadUrl);
+    } catch (error) {
+      console.warn("[storage] qiniu download failed, will try local fallback", error);
+      return null;
+    }
 
     if (!response.ok) {
       return null;

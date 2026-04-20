@@ -2,7 +2,7 @@
   <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
     <view class="hero-left">
       <text class="hero-title">{{tool.name}}</text>
-      <text class="hero-cost" wx:if="{{tool.id !== 'photo-id'}}">{{billing ? billing.costText : (tool.points + ' 积分')}}</text>
+      <text class="hero-cost" wx:if="{{tool.id !== 'photo-id'}}">{{billing ? billing.costText : (tool.points + '积分')}}</text>
     </view>
     <view class="hero-right" wx:if="{{userState}}">
       <view class="user-info">
@@ -26,7 +26,7 @@
     </view>
 
     <view class="card upload-card">
-      <view class="option-block" wx:for="{{tool.params}}" wx:key="key">
+      <view class="option-block" wx:for="{{visibleParams}}" wx:key="key">
         <text class="option-block__title">{{item.label}}</text>
         <view class="chips-wrap {{showMoreColors && item.key === 'background' ? 'chips-wrap-expanded' : ''}}">
           <view
@@ -53,27 +53,85 @@
     </view>
   </view>
 
-  <view class="section" wx:if="{{showImageUpload && tool.id !== 'photo-id' && tool.id !== 'image-compress' && tool.id !== 'image-convert'}}">
+  <view class="section" wx:if="{{showImageUpload && tool.id !== 'photo-id' && tool.id !== 'image-compress' && tool.id !== 'image-convert' && tool.id !== 'resize-crop'}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Upload</text>
-        <text class="section-title">{{tool.id === 'ocr-text' ? '上传识别图片' : '上传图片'}}</text>
+        <text class="section-title">{{tool.id === 'ocr-text' ? (ocrResultReady ? '识别结果' : '上传识别图片') : '上传图片'}}</text>
+        <text class="section-copy" wx:if="{{tool.id === 'ocr-text' && ocrResultReady}}">{{ocrResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '选择图片（可多选）' : (tool.id === 'ocr-text' ? '选择识别图片' : '选择图片')}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '选择图片（可多选）' : (tool.id === 'ocr-text' ? (ocrResultReady ? '重新选择图片' : '选择识别图片') : '选择图片')}}</view>
 
-      <view class="image-preview" wx:if="{{imageInput}}">
+      <view class="image-preview" wx:if="{{imageInput && !(tool.id === 'ocr-text' && ocrResultReady)}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
         <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
         <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+      </view>
+
+      <view class="ocr-result" wx:if="{{tool.id === 'ocr-text' && ocrResultReady}}">
+        <view class="ocr-result__head">
+          <view>
+            <text class="result-card__title">{{ocrResultHeadline}}</text>
+            <text class="ocr-result__meta">{{ocrResultLines.length}} 行 · {{ocrResultText.length}} 字 · {{ocrResultProviderText}}</text>
+          </view>
+          <view class="btn-ghost ocr-result__copy-all" bindtap="copyOcrAll">复制全部</view>
+        </view>
+        <scroll-view class="ocr-result__scroll" scroll-y>
+          <view class="ocr-empty" wx:if="{{!ocrResultLines.length}}">
+            <text>未识别到可展示的文字</text>
+          </view>
+          <view class="ocr-line" wx:for="{{ocrResultLines}}" wx:key="id">
+            <text class="ocr-line__text" selectable="true" user-select="true">{{item.text}}</text>
+            <view class="ocr-line__copy" data-text="{{item.text}}" bindtap="copyOcrLine">复制</view>
+          </view>
+        </scroll-view>
       </view>
 
       <view class="image-preview__list" wx:if="{{tool.id === 'image-to-pdf' && imageInputs.length}}">
         <text class="image-preview__meta">已选择 {{imageInputs.length}} 张图片</text>
         <view class="chips-wrap">
           <text class="chip-static" wx:for="{{imageInputs}}" wx:key="path">第 {{index + 1}} 张 · {{item.width}} × {{item.height}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{tool.id === 'resize-crop'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">{{resizeResultReady ? '调整结果' : '上传图片'}}</text>
+        <text class="section-copy" wx:if="{{resizeResultReady}}">{{resizeResultDetail}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{!resizeResultReady}}">选择图片</view>
+      <view class="btn-ghost picker-button" bindtap="chooseInputImage" wx:if="{{resizeResultReady}}">重新选择</view>
+
+      <view class="image-preview" wx:if="{{imageInput && !resizeResultReady}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
+        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+      </view>
+
+      <view class="image-preview" wx:if="{{resizeResultReady}}">
+        <image class="image-preview__image" src="{{resizeResultPath}}" mode="aspectFit"></image>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{resizeResultHeadline}}</text>
+        <view class="chips-wrap" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static">原尺寸 {{resizeBeforeWidth}} ? {{resizeBeforeHeight}}</text>
+          <text class="chip-static">新尺寸 {{resizeAfterWidth}} ? {{resizeAfterHeight}}</text>
+        </view>
+        <view class="chips-wrap" wx:if="{{resizeResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{resizeResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewResizeResult">预览大图</view>
+          <view class="btn-ghost action-card__button" bindtap="saveResizeResult">保存到相册</view>
+          <view class="btn-ghost action-card__button" wx:if="{{resizeResultRemoteUrl}}" bindtap="copyResizeResultLink">复制链接</view>
         </view>
       </view>
     </view>
@@ -107,6 +165,71 @@
         <view class="action-card__buttons" style="margin-top: 24rpx;">
           <view class="btn-primary action-card__button" bindtap="previewCompressResult">预览大图</view>
           <view class="btn-ghost action-card__button" bindtap="saveCompressResult">保存到相册</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 万能压缩部分 -->
+  <view class="section" wx:if="{{tool.id === 'universal-compress'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Upload</text>
+        <text class="section-title">{{universalCompressResultReady ? '压缩结果' : '选择文件'}}</text>
+        <text class="section-copy" wx:if="{{universalCompressResultReady}}">{{universalCompressResultDetail}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <!-- 选择文件按钮 -->
+      <view class="btn-ghost picker-button" bindtap="chooseUniversalCompressFile" wx:if="{{!universalCompressResultReady}}">
+        选择图片或文件
+      </view>
+      <view class="btn-ghost picker-button" bindtap="chooseUniversalCompressFile" wx:if="{{universalCompressResultReady}}">
+        重新选择文件
+      </view>
+
+      <!-- 显示已选择的图片 -->
+      <view class="image-preview" wx:if="{{imageInput && !universalCompressResultReady}}">
+        <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
+        <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
+        <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
+      </view>
+
+      <!-- 显示已选择的文件 -->
+      <view class="file-list" wx:if="{{backendFiles.length && !universalCompressResultReady}}">
+        <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
+          <text class="file-item__name">{{item.name}}</text>
+          <text class="file-item__meta">{{item.sizeText}}</text>
+        </view>
+      </view>
+
+      <!-- 显示压缩结果 -->
+      <view class="image-preview" wx:if="{{universalCompressResultReady}}">
+        <!-- 如果是图片显示预览 -->
+        <image wx:if="{{universalCompressFileType === 'image'}}" class="image-preview__image" src="{{universalCompressResultPath}}" mode="aspectFit"></image>
+        <!-- 如果是其他文件显示文件图标 -->
+        <view wx:else class="file-preview">
+          <text class="file-preview__icon">📄</text>
+          <text class="file-preview__name">{{universalCompressResultName}}</text>
+        </view>
+
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{universalCompressResultHeadline}}</text>
+
+        <view class="chips-wrap" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static">原大小 {{universalCompressResultBeforeSizeText}}</text>
+          <text class="chip-static">压缩后 {{universalCompressResultAfterSizeText}}</text>
+          <text class="chip-static" wx:if="{{universalCompressResultSavedText}}">{{universalCompressResultSavedText}}</text>
+        </view>
+
+        <view class="chips-wrap" wx:if="{{universalCompressResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{universalCompressResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewUniversalCompressResult">预览</view>
+          <view class="btn-ghost action-card__button" bindtap="saveUniversalCompressResult">保存</view>
+          <view class="btn-ghost action-card__button" wx:if="{{universalCompressResultRemoteUrl}}" bindtap="copyUniversalCompressResultLink">复制链接</view>
         </view>
       </view>
     </view>
@@ -198,16 +321,17 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Files</text>
-        <text class="section-title">{{pdfToWordResultReady ? '转换结果' : backendPickerTitle}}</text>
+        <text class="section-title">{{pdfToWordResultReady || audioConvertResultReady ? '转换结果' : backendPickerTitle}}</text>
         <text class="section-copy" wx:if="{{pdfToWordResultReady}}">{{pdfToWordResultDetail}}</text>
+        <text class="section-copy" wx:if="{{audioConvertResultReady}}">{{audioConvertResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady}}">{{backendPickerButtonText}}</view>
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady}}">{{backendPickerButtonText}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady}}">重新选择</view>
 
-      <view class="file-list" wx:if="{{backendFiles.length && !pdfToWordResultReady}}">
+      <view class="file-list" wx:if="{{backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady}}">
         <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
           <text class="file-item__name">{{item.name}}</text>
           <text class="file-item__meta">{{item.sizeText}}</text>
@@ -224,8 +348,33 @@
           <text class="chip-static" wx:for="{{pdfToWordResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewPdfToWordResult">预览文件</view>
           <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">下载文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{pdfToWordResultRemoteUrl}}" bindtap="copyPdfToWordUrl">复制链接</view>
+        </view>
+      </view>
+
+      <view class="image-preview" wx:if="{{audioConvertResultReady}}">
+        <video
+          wx:if="{{audioConvertResultKind === 'video'}}"
+          class="media-preview__video"
+          src="{{audioConvertResultPath || audioConvertResultRemoteUrl}}"
+          controls
+          show-fullscreen-btn
+          show-play-btn
+        ></video>
+        <view wx:else class="file-preview">
+          <text class="file-preview__icon">🎵</text>
+          <text class="file-preview__name">{{audioConvertResultName}}</text>
+        </view>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{audioConvertResultHeadline}}</text>
+        <view class="chips-wrap" wx:if="{{audioConvertResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{audioConvertResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewAudioConvertResult">{{audioConvertResultKind === 'audio' && audioConvertIsPlaying ? '暂停预览' : '预览'}}</view>
+          <view class="btn-ghost action-card__button" bindtap="saveAudioConvertResult">保存</view>
+          <view class="btn-ghost action-card__button" wx:if="{{audioConvertResultRemoteUrl}}" bindtap="copyAudioConvertResultLink">复制链接</view>
         </view>
       </view>
     </view>
@@ -355,17 +504,31 @@
 
   <view wx:if="{{showProcessingOverlay}}" class="processing-overlay">
     <view class="processing-panel">
-      <view class="processing-spinner">
-        <view class="processing-spinner__ring"></view>
-        <view class="processing-spinner__ring processing-spinner__ring--second"></view>
+      <view class="processing-stage">
+        <view class="processing-orbit">
+          <view class="processing-orbit__ring"></view>
+          <view class="processing-orbit__ring processing-orbit__ring--second"></view>
+          <view class="processing-orbit__core">
+            <view class="processing-core__bar processing-core__bar--one"></view>
+            <view class="processing-core__bar processing-core__bar--two"></view>
+            <view class="processing-core__bar processing-core__bar--three"></view>
+          </view>
+          <view class="processing-chip processing-chip--one"></view>
+          <view class="processing-chip processing-chip--two"></view>
+          <view class="processing-chip processing-chip--three"></view>
+        </view>
       </view>
-      <text class="processing-title">证件照处理中</text>
+      <text class="processing-title">{{processingTitle || '处理中'}}</text>
       <text class="processing-status">{{processingStatus}}</text>
       <view class="processing-progress-wrap">
         <view class="processing-progress-track">
-          <view class="processing-progress-fill" style="width: {{processingProgress}}%;"></view>
+          <view class="processing-progress-fill" style="width: {{processingDisplayProgress}}%;"></view>
+          <view class="processing-progress-spark" style="left: {{processingDisplayProgress}}%;"></view>
         </view>
-        <text class="processing-progress-text">{{processingProgress}}%</text>
+        <view class="processing-progress-row">
+          <text class="processing-progress-label">进度</text>
+          <text class="processing-progress-text">{{processingDisplayProgressText}}%</text>
+        </view>
       </view>
     </view>
   </view>

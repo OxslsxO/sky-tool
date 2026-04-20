@@ -147,12 +147,22 @@ GET /health
 
 ## PDF 转 Word
 
-`PDF 转 Word` 支持两种模式：
+`PDF 转 Word` 通过 Adobe PDF Services API 的 Export PDF 能力将 PDF 转换为 DOCX，尽量保留原 PDF 版式、字体、表格和图片。
 
-- **保持版式**：通过 pdf2docx（Python）将 PDF 转换为 DOCX，尽量保留原 PDF 版式、字体、表格和图片。Docker 部署已内置，本地开发需要安装 Python 3.10+ 并 `pip install pdf2docx`。
-- **优先文字**：使用本地 pdf2json 提取文本并生成 DOCX，无需额外依赖。
+需要在后端环境变量中配置：
 
-本地未安装 Python 时，选择"保持版式"会返回错误提示。
+- `PDF_SERVICES_CLIENT_ID`
+- `PDF_SERVICES_CLIENT_SECRET`
+
+可以参考仓库根目录的 `.env.example`。
+
+可选配置：
+
+- `PDF_SERVICES_REGION`：`US` 或 `EU`，默认使用 Adobe SDK 的默认区域。
+- `PDF_SERVICES_OCR_LOCALE`：Export PDF OCR 语言，默认 `zh-CN`。英文文档可设为 `en-US`，日文可设为 `ja-JP`。
+- `PDF_SERVICES_TIMEOUT_MS`：Adobe SDK 请求超时时间，默认 `120000`。
+
+如果 PDF 有打开密码，接口请求体可传 `password` 或 `pdfPassword`，后端会先通过 Adobe Remove Protection 再导出 DOCX。
 
 ## 清理策略
 

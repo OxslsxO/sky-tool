@@ -457,13 +457,13 @@ function buildTaskPayload(tool, selections) {
       detail: "这类轻量工具处理很快，适合高频使用和收藏。",
     },
     "audio-convert": {
-      inputName: "原音频.mp3",
-      outputName: "转换后音频.wav",
+      inputName: "原音视频.mp4",
+      outputName: "转换后文件.mp4",
       beforeSize: 8.2,
       afterSize: 12.4,
       duration: 6000,
-      headline: "音频格式转换中",
-      detail: "会按目标格式和音质设置进行转换，适合不同设备使用。",
+      headline: "音视频格式转换中",
+      detail: "会按目标格式和质量设置进行转换，适合不同设备使用。",
     },
   };
 
@@ -546,7 +546,7 @@ function buildTaskResult(task, tool) {
     "ocr-text": "识别出约 1268 字，可继续复制和校对。",
     "qr-maker": "二维码已生成，适合直接保存到相册或继续排版。",
     "unit-convert": "换算结果已生成，并附常见近似值供参考。",
-    "audio-convert": "音频格式已转换，适合不同设备和场景使用。",
+    "audio-convert": "音视频格式已转换，适合不同设备和场景使用。",
   };
 
   return resultMap[tool.id] || task.resultDetail || task.resultText;
@@ -729,8 +729,8 @@ function seedMockTasks() {
   ];
 
   saveTasks(seedTasks);
-  writeStorage(STORAGE_KEYS.recent, ["photo-id", "pdf-compress", "ocr-text", "image-compress"]);
-  writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "image-compress"]);
+  writeStorage(STORAGE_KEYS.recent, ["photo-id", "universal-compress", "ocr-text"]);
+  writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "universal-compress"]);
 }
 
 function getTaskDashboard() {
@@ -948,6 +948,7 @@ module.exports = {
   listFavoriteTools,
   touchRecentTool,
   getRecentTools,
+  getRawTasks,
   hasDirtySyncState,
   getSyncDirtyStamp,
   clearSyncDirty,

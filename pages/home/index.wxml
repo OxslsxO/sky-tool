@@ -30,7 +30,7 @@
     <view class="tools-header">
       <view class="tools-title-group">
         <text class="section-title">{{keyword ? '搜索结果' : '全部工具'}}</text>
-        <text class="tools-count" wx:if="{{!keyword}}">{{displayTools.length}} 个工具</text>
+        <text class="tools-count" wx:if="{{!keyword}}">{{displayTools.length}} 个工具 · 按全站使用次数排序</text>
       </view>
       <view class="view-toggle">
         <view
@@ -88,6 +88,7 @@
           <view class="tool-grid-icon">{{item.icon || '🔧'}}</view>
           <text class="tool-grid-name">{{item.name}}</text>
           <text class="tool-grid-desc">{{item.shortDescription}}</text>
+          <text class="tool-grid-usage" wx:if="{{item.usageText}}">{{item.usageText}}</text>
           <view class="tool-grid-footer">
             <text class="tool-grid-points">{{item.points}} 积分</text>
             <text class="tool-grid-arrow">→</text>
@@ -117,6 +118,7 @@
             <text class="tool-list-desc">{{item.shortDescription}}</text>
             <view class="tool-list-meta">
               <text class="tool-list-format">{{item.formatText}}</text>
+              <text class="tool-list-usage" wx:if="{{item.usageText}}">{{item.usageText}}</text>
               <text class="tool-list-points">{{item.points}} 积分</text>
             </view>
           </view>

@@ -58,6 +58,17 @@
   color: #7a776d;
 }
 
+.debug-add-btn {
+  margin-top: 8rpx;
+  padding: 6rpx 16rpx;
+  background: linear-gradient(135deg, #1d5c4b, #3a8d76);
+  color: #ffffff;
+  font-size: 20rpx;
+  font-weight: 700;
+  border-radius: 999rpx;
+  text-align: center;
+}
+
 .tab-bar {
   display: flex;
   gap: 0;

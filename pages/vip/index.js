@@ -159,4 +159,24 @@ Page({
     this.setData({ selectedPackage: null });
     this.refreshPage();
   },
+
+  // 调试用：快捷充值10000积分
+  debugAddPoints() {
+    const { getUserState, updateUserState, addPointsRecord } = require("../../utils/task-store");
+    const user = getUserState();
+    const addPoints = 10000;
+
+    updateUserState({
+      points: user.points + addPoints,
+    });
+
+    addPointsRecord({
+      type: "recharge",
+      title: "调试充值",
+      change: addPoints,
+    });
+
+    wx.showToast({ title: `已充值${addPoints}积分`, icon: "success" });
+    this.refreshPage();
+  },
 });
