@@ -1552,6 +1552,31 @@ app.post("/api/client/state/sync", async (req, res) => {
   }
 });
 
+// 获取PDF信息（页数、基本信息）
+app.post("/api/pdf/preview", async (req, res) => {
+  const files = req.body.files || [];
+  try {
+    const results = [];
+    for (const file of files) {
+      assertPdfFile(file);
+      const pdfBuffer = decodeBase64File(file);
+      const pdfDoc = await PDFDocument.load(pdfBuffer);
+      const pageCount = pdfDoc.getPageCount();
+      results.push({
+        name: file.name || "",
+        sizeBytes: file.sizeBytes || 0,
+        pageCount,
+      });
+    }
+    res.json({
+      ok: true,
+      files: results,
+    });
+  } catch (error) {
+    sendError(res, 400, "PDF_PREVIEW_FAILED", error.message || "PDF预览失败");
+  }
+});
+
 app.post("/api/pdf/merge", async (req, res) => {
   const files = req.body.files || [];
 

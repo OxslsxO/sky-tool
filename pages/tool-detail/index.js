@@ -1,4 +1,4 @@
-﻿const qrcode = require("../../utils/vendor/qrcode-generator");
+const qrcode = require("../../utils/vendor/qrcode-generator");
 const { PDFDocument } = require("../../utils/vendor/pdf-lib");
 const { getToolById, getCategoryById } = require("../../data/mock");
 
@@ -423,6 +423,10 @@ Page({
     // 音视频分类目标格式（分离音频和视频）
     audioConvertAudioFormats: AUDIO_CONVERT_AUDIO_FORMATS,
     audioConvertVideoFormats: AUDIO_CONVERT_VIDEO_FORMATS,
+    // PDF合并相关
+    pdfMergePreviewFiles: [], // 预览用的PDF文件信息（带页数）
+    pdfMergeSorting: false, // 是否正在排序
+    pdfMergeCurrentIndex: 0, // 当前预览的索引
     tool: null,
     category: null,
     selections: {},
@@ -1325,7 +1329,7 @@ Page({
     try {
       this.ignoreOnShowRefreshUntil = Date.now() + 3000;
       const { tool } = this.data;
-      const count = tool.id === "pdf-merge" ? 9 : 1;
+      const count = tool.id === "pdf-merge" ? 20 : 1;
       const extensionMap = {
         "pdf-merge": ["pdf"],
         "pdf-split": ["pdf"],
@@ -1337,6 +1341,49 @@ Page({
 
       const files = await chooseMessageFiles(count, extensionMap[tool.id] || []);
 
+      // PDF合并做上传限制
+      if (tool.id === "pdf-merge") {
+        // 检查文件数量
+        if (files.length < 2) {
+          wx.showModal({
+            title: "提示",
+            content: "PDF合并至少需要上传2个PDF文件",
+            showCancel: false,
+            confirmText: "知道了",
+          });
+          return;
+        }
+        // 检查文件大小（单个不超过50MB，总共不超过200MB）
+        let totalSize = 0;
+        let invalidFile = null;
+        for (let file of files) {
+          const size = file.size || 0;
+          totalSize += size;
+          if (size > 50 * 1024 * 1024) {
+            invalidFile = file.name || getFileName(file.path);
+            break;
+          }
+        }
+        if (invalidFile) {
+          wx.showModal({
+            title: "提示",
+            content: `文件「${invalidFile}」超过50MB，单个文件最大支持50MB`,
+            showCancel: false,
+            confirmText: "知道了",
+          });
+          return;
+        }
+        if (totalSize > 200 * 1024 * 1024) {
+          wx.showModal({
+            title: "提示",
+            content: `所有文件总大小超过200MB，当前总共${formatFileSize(totalSize)}`,
+            showCancel: false,
+            confirmText: "知道了",
+          });
+          return;
+        }
+      }
+
       const nextState = {
         backendFiles: files.map((file) => ({
           path: file.path,
@@ -1346,11 +1393,13 @@ Page({
         })),
       };
 
-      if (tool.id === "pdf-to-word") {
+      if (tool.id === "pdf-merge") {
+        // PDF合并：预览并排序
+        Object.assign(nextState, this.getClearedPdfMergePreview());
+        await this.loadPdfPreviews(nextState.backendFiles);
+      } else if (tool.id === "pdf-to-word") {
         Object.assign(nextState, this.getClearedPdfToWordResult());
-      }
-
-      if (tool.id === "audio-convert") {
+      } else if (tool.id === "audio-convert") {
         if (this.data.audioConvertAudioContext) {
           this.data.audioConvertAudioContext.stop();
         }
@@ -1613,6 +1662,117 @@ Page({
       audioConvertResultKind: "",
       audioConvertIsPlaying: false,
     };
+  },
+
+  getClearedPdfMergePreview() {
+    return {
+      pdfMergePreviewFiles: [],
+      pdfMergeSorting: false,
+      pdfMergeCurrentIndex: 0,
+    };
+  },
+
+  async loadPdfPreviews(files) {
+    try {
+      if (!files || !files.length) {
+        return;
+      }
+      // 上传文件并获取PDF信息
+      const { packLocalFile } = require("../../services/remote-executor");
+      const { hasBackendService, getBackendBaseUrl } = require("../../services/backend-tools");
+      if (!hasBackendService()) {
+        wx.showToast({
+          title: "未配置后端服务",
+          icon: "none",
+        });
+        return;
+      }
+      const baseUrl = getBackendBaseUrl();
+      // 打包所有PDF文件
+      const packedFiles = [];
+      for (let file of files) {
+        const packed = await packLocalFile(file.path, { name: file.name });
+        packedFiles.push(packed);
+      }
+      // 调用预览API
+      const response = await wx.request({
+        url: `${baseUrl}/api/pdf/preview`,
+        method: "POST",
+        data: { files: packedFiles },
+      });
+      const result = await new Promise((resolve) => {
+        response.onSuccess = (res) => resolve(res.data);
+        response.onFail = () => resolve({ ok: false });
+      });
+      if (result && result.ok && result.files) {
+        // 组合预览文件信息
+        const previewFiles = files.map((file, index) => ({
+          ...file,
+          pageCount: (result.files[index] && result.files[index].pageCount) || 0,
+        }));
+        this.setData({
+          pdfMergePreviewFiles: previewFiles,
+        });
+      }
+    } catch (error) {
+      // 忽略预览错误，继续使用基本信息
+      const previewFiles = files.map((file) => ({
+        ...file,
+        pageCount: 0,
+      }));
+      this.setData({
+        pdfMergePreviewFiles: previewFiles,
+      });
+    }
+  },
+
+  handlePdfMergeSwiperChange(e) {
+    this.setData({
+      pdfMergeCurrentIndex: e.detail.current || 0,
+    });
+  },
+
+  handlePdfMergeSortToggle() {
+    this.setData({
+      pdfMergeSorting: !this.data.pdfMergeSorting,
+    });
+  },
+
+  handlePdfMergeSwapUp() {
+    const { pdfMergeCurrentIndex, pdfMergePreviewFiles, backendFiles } = this.data;
+    if (pdfMergeCurrentIndex <= 0) {
+      return;
+    }
+    // 交换预览文件和源文件
+    const newPreviewFiles = [...pdfMergePreviewFiles];
+    const newBackendFiles = [...backendFiles];
+    [newPreviewFiles[pdfMergeCurrentIndex - 1], newPreviewFiles[pdfMergeCurrentIndex]] = 
+      [newPreviewFiles[pdfMergeCurrentIndex], newPreviewFiles[pdfMergeCurrentIndex - 1]];
+    [newBackendFiles[pdfMergeCurrentIndex - 1], newBackendFiles[pdfMergeCurrentIndex]] = 
+      [newBackendFiles[pdfMergeCurrentIndex], newBackendFiles[pdfMergeCurrentIndex - 1]];
+    this.setData({
+      pdfMergePreviewFiles: newPreviewFiles,
+      backendFiles: newBackendFiles,
+      pdfMergeCurrentIndex: pdfMergeCurrentIndex - 1,
+    });
+  },
+
+  handlePdfMergeSwapDown() {
+    const { pdfMergeCurrentIndex, pdfMergePreviewFiles, backendFiles } = this.data;
+    if (pdfMergeCurrentIndex >= pdfMergePreviewFiles.length - 1) {
+      return;
+    }
+    const newPreviewFiles = [...pdfMergePreviewFiles];
+    const newBackendFiles = [...backendFiles];
+    [newPreviewFiles[pdfMergeCurrentIndex], newPreviewFiles[pdfMergeCurrentIndex + 1]] = 
+      [newPreviewFiles[pdfMergeCurrentIndex + 1], newPreviewFiles[pdfMergeCurrentIndex]];
+    [newBackendFiles[pdfMergeCurrentIndex], newBackendFiles[pdfMergeCurrentIndex + 1]] = 
+      [newBackendFiles[pdfMergeCurrentIndex + 1], newBackendFiles[pdfMergeCurrentIndex]];
+    this.setData({
+      pdfMergePreviewFiles: newPreviewFiles,
+      backendFiles: newBackendFiles,
+      pdfMergeCurrentIndex: pdfMergeCurrentIndex + 1,
+    });
   },
 
   previewCompressResult() {
@@ -3931,30 +4091,47 @@ Page({
 
   handleThumbClick(e) {
     const index = e.currentTarget.dataset.index;
-    this.setData({
-      imageToPdfCurrentIndex: index,
-    });
+    const { tool } = this.data;
+    if (tool.id === "pdf-merge") {
+      this.setData({
+        pdfMergeCurrentIndex: index,
+      });
+    } else if (tool.id === "image-to-pdf") {
+      this.setData({
+        imageToPdfCurrentIndex: index,
+      });
+    }
   },
 
   handleThumbLongPress(e) {
     const index = e.currentTarget.dataset.index;
-    wx.showModal({
-      title: "调整图片顺序",
-      content: "长按后可拖动调整顺序，点击完成保存。",
-      showCancel: false,
-      confirmText: "知道了",
-      success: () => {
-        this.setData({
-          imageToPdfSorting: true,
-        });
-      },
-    });
+    const { tool } = this.data;
+    if (tool.id === "image-to-pdf") {
+      wx.showModal({
+        title: "调整图片顺序",
+        content: "长按后可拖动调整顺序，点击完成保存。",
+        showCancel: false,
+        confirmText: "知道了",
+        success: () => {
+          this.setData({
+            imageToPdfSorting: true,
+          });
+        },
+      });
+    }
   },
 
   finishSorting() {
-    this.setData({
-      imageToPdfSorting: false,
-    });
+    const { tool } = this.data;
+    if (tool.id === "pdf-merge") {
+      this.setData({
+        pdfMergeSorting: false,
+      });
+    } else {
+      this.setData({
+        imageToPdfSorting: false,
+      });
+    }
   },
 
   async previewImageToPdfResult() {
@@ -4015,7 +4192,22 @@ Page({
 
   handleDeleteThumbImage(e) {
     const index = e.currentTarget.dataset.index;
-    this.deleteImage(index);
+    const { tool } = this.data;
+    if (tool.id === "pdf-merge") {
+      // 删除PDF合并中的文件
+      const { pdfMergePreviewFiles, backendFiles } = this.data;
+      const newPreviewFiles = pdfMergePreviewFiles.filter((_, i) => i !== index);
+      const newBackendFiles = backendFiles.filter((_, i) => i !== index);
+      const newIndex = index >= newPreviewFiles.length ? Math.max(0, newPreviewFiles.length - 1) : index;
+      this.setData({
+        pdfMergePreviewFiles: newPreviewFiles,
+        backendFiles: newBackendFiles,
+        pdfMergeCurrentIndex: newIndex,
+      });
+    } else {
+      // 照片转PDF删除
+      this.deleteImage(index);
+    }
   },
 
   deleteImage(index) {

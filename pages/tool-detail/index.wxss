@@ -807,6 +807,142 @@
   gap: 12rpx;
 }
 
+/* PDF合并专用样式 */
+.pdf-merge-container {
+  margin-top: 20rpx;
+}
+
+.pdf-merge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.pdf-merge-title {
+  font-size: 28rpx;
+  color: #1f2b28;
+  font-weight: 600;
+}
+
+.pdf-merge-swiper {
+  width: 100%;
+  height: 400rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.9);
+  margin-top: 16rpx;
+}
+
+.pdf-preview-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+}
+
+.pdf-icon {
+  font-size: 120rpx;
+  margin-bottom: 24rpx;
+}
+
+.pdf-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.pdf-name {
+  font-size: 28rpx;
+  color: #1f2b28;
+  font-weight: 600;
+  text-align: center;
+  word-break: break-all;
+}
+
+.pdf-meta {
+  font-size: 24rpx;
+  color: #6a6f66;
+}
+
+.pdf-merge-thumbs {
+  width: 100%;
+  margin-top: 20rpx;
+}
+
+.pdf-merge-thumbs__list {
+  display: flex;
+  gap: 12rpx;
+  padding: 8rpx 0;
+}
+
+.pdf-merge-thumb {
+  position: relative;
+  width: 120rpx;
+  height: 160rpx;
+  border-radius: 16rpx;
+  overflow: hidden;
+  border: 4rpx solid transparent;
+  transition: all 0.2s ease;
+  background: rgba(244, 240, 233, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pdf-merge-thumb--active {
+  border-color: #1d5c4b;
+}
+
+.pdf-thumb-icon {
+  font-size: 48rpx;
+}
+
+.pdf-thumb-name {
+  font-size: 24rpx;
+  color: #1f2b28;
+  margin-top: 8rpx;
+}
+
+.pdf-thumb-delete {
+  position: absolute;
+  top: -8rpx;
+  right: -8rpx;
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background: #dc4c46;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 4rpx 12rpx rgba(220, 76, 70, 0.4);
+}
+
+.pdf-thumb-delete-icon {
+  font-size: 24rpx;
+  color: #ffffff;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.pdf-merge-sort-actions {
+  margin-top: 24rpx;
+  display: flex;
+  gap: 16rpx;
+  justify-content: center;
+}
+
+.pdf-merge-sort-actions .btn-ghost {
+  flex: 1;
+  max-width: 200rpx;
+}
+
 .more-colors-wrap {
   margin-top: 16rpx;
   padding-top: 16rpx;

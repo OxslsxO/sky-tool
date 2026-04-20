@@ -426,7 +426,66 @@
       <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady}}">{{backendPickerButtonText}}</view>
       <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady}}">重新选择</view>
 
-      <view class="file-list" wx:if="{{backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady}}">
+      <!-- PDF合并专用预览和排序UI -->
+      <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length}}">
+        <view class="pdf-merge-header">
+          <text class="pdf-merge-title">已选择 {{pdfMergePreviewFiles.length}} 个PDF</text>
+          <view class="btn-ghost" wx:if="{{pdfMergePreviewFiles.length > 1}}" bindtap="handlePdfMergeSortToggle">
+            {{pdfMergeSorting ? '完成排序' : '调整顺序'}}
+          </view>
+        </view>
+
+        <!-- Swiper 大图预览 -->
+        <swiper 
+          class="pdf-merge-swiper" 
+          current="{{pdfMergeCurrentIndex}}" 
+          bindchange="handlePdfMergeSwiperChange"
+          indicator-dots="{{pdfMergePreviewFiles.length > 1}}"
+        >
+          <swiper-item wx:for="{{pdfMergePreviewFiles}}" wx:key="path">
+            <view class="pdf-preview-card">
+              <text class="pdf-icon">📄</text>
+              <view class="pdf-info">
+                <text class="pdf-name">{{item.name}}</text>
+                <text class="pdf-meta">{{item.sizeText}}{{item.pageCount > 0 ? ' · ' + item.pageCount + '页' : ''}}</text>
+              </view>
+            </view>
+          </swiper-item>
+        </swiper>
+
+        <!-- 缩略图列表 -->
+        <scroll-view class="pdf-merge-thumbs" scroll-x>
+          <view class="pdf-merge-thumbs__list">
+            <view 
+              class="pdf-merge-thumb {{pdfMergeCurrentIndex === index ? 'pdf-merge-thumb--active' : ''}}"
+              wx:for="{{pdfMergePreviewFiles}}"
+              wx:key="path"
+              data-index="{{index}}"
+              bindtap="handleThumbClick"
+            >
+              <view class="pdf-thumb-icon">📄</view>
+              <text class="pdf-thumb-name">{{index + 1}}</text>
+              <!-- 排序时显示删除按钮 -->
+              <view class="pdf-thumb-delete" wx:if="{{pdfMergeSorting}}" data-index="{{index}}" catchtap="handleDeleteThumbImage">
+                <text class="pdf-thumb-delete-icon">✕</text>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+
+        <!-- 排序操作栏 -->
+        <view class="pdf-merge-sort-actions" wx:if="{{pdfMergeSorting}}">
+          <view class="btn-ghost" bindtap="handlePdfMergeSwapUp" disabled="{{pdfMergeCurrentIndex <= 0}}">
+            ← 上移
+          </view>
+          <view class="btn-ghost" bindtap="handlePdfMergeSwapDown" disabled="{{pdfMergeCurrentIndex >= pdfMergePreviewFiles.length - 1}}">
+            下移 →
+          </view>
+        </view>
+      </view>
+
+      <!-- 普通文件列表（其他工具用） -->
+      <view class="file-list" wx:if="{{tool.id !== 'pdf-merge' && backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady}}">
         <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
           <text class="file-item__name">{{item.name}}</text>
           <text class="file-item__meta">{{item.sizeText}}</text>
