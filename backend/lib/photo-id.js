@@ -128,9 +128,10 @@ function isTruthyEnv(value) {
 }
 
 function shouldUseImglyBackgroundRemoval() {
-  const segmenter = String(process.env.PHOTO_ID_SEGMENTER || "imgly").toLowerCase();
+  // 默认禁用 IMG.LY 方案，因为在部署环境中容易卡死
+  const segmenter = String(process.env.PHOTO_ID_SEGMENTER || "onnx").toLowerCase();
   return (
-    !isTruthyEnv(process.env.PHOTO_ID_DISABLE_IMGLY) &&
+    isTruthyEnv(process.env.PHOTO_ID_ENABLE_IMGLY) &&
     !["legacy", "uniform", "onnx"].includes(segmenter)
   );
 }
@@ -1000,12 +1001,14 @@ function runImglyWorker(inputPath, outputPath) {
     });
     let stdout = "";
     let stderr = "";
+    
+    // 大幅减少超时时间，从120秒改为30秒
     const timer = setTimeout(() => {
       child.kill();
       const error = new Error("IMG.LY background removal timed out");
       error.code = "PHOTO_ID_IMGLY_TIMEOUT";
       reject(error);
-    }, 120000);
+    }, 30000);
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
