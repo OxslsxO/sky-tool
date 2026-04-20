@@ -1384,19 +1384,32 @@ Page({
         }
       }
 
+      const backendFiles = files.map((file) => ({
+        path: file.path,
+        name: file.name || getFileName(file.path),
+        size: file.size || 0,
+        sizeText: formatFileSize(file.size || 0),
+      }));
+
       const nextState = {
-        backendFiles: files.map((file) => ({
-          path: file.path,
-          name: file.name || getFileName(file.path),
-          size: file.size || 0,
-          sizeText: formatFileSize(file.size || 0),
-        })),
+        backendFiles,
       };
 
       if (tool.id === "pdf-merge") {
-        // PDF合并：预览并排序
-        Object.assign(nextState, this.getClearedPdfMergePreview());
-        await this.loadPdfPreviews(nextState.backendFiles);
+        // PDF合并：先显示基本预览，再加载页数
+        const initialPreviewFiles = backendFiles.map((file) => ({
+          ...file,
+          pageCount: 0,
+        }));
+        nextState.pdfMergePreviewFiles = initialPreviewFiles;
+        nextState.pdfMergeSorting = false;
+        nextState.pdfMergeCurrentIndex = 0;
+        
+        // 先更新UI
+        this.setData(nextState);
+        
+        // 再异步加载预览（不阻塞UI）
+        this.loadPdfPreviews(backendFiles);
       } else if (tool.id === "pdf-to-word") {
         Object.assign(nextState, this.getClearedPdfToWordResult());
       } else if (tool.id === "audio-convert") {
@@ -1422,7 +1435,10 @@ Page({
         });
       }
 
-      this.setData(nextState);
+      // PDF合并已经提前 setData 了，避免重复
+      if (tool.id !== "pdf-merge") {
+        this.setData(nextState);
+      }
     } catch (error) {
       this.ignoreOnShowRefreshUntil = 0;
       if (error && error.errMsg && error.errMsg.indexOf("cancel") > -1) {
@@ -1678,32 +1694,40 @@ Page({
         return;
       }
       // 上传文件并获取PDF信息
-      const { packLocalFile } = require("../../services/remote-executor");
-      const { hasBackendService, getBackendBaseUrl } = require("../../services/backend-tools");
+      const { packLocalFile, requestJson } = require("../../services/remote-executor");
+      const { hasBackendService } = require("../../services/backend-tools");
       if (!hasBackendService()) {
         wx.showToast({
           title: "未配置后端服务",
           icon: "none",
         });
+        // 即使没有后端，也显示基本预览
+        const previewFiles = files.map((file) => ({
+          ...file,
+          pageCount: 0,
+        }));
+        this.setData({
+          pdfMergePreviewFiles: previewFiles,
+        });
         return;
       }
-      const baseUrl = getBackendBaseUrl();
       // 打包所有PDF文件
       const packedFiles = [];
       for (let file of files) {
-        const packed = await packLocalFile(file.path, { name: file.name });
-        packedFiles.push(packed);
+        try {
+          const packed = await packLocalFile(file);
+          packedFiles.push(packed);
+        } catch (err) {
+          // 打包失败，继续
+          packedFiles.push({
+            name: file.name,
+            sizeBytes: file.size || 0,
+            base64: "",
+          });
+        }
       }
       // 调用预览API
-      const response = await wx.request({
-        url: `${baseUrl}/api/pdf/preview`,
-        method: "POST",
-        data: { files: packedFiles },
-      });
-      const result = await new Promise((resolve) => {
-        response.onSuccess = (res) => resolve(res.data);
-        response.onFail = () => resolve({ ok: false });
-      });
+      const result = await requestJson("/api/pdf/preview", { files: packedFiles });
       if (result && result.ok && result.files) {
         // 组合预览文件信息
         const previewFiles = files.map((file, index) => ({
@@ -1713,9 +1737,19 @@ Page({
         this.setData({
           pdfMergePreviewFiles: previewFiles,
         });
+      } else {
+        // 失败时也显示基本信息
+        const previewFiles = files.map((file) => ({
+          ...file,
+          pageCount: 0,
+        }));
+        this.setData({
+          pdfMergePreviewFiles: previewFiles,
+        });
       }
     } catch (error) {
       // 忽略预览错误，继续使用基本信息
+      console.error("loadPdfPreviews error:", error);
       const previewFiles = files.map((file) => ({
         ...file,
         pageCount: 0,
