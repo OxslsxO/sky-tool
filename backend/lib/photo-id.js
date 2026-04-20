@@ -235,8 +235,24 @@ async function getSession(config) {
     return null;
   }
 
-  const modelsDir = path.join(config.tempDir, "..", "models");
-  console.log(`[photo-id] getSession: 模型目录 ${modelsDir}`);
+  // 优先使用项目内的模型目录（Docker 构建时下载的）
+  const projectModelsDir = path.join(__dirname, "..", "storage", "models");
+  console.log(`[photo-id] getSession: 检查项目模型目录 ${projectModelsDir}`);
+  
+  // 只有项目内没有模型时才使用运行时目录
+  let modelsDir;
+  if (fs.existsSync(projectModelsDir)) {
+    const files = fs.readdirSync(projectModelsDir);
+    if (files.length > 0) {
+      modelsDir = projectModelsDir;
+      console.log(`[photo-id] getSession: 使用项目模型目录 ${modelsDir}`);
+    }
+  }
+  
+  if (!modelsDir) {
+    modelsDir = path.join(config.tempDir, "..", "models");
+    console.log(`[photo-id] getSession: 使用运行时模型目录 ${modelsDir}`);
+  }
 
   // 检查缓存
   for (let index = 0; index < MODEL_CANDIDATES.length; index += 1) {
