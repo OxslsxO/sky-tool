@@ -11,7 +11,7 @@ RUN mkdir -p backend/storage/models \
 
 COPY . .
 
-ENV PORT=3100
-EXPOSE 3100
+ENV PORT=7860
+EXPOSE 7860
 
 CMD ["npm", "run", "backend:start"]
