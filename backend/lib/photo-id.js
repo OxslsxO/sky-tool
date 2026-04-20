@@ -235,6 +235,12 @@ async function getSession(config) {
     return null;
   }
 
+  // 检查是否强制禁用模型（用于内存受限环境如 Render）
+  if (process.env.PHOTO_ID_DISABLE_MODEL === 'true') {
+    console.log("[photo-id] getSession: 模型被环境变量禁用");
+    return null;
+  }
+
   // 优先使用项目内的模型目录（Docker 构建时下载的）
   const projectModelsDir = path.join(__dirname, "..", "storage", "models");
   console.log(`[photo-id] getSession: 检查项目模型目录 ${projectModelsDir}`);
@@ -275,11 +281,23 @@ async function getSession(config) {
 
       // 创建带有超时的会话
       console.log(`[photo-id] getSession: 创建会话 ${model.key}`);
-      const sessionCreatePromise = ort.InferenceSession.create(modelPath);
       
-      // 30秒超时
+      // 使用更长的超时时间和更保守的内存设置
+      const sessionOptions = {
+        // 使用 CPU 执行提供程序，避免 GPU 内存问题
+        executionProviders: ['cpu'],
+        // 限制线程数以减少内存使用
+        intraOpNumThreads: 1,
+        interOpNumThreads: 1,
+        // 禁用内存优化（在内存受限环境中）
+        graphOptimizationLevel: 'basic',
+      };
+      
+      const sessionCreatePromise = ort.InferenceSession.create(modelPath, sessionOptions);
+      
+      // 60秒超时（Render 等环境可能需要更长时间）
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 30000);
+        setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 60000);
       });
 
       const session = await Promise.race([sessionCreatePromise, timeoutPromise]);
@@ -290,7 +308,7 @@ async function getSession(config) {
 
       return sessionResult;
     } catch (error) {
-      console.error(`[photo-id] getSession: 模型 ${model.key} 失败`, error);
+      console.error(`[photo-id] getSession: 模型 ${model.key} 失败`, error.message || error);
       if (index === MODEL_CANDIDATES.length - 1) {
         console.warn(`[photo-id] getSession: 所有模型都失败，返回 null 降级处理`);
         return null;
@@ -951,7 +969,15 @@ async function removeUniformBackground(inputBuffer) {
 async function removeBackgroundWithModel(config, inputBuffer) {
   console.log("[photo-id] removeBackgroundWithModel: 开始");
   console.log("[photo-id] removeBackgroundWithModel: 获取会话");
-  const sessionBundle = await getSession(config);
+  
+  let sessionBundle;
+  try {
+    sessionBundle = await getSession(config);
+  } catch (error) {
+    console.error("[photo-id] removeBackgroundWithModel: 获取会话失败", error.message || error);
+    return null;
+  }
+  
   if (!sessionBundle) {
     console.warn("[photo-id] removeBackgroundWithModel: 模型不可用，返回 null");
     return null;
@@ -959,19 +985,32 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   console.log("[photo-id] removeBackgroundWithModel: 会话获取成功");
 
   const { session, model } = sessionBundle;
-  console.log("[photo-id] removeBackgroundWithModel: 标准化图像");
-  const tensor = await normalizeImageForModel(session, model, inputBuffer);
+  
+  let tensor;
+  try {
+    console.log("[photo-id] removeBackgroundWithModel: 标准化图像");
+    tensor = await normalizeImageForModel(session, model, inputBuffer);
+  } catch (error) {
+    console.error("[photo-id] removeBackgroundWithModel: 图像标准化失败", error.message || error);
+    return null;
+  }
 
   console.log("[photo-id] removeBackgroundWithModel: 运行模型推理");
   
-  // 添加推理超时
-  const runPromise = session.run({ [getInputShape(session, model).inputName]: tensor });
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error("Model inference timeout")), 60000);
-  });
+  let result;
+  try {
+    // 添加推理超时 - 在 Render 等内存受限环境中可能需要更长时间
+    const runPromise = session.run({ [getInputShape(session, model).inputName]: tensor });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Model inference timeout")), 120000);
+    });
 
-  const result = await Promise.race([runPromise, timeoutPromise]);
-  console.log("[photo-id] removeBackgroundWithModel: 模型推理完成");
+    result = await Promise.race([runPromise, timeoutPromise]);
+    console.log("[photo-id] removeBackgroundWithModel: 模型推理完成");
+  } catch (error) {
+    console.error("[photo-id] removeBackgroundWithModel: 模型推理失败", error.message || error);
+    return null;
+  }
 
   const outputTensor = getPrimaryOutputTensor(session, result);
   const dimensions = outputTensor.dims || [];

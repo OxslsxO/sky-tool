@@ -58,7 +58,7 @@ app.get("/", (req, res) => {
   });
 });
 
-if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL)) {
+if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL) && process.env.PHOTO_ID_DISABLE_MODEL !== 'true') {
   setTimeout(() => {
     warmPhotoIdModel(config)
       .then(() => {
@@ -67,7 +67,7 @@ if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL)) {
       .catch((error) => {
         console.warn("photo-id model warmup failed", error && error.message ? error.message : error);
       });
-  }, 0);
+  }, 5000); // 延迟5秒预热，避免启动时内存压力
 }
 
 function makeId() {
@@ -813,6 +813,17 @@ app.get("/health", async (req, res) => {
   const sofficePath = resolveSofficePath();
   const ffmpegPath = resolveFfmpegPath();
 
+  // 检查 photo-id 模型状态
+  let photoIdModelStatus = 'disabled';
+  if (process.env.PHOTO_ID_DISABLE_MODEL !== 'true') {
+    try {
+      const ort = require("onnxruntime-node");
+      photoIdModelStatus = 'available';
+    } catch (error) {
+      photoIdModelStatus = 'unavailable';
+    }
+  }
+
   res.json({
     ok: true,
     service: "sky-toolbox-backend",
@@ -823,6 +834,7 @@ app.get("/health", async (req, res) => {
     fileTtlHours: config.fileTtlHours,
     capabilities: {
       photoId: true,
+      photoIdModel: photoIdModelStatus,
       pdfMerge: true,
       pdfSplit: true,
       pdfCompress: true,
@@ -842,6 +854,11 @@ app.get("/health", async (req, res) => {
     audio: {
       available: Boolean(ffmpegPath),
       path: ffmpegPath || "",
+    },
+    photoId: {
+      modelStatus: photoIdModelStatus,
+      modelDisabled: process.env.PHOTO_ID_DISABLE_MODEL === 'true',
+      warmModelEnabled: isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL),
     },
   });
 });
