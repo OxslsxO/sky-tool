@@ -29,25 +29,65 @@
       <view class="option-block" wx:for="{{visibleParams}}" wx:key="key">
         <text class="option-block__title">{{item.label}}</text>
         <view class="chips-wrap {{showMoreColors && item.key === 'background' ? 'chips-wrap-expanded' : ''}}">
-          <view
-            class="chip {{selections[item.key] === option ? 'chip-active' : ''}} {{item.key === 'background' ? 'chip-color' : ''}}"
-            wx:for="{{item.key === 'background' && !showMoreColors ? ['白色', '蓝色', '红色'] : (item.key === 'background' && showMoreColors ? tool.params[1].options : (tool.id === 'image-convert' && item.key === 'target' && imageInput ? convertTargetOptions : item.options))}}"
-            wx:for-item="option"
-            wx:key="*this"
-            data-key="{{item.key}}"
-            data-value="{{option}}"
-            bindtap="handleOptionSelect"
-          >
-            <view wx:if="{{item.key === 'background'}}" class="chip-color__dot" style="background: {{backgroundColorMap[option]}};"></view>
-            <text>{{option}}</text>
-          </view>
-          <view
-            class="chip chip-expand {{showMoreColors ? 'chip-active' : ''}}"
-            wx:if="{{item.key === 'background'}}"
-            bindtap="toggleMoreColors"
-          >
-            <text>{{showMoreColors ? '收起' : '更多'}}</text>
-          </view>
+          <!-- 音视频转换特殊处理：按音频/视频分类 -->
+          <block wx:if="{{tool.id === 'audio-convert' && item.key === 'target'}}">
+            <!-- 音频格式组 -->
+            <view wx:if="{{audioConvertAudioFormats.length && (audioInputKind === 'audio' || audioInputKind === 'video')}}" class="format-group">
+              <text class="format-group-label">🎵 音频格式</text>
+              <view class="format-group-chips">
+                <view
+                  class="chip {{selections[item.key] === option ? 'chip-active' : ''}}"
+                  wx:for="{{audioConvertAudioFormats}}"
+                  wx:for-item="option"
+                  wx:key="*this"
+                  data-key="{{item.key}}"
+                  data-value="{{option}}"
+                  bindtap="handleOptionSelect"
+                >
+                  <text>{{option}}</text>
+                </view>
+              </view>
+            </view>
+            <!-- 视频格式组 -->
+            <view wx:if="{{audioConvertVideoFormats.length && audioInputKind === 'video'}}" class="format-group">
+              <text class="format-group-label">🎬 视频格式</text>
+              <view class="format-group-chips">
+                <view
+                  class="chip {{selections[item.key] === option ? 'chip-active' : ''}}"
+                  wx:for="{{audioConvertVideoFormats}}"
+                  wx:for-item="option"
+                  wx:key="*this"
+                  data-key="{{item.key}}"
+                  data-value="{{option}}"
+                  bindtap="handleOptionSelect"
+                >
+                  <text>{{option}}</text>
+                </view>
+              </view>
+            </view>
+          </block>
+          <!-- 其他参数正常渲染 -->
+          <block wx:else>
+            <view
+              class="chip {{selections[item.key] === option ? 'chip-active' : ''}} {{item.key === 'background' ? 'chip-color' : ''}}"
+              wx:for="{{item.key === 'background' && !showMoreColors ? ['白色', '蓝色', '红色'] : (item.key === 'background' && showMoreColors ? tool.params[1].options : (tool.id === 'image-convert' && item.key === 'target' && imageInput ? convertTargetOptions : item.options))}}"
+              wx:for-item="option"
+              wx:key="*this"
+              data-key="{{item.key}}"
+              data-value="{{option}}"
+              bindtap="handleOptionSelect"
+            >
+              <view wx:if="{{item.key === 'background'}}" class="chip-color__dot" style="background: {{backgroundColorMap[option]}};"></view>
+              <text>{{option}}</text>
+            </view>
+            <view
+              class="chip chip-expand {{showMoreColors ? 'chip-active' : ''}}"
+              wx:if="{{item.key === 'background'}}"
+              bindtap="toggleMoreColors"
+            >
+              <text>{{showMoreColors ? '收起' : '更多'}}</text>
+            </view>
+          </block>
         </view>
       </view>
     </view>

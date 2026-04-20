@@ -234,6 +234,10 @@
   flex: 1;
   font-size: 24rpx;
   color: #1f2b28;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .file-item__meta {
@@ -774,6 +778,33 @@
 .chip-expand.chip-active {
   background: rgba(29, 92, 75, 0.08);
   border-color: rgba(29, 92, 75, 0.3);
+}
+
+/* 音视频格式分组样式 */
+.format-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  width: 100%;
+  margin-bottom: 20rpx;
+}
+
+.format-group:last-child {
+  margin-bottom: 0;
+}
+
+.format-group-label {
+  display: block;
+  font-size: 24rpx;
+  color: #6a6f66;
+  font-weight: 600;
+  padding-left: 4rpx;
+}
+
+.format-group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
 }
 
 .more-colors-wrap {

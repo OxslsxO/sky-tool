@@ -1,4 +1,4 @@
-﻿﻿const qrcode = require("../../utils/vendor/qrcode-generator");
+﻿const qrcode = require("../../utils/vendor/qrcode-generator");
 const { PDFDocument } = require("../../utils/vendor/pdf-lib");
 const { getToolById, getCategoryById } = require("../../data/mock");
 
@@ -420,6 +420,9 @@ function clearPhotoIdSession() {
 
 Page({
   data: {
+    // 音视频分类目标格式（分离音频和视频）
+    audioConvertAudioFormats: AUDIO_CONVERT_AUDIO_FORMATS,
+    audioConvertVideoFormats: AUDIO_CONVERT_VIDEO_FORMATS,
     tool: null,
     category: null,
     selections: {},
