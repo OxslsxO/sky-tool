@@ -1,3 +1,13 @@
+---
+title: Sky Tool
+emoji: 🛠️
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+license: mit
+---
+
 # 晴空工具箱
 
 一个面向微信小程序的全能工具箱项目，覆盖图片处理、PDF/文档、OCR 和日常效率工具。当前仓库已经包含原生小程序前端、可直接启动的 Node.js 后端，以及可选的 MongoDB 持久化和七牛云 Kodo 文件存储接入。
