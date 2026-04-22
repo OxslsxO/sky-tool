@@ -1587,10 +1587,13 @@ app.post("/api/pdf/merge", async (req, res) => {
     }
 
     const mergedPdf = await PDFDocument.create();
+    let totalPages = 0;
 
     for (const file of files) {
       assertPdfFile(file);
       const sourcePdf = await PDFDocument.load(decodeBase64File(file));
+      const pageCount = sourcePdf.getPageCount();
+      totalPages += pageCount;
       const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
       copiedPages.forEach((page) => mergedPdf.addPage(page));
     }
@@ -1618,6 +1621,7 @@ app.post("/api/pdf/merge", async (req, res) => {
       ],
       meta: {
         inputCount: files.length,
+        totalPages,
       },
     });
 
@@ -1629,6 +1633,7 @@ app.post("/api/pdf/merge", async (req, res) => {
       file: buildFileResponse(output, "application/pdf"),
       metaLines: [
         `输入文件 ${files.length} 份`,
+        `合并后 ${totalPages} 页`,
         `存储位置 ${output.provider === "qiniu" ? "七牛云" : "本地磁盘"}`,
       ],
     });
