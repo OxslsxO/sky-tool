@@ -1,5 +1,18 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
+process.env.PHOTO_ID_DISABLE_MODEL = process.env.PHOTO_ID_DISABLE_MODEL || "true";
+process.env.PHOTO_ID_WARM_MODEL = process.env.PHOTO_ID_WARM_MODEL || "false";
+
+console.log("🚀 sky-toolbox-backend 正在启动...");
+
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled Rejection:", reason);
+});
+
 const http = require("http");
 const express = require("express");
 const cors = require("cors");
@@ -8,31 +21,35 @@ const path = require("path");
 const crypto = require("crypto");
 const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
-const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
-const Pay = require("wechatpay-node-v3");
-const {
-  PDFServices,
-  MimeType,
-  ServicePrincipalCredentials,
-  ClientConfig,
-  Region,
-  ExportPDFParams,
-  ExportPDFTargetFormat,
-  ExportOCRLocale,
-  ExportPDFJob,
-  ExportPDFResult,
-  RemoveProtectionParams,
-  RemoveProtectionJob,
-  RemoveProtectionResult,
-} = require("@adobe/pdfservices-node-sdk");
-const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
 
-// ==================== 启动优化配置 ====================
-process.env.PHOTO_ID_DISABLE_MODEL = process.env.PHOTO_ID_DISABLE_MODEL || "true"; // 默认禁用模型避免内存问题
-process.env.PHOTO_ID_WARM_MODEL = process.env.PHOTO_ID_WARM_MODEL || "false";      // 默认不预热模型
+let Pay = null;
+try {
+  Pay = require("wechatpay-node-v3");
+} catch (e) {
+  console.warn("⚠️ wechatpay-node-v3 加载失败:", e.message);
+}
 
-console.log("🚀 sky-toolbox-backend 正在启动...");
+let adobePdfServices = null;
+try {
+  adobePdfServices = require("@adobe/pdfservices-node-sdk");
+} catch (e) {
+  console.warn("⚠️ @adobe/pdfservices-node-sdk 加载失败:", e.message);
+}
+
+let tesseractWorker = null;
+try {
+  tesseractWorker = require("tesseract.js");
+} catch (e) {
+  console.warn("⚠️ tesseract.js 加载失败:", e.message);
+}
+
+let photoIdModule = null;
+try {
+  photoIdModule = require("./lib/photo-id");
+} catch (e) {
+  console.warn("⚠️ photo-id 模块加载失败:", e.message);
+}
 
 // ==================== 微信支付初始化 ====================
 let wechatPay = null;
@@ -79,6 +96,11 @@ function initWechatPay() {
       console.log("✅ PEM格式处理完成");
     } catch (e) {
       console.warn("⚠️ PEM格式处理警告，尝试直接使用原始值:", e.message);
+    }
+
+    if (!Pay) {
+      console.warn("⚠️ wechatpay-node-v3 模块未加载，跳过微信支付初始化");
+      return null;
     }
 
     const wp = new Pay({
@@ -132,16 +154,16 @@ app.get("/", (req, res) => {
   });
 });
 
-if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL) && process.env.PHOTO_ID_DISABLE_MODEL !== 'true') {
+if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL) && process.env.PHOTO_ID_DISABLE_MODEL !== 'true' && photoIdModule) {
   setTimeout(() => {
-    warmPhotoIdModel(config)
+    photoIdModule.warmPhotoIdModel(config)
       .then(() => {
         console.log("photo-id model warmed");
       })
       .catch((error) => {
         console.warn("photo-id model warmup failed", error && error.message ? error.message : error);
       });
-  }, 5000); // 延迟5秒预热，避免启动时内存压力
+  }, 5000);
 }
 
 function makeId() {
@@ -729,9 +751,13 @@ async function recognizeTextFromImage(file, languageLabel, layoutLabel) {
     }
   }
 
+  if (!tesseractWorker) {
+    throw new Error("OCR 功能不可用：tesseract.js 未加载");
+  }
+
   const fileBuffer = decodeBase64File(file);
   const variants = await prepareOcrImageVariants(fileBuffer, layoutLabel);
-  const worker = await createWorker(normalizeOcrLanguage(languageLabel));
+  const worker = await tesseractWorker.createWorker(normalizeOcrLanguage(languageLabel));
 
   try {
     await worker.setParameters({
@@ -1015,8 +1041,12 @@ app.post("/api/photo-id", async (req, res) => {
   const { file, size, background, retouch } = req.body || {};
 
   try {
+    if (!photoIdModule) {
+      throw new Error("证件照功能不可用：photo-id 模块未加载");
+    }
+
     const inputBuffer = decodeBase64File(file);
-    const result = await buildPhotoIdImage(config, inputBuffer, {
+    const result = await photoIdModule.buildPhotoIdImage(config, inputBuffer, {
       size,
       background,
       retouch,
@@ -2889,6 +2919,13 @@ function createCodedError(message, code) {
 }
 
 function getAdobePdfServicesCredentials() {
+  if (!adobePdfServices) {
+    throw createCodedError(
+      "Adobe PDF Services SDK 未加载",
+      "PDF_TO_WORD_ADOBE_NOT_AVAILABLE"
+    );
+  }
+
   const clientId = process.env.PDF_SERVICES_CLIENT_ID || process.env.ADOBE_PDF_SERVICES_CLIENT_ID;
   const clientSecret = process.env.PDF_SERVICES_CLIENT_SECRET || process.env.ADOBE_PDF_SERVICES_CLIENT_SECRET;
 
@@ -2899,7 +2936,7 @@ function getAdobePdfServicesCredentials() {
     );
   }
 
-  return new ServicePrincipalCredentials({ clientId, clientSecret });
+  return new adobePdfServices.ServicePrincipalCredentials({ clientId, clientSecret });
 }
 
 function buildAdobeClientConfig() {
@@ -2912,16 +2949,16 @@ function buildAdobeClientConfig() {
   }
 
   if (region === "EU") {
-    configOptions.region = Region.EU;
+    configOptions.region = adobePdfServices.Region.EU;
   } else if (region === "US") {
-    configOptions.region = Region.US;
+    configOptions.region = adobePdfServices.Region.US;
   }
 
-  return new ClientConfig(configOptions);
+  return new adobePdfServices.ClientConfig(configOptions);
 }
 
 function createAdobePdfServicesClient() {
-  return new PDFServices({
+  return new adobePdfServices.PDFServices({
     credentials: getAdobePdfServicesCredentials(),
     clientConfig: buildAdobeClientConfig(),
   });
@@ -2932,29 +2969,29 @@ function getPdfToWordOutputConfig(format) {
   if (normalizedFormat === "DOC") {
     return {
       extension: "doc",
-      contentType: MimeType.DOC,
-      targetFormat: ExportPDFTargetFormat.DOC,
+      contentType: adobePdfServices.MimeType.DOC,
+      targetFormat: adobePdfServices.ExportPDFTargetFormat.DOC,
       format: "DOC",
     };
   }
 
   return {
     extension: "docx",
-    contentType: MimeType.DOCX,
-    targetFormat: ExportPDFTargetFormat.DOCX,
+    contentType: adobePdfServices.MimeType.DOCX,
+    targetFormat: adobePdfServices.ExportPDFTargetFormat.DOCX,
     format: "DOCX",
   };
 }
 
 function getAdobeExportOcrLocale(locale) {
   const requestedLocale = String(locale || process.env.PDF_SERVICES_OCR_LOCALE || "zh-CN").trim();
-  const localeEntry = Object.entries(ExportOCRLocale).find(
+  const localeEntry = Object.entries(adobePdfServices.ExportOCRLocale).find(
     ([key, value]) =>
       key.toLowerCase() === requestedLocale.toLowerCase().replace(/-/g, "_") ||
       value.toLowerCase() === requestedLocale.toLowerCase()
   );
 
-  return localeEntry ? localeEntry[1] : ExportOCRLocale.ZH_CN;
+  return localeEntry ? localeEntry[1] : adobePdfServices.ExportOCRLocale.ZH_CN;
 }
 
 async function readStreamToBuffer(readStream) {
@@ -3006,7 +3043,7 @@ async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options
   try {
     const inputAsset = await pdfServices.upload({
       readStream: fs.createReadStream(inputPath),
-      mimeType: MimeType.PDF,
+      mimeType: adobePdfServices.MimeType.PDF,
     });
     uploadedAssets.push(inputAsset);
 
@@ -3015,15 +3052,15 @@ async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options
 
     // 处理加密 PDF
     if (password) {
-      const removeProtectionParams = new RemoveProtectionParams({ password });
-      const removeProtectionJob = new RemoveProtectionJob({
+      const removeProtectionParams = new adobePdfServices.RemoveProtectionParams({ password });
+      const removeProtectionJob = new adobePdfServices.RemoveProtectionJob({
         inputAsset: exportInputAsset,
         params: removeProtectionParams,
       });
       const removeProtectionPollingURL = await pdfServices.submit({ job: removeProtectionJob });
       const removeProtectionResponse = await pdfServices.getJobResult({
         pollingURL: removeProtectionPollingURL,
-        resultType: RemoveProtectionResult,
+        resultType: adobePdfServices.RemoveProtectionResult,
       });
 
       if (!removeProtectionResponse.result || !removeProtectionResponse.result.asset) {
@@ -3037,7 +3074,7 @@ async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options
 
     // ====================== 终极优化：最高字体/格式还原配置 ======================
     const finalLayoutMode = layoutMode === "exact" ? "EXACT" : "FLOW";
-    const exportParams = new ExportPDFParams({
+    const exportParams = new adobePdfServices.ExportPDFParams({
       targetFormat: outputConfig.targetFormat,
       ocrLocale,
       // 🔥 核心1：精确布局（完全复刻PDF的字体、间距、排版）
@@ -3059,14 +3096,14 @@ async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options
       subsetFonts: true,
     });
 
-    const exportJob = new ExportPDFJob({
+    const exportJob = new adobePdfServices.ExportPDFJob({
       inputAsset: exportInputAsset,
       params: exportParams,
     });
     const exportPollingURL = await pdfServices.submit({ job: exportJob });
     const exportResponse = await pdfServices.getJobResult({
       pollingURL: exportPollingURL,
-      resultType: ExportPDFResult,
+      resultType: adobePdfServices.ExportPDFResult,
     });
 
     if (!exportResponse.result || !exportResponse.result.asset) {
