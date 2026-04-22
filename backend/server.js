@@ -41,12 +41,39 @@ function initWechatPay() {
 
     if (!appId || !mchId || !apiV3Key || !serialNo || !privateKey || !publicKey) {
       console.warn("⚠️ 微信支付配置不完整，将使用模拟支付");
+      console.warn("   缺少的配置项:", {
+        appId: !!appId,
+        mchId: !!mchId,
+        apiV3Key: !!apiV3Key,
+        serialNo: !!serialNo,
+        privateKey: !!privateKey,
+        publicKey: !!publicKey,
+      });
       return null;
     }
 
-    // 确保 PEM 格式正确
-    const cleanedPrivateKey = privateKey.replace(/\\n/g, "\n").trim();
-    const cleanedPublicKey = publicKey.replace(/\\n/g, "\n").trim();
+    // 确保 PEM 格式正确 - 更健壮的处理
+    let cleanedPrivateKey = privateKey;
+    let cleanedPublicKey = publicKey;
+    
+    // 处理各种可能的格式
+    try {
+      // 先尝试处理 \n 转义的情况
+      cleanedPrivateKey = cleanedPrivateKey.replace(/\\n/g, "\n").trim();
+      cleanedPublicKey = cleanedPublicKey.replace(/\\n/g, "\n").trim();
+      
+      // 确保有正确的头部和尾部
+      if (!cleanedPrivateKey.startsWith("-----BEGIN")) {
+        cleanedPrivateKey = "-----BEGIN PRIVATE KEY-----\n" + cleanedPrivateKey + "\n-----END PRIVATE KEY-----";
+      }
+      if (!cleanedPublicKey.startsWith("-----BEGIN")) {
+        cleanedPublicKey = "-----BEGIN CERTIFICATE-----\n" + cleanedPublicKey + "\n-----END CERTIFICATE-----";
+      }
+      
+      console.log("✅ PEM格式处理完成");
+    } catch (e) {
+      console.warn("⚠️ PEM格式处理警告，尝试直接使用原始值:", e.message);
+    }
 
     const wp = new Pay({
       appid: appId,
@@ -61,6 +88,7 @@ function initWechatPay() {
     return wp;
   } catch (error) {
     console.error("❌ 微信支付初始化失败:", error && error.message ? error.message : error);
+    console.error("   错误详情:", error);
     return null;
   }
 }
@@ -1151,9 +1179,12 @@ const PRODUCTS = {
 };
 
 app.post("/api/pay/create", async (req, res) => {
+  console.log(`[支付] 收到创建订单请求:`, req.body);
+  
   const { type, itemId, userId, deviceId } = req.body || {};
 
   if (!type || !itemId) {
+    console.warn(`[支付] 缺少参数: type=${type}, itemId=${itemId}`);
     return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
   }
 
@@ -1161,21 +1192,26 @@ app.post("/api/pay/create", async (req, res) => {
   const product = PRODUCTS[type]?.[itemId];
 
   if (!product) {
+    console.warn(`[支付] 无效商品: type=${type}, itemId=${itemId}`);
     return res.status(400).json({ error: "INVALID_PRODUCT", message: "无效的商品" });
   }
+
+  console.log(`[支付] 准备创建订单: orderId=${orderId}, product=${product.name}, price=${product.price}`);
 
   let payment = null;
 
   if (wechatPay) {
     try {
-      console.log(`[支付] 创建订单 ${orderId} - ${product.name} (${product.price}分)`);
+      console.log(`[支付] 尝试使用微信支付创建订单 ${orderId}`);
+      
+      const notifyUrl = `${process.env.PUBLIC_BASE_URL || "https://OxslsxO-sky-tool.hf.space"}/api/pay/notify`;
       
       const params = {
         appid: process.env.WECHAT_APPID,
         mchid: process.env.WECHAT_MCH_ID,
         description: product.name,
         out_trade_no: orderId,
-        notify_url: `${process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3100"}/api/pay/notify`,
+        notify_url: notifyUrl,
         amount: {
           total: product.price,
           currency: "CNY",
@@ -1185,11 +1221,15 @@ app.post("/api/pay/create", async (req, res) => {
         },
       };
 
+      console.log(`[支付] 微信支付请求参数:`, { ...params, privateKey: '***' });
+      
       const result = await wechatPay.transactions_jsapi(params);
 
+      console.log(`[支付] 微信支付响应:`, result);
+
       if (result.status !== 200) {
-        console.error("[支付] 预下单失败:", result);
-        throw new Error("创建订单失败");
+        console.error("[支付] 预下单失败，状态码:", result.status);
+        throw new Error(`创建订单失败: ${result.status}`);
       }
 
       console.log(`[支付] 预下单成功:`, result.data);
@@ -1200,7 +1240,10 @@ app.post("/api/pay/create", async (req, res) => {
       console.log(`[支付] 返回小程序支付参数:`, payment);
     } catch (error) {
       console.error("❌ 微信支付创建订单失败:", error && error.message ? error.message : error);
+      console.error("   完整错误:", error);
     }
+  } else {
+    console.log(`[支付] wechatPay未初始化，直接使用模拟支付`);
   }
 
   if (!payment) {
@@ -1228,6 +1271,7 @@ app.post("/api/pay/create", async (req, res) => {
     createdAt: Date.now(),
   });
 
+  console.log(`[支付] 返回订单: orderId=${orderId}`);
   res.json({ orderId, payment });
 });
 
