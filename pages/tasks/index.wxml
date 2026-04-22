@@ -1,8 +1,7 @@
 <view class="container">
   <view class="hero tasks-hero">
-    <text class="eyebrow">Task Center</text>
-    <text class="hero-title">处理过程与结果都能回来继续。</text>
-    <text class="hero-copy">重处理类工具统一走任务流，后续接入真实后端时这里就是核心中枢。</text>
+    <text class="eyebrow">History</text>
+    <text class="hero-title">历史记录</text>
 
     <view class="hero-stat-row">
       <view class="hero-stat">

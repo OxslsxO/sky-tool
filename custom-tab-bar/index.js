@@ -10,7 +10,7 @@ Component({
       },
       {
         pagePath: "/pages/tasks/index",
-        text: "任务",
+        text: "历史",
         icon: "/custom-tab-bar/icons/tasks.svg",
         activeIcon: "/custom-tab-bar/icons/tasks-active.svg"
       },
