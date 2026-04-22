@@ -1766,46 +1766,18 @@ Page({
     });
   },
 
-  handlePdfMergeSortToggle() {
-    this.setData({
-      pdfMergeSorting: !this.data.pdfMergeSorting,
-    });
-  },
-
-  handlePdfMergeSwapUp() {
-    const { pdfMergeCurrentIndex, pdfMergePreviewFiles, backendFiles } = this.data;
-    if (pdfMergeCurrentIndex <= 0) {
-      return;
-    }
-    // 交换预览文件和源文件
-    const newPreviewFiles = [...pdfMergePreviewFiles];
-    const newBackendFiles = [...backendFiles];
-    [newPreviewFiles[pdfMergeCurrentIndex - 1], newPreviewFiles[pdfMergeCurrentIndex]] = 
-      [newPreviewFiles[pdfMergeCurrentIndex], newPreviewFiles[pdfMergeCurrentIndex - 1]];
-    [newBackendFiles[pdfMergeCurrentIndex - 1], newBackendFiles[pdfMergeCurrentIndex]] = 
-      [newBackendFiles[pdfMergeCurrentIndex], newBackendFiles[pdfMergeCurrentIndex - 1]];
-    this.setData({
-      pdfMergePreviewFiles: newPreviewFiles,
-      backendFiles: newBackendFiles,
-      pdfMergeCurrentIndex: pdfMergeCurrentIndex - 1,
-    });
-  },
-
-  handlePdfMergeSwapDown() {
-    const { pdfMergeCurrentIndex, pdfMergePreviewFiles, backendFiles } = this.data;
-    if (pdfMergeCurrentIndex >= pdfMergePreviewFiles.length - 1) {
-      return;
-    }
-    const newPreviewFiles = [...pdfMergePreviewFiles];
-    const newBackendFiles = [...backendFiles];
-    [newPreviewFiles[pdfMergeCurrentIndex], newPreviewFiles[pdfMergeCurrentIndex + 1]] = 
-      [newPreviewFiles[pdfMergeCurrentIndex + 1], newPreviewFiles[pdfMergeCurrentIndex]];
-    [newBackendFiles[pdfMergeCurrentIndex], newBackendFiles[pdfMergeCurrentIndex + 1]] = 
-      [newBackendFiles[pdfMergeCurrentIndex + 1], newBackendFiles[pdfMergeCurrentIndex]];
-    this.setData({
-      pdfMergePreviewFiles: newPreviewFiles,
-      backendFiles: newBackendFiles,
-      pdfMergeCurrentIndex: pdfMergeCurrentIndex + 1,
+  handlePdfMergeThumbLongPress(e) {
+    const index = e.currentTarget.dataset.index;
+    wx.showModal({
+      title: "调整PDF顺序",
+      content: "长按后可拖动调整顺序，点击完成保存。",
+      showCancel: false,
+      confirmText: "知道了",
+      success: () => {
+        this.setData({
+          pdfMergeSorting: true,
+        });
+      },
     });
   },
 

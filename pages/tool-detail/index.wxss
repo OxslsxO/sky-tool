@@ -931,16 +931,17 @@
   line-height: 1;
 }
 
-.pdf-merge-sort-actions {
-  margin-top: 24rpx;
-  display: flex;
-  gap: 16rpx;
-  justify-content: center;
+.pdf-merge-sort-hint {
+  margin-top: 20rpx;
+  padding: 16rpx 24rpx;
+  background: rgba(29, 92, 75, 0.08);
+  border-radius: 16rpx;
+  text-align: center;
 }
 
-.pdf-merge-sort-actions .btn-ghost {
-  flex: 1;
-  max-width: 200rpx;
+.sort-hint-text {
+  font-size: 24rpx;
+  color: #1d5c4b;
 }
 
 .more-colors-wrap {

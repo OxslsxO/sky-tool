@@ -430,8 +430,8 @@
       <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length}}">
         <view class="pdf-merge-header">
           <text class="pdf-merge-title">已选择 {{pdfMergePreviewFiles.length}} 个PDF</text>
-          <view class="btn-ghost" wx:if="{{pdfMergePreviewFiles.length > 1}}" bindtap="handlePdfMergeSortToggle">
-            {{pdfMergeSorting ? '完成排序' : '调整顺序'}}
+          <view class="btn-ghost" wx:if="{{pdfMergeSorting}}" bindtap="finishSorting">
+            完成排序
           </view>
         </view>
 
@@ -462,6 +462,7 @@
               wx:key="path"
               data-index="{{index}}"
               bindtap="handleThumbClick"
+              bindlongpress="handlePdfMergeThumbLongPress"
             >
               <view class="pdf-thumb-icon">📄</view>
               <text class="pdf-thumb-name">{{index + 1}}</text>
@@ -473,14 +474,9 @@
           </view>
         </scroll-view>
 
-        <!-- 排序操作栏 -->
-        <view class="pdf-merge-sort-actions" wx:if="{{pdfMergeSorting}}">
-          <view class="btn-ghost" bindtap="handlePdfMergeSwapUp" disabled="{{pdfMergeCurrentIndex <= 0}}">
-            ← 上移
-          </view>
-          <view class="btn-ghost" bindtap="handlePdfMergeSwapDown" disabled="{{pdfMergeCurrentIndex >= pdfMergePreviewFiles.length - 1}}">
-            下移 →
-          </view>
+        <!-- 排序提示 -->
+        <view class="pdf-merge-sort-hint" wx:if="{{pdfMergeSorting}}">
+          <text class="sort-hint-text">长按拖动调整顺序，点击完成保存</text>
         </view>
       </view>
 
