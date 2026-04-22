@@ -10,7 +10,6 @@ const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
-const { Wechatpay } = require("wechatpay-node-v3");
 const {
   PDFServices,
   MimeType,
@@ -28,39 +27,10 @@ const {
 } = require("@adobe/pdfservices-node-sdk");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
 
-// ==================== 微信支付初始化 ====================
-let wechatpay = null;
-function initWechatPay() {
-  try {
-    const appId = process.env.WECHAT_APPID;
-    const mchId = process.env.WECHAT_MCH_ID;
-    const apiV3Key = process.env.WECHAT_API_V3_KEY;
-    const serialNo = process.env.WECHAT_SERIAL_NO;
-    const privateKey = process.env.WECHAT_PRIVATE_KEY;
-
-    if (!appId || !mchId || !apiV3Key || !serialNo || !privateKey) {
-      console.warn("⚠️ 微信支付配置不完整，将使用模拟支付");
-      return null;
-    }
-
-    wechatpay = new Wechatpay({
-      appid: appId,
-      mchid: mchId,
-      serial_no: serialNo,
-      privateKey: privateKey,
-      apiv3_private_key: apiV3Key,
-      notify_url: `${process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3100"}/api/pay/notify`,
-    });
-
-    console.log("✅ 微信支付已初始化");
-    return wechatpay;
-  } catch (error) {
-    console.error("❌ 微信支付初始化失败:", error && error.message ? error.message : error);
-    return null;
-  }
-}
-
-const wechatPay = initWechatPay();
+// ==================== 微信支付模拟初始化 ====================
+// 目前使用模拟支付，等项目稳定后再集成真实支付
+const wechatPay = null;
+console.log("ℹ️ 微信支付处于模拟模式，仅用于开发测试");
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");

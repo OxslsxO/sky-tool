@@ -25,7 +25,6 @@
     "pdf-lib": "^1.17.1",
     "qiniu": "^7.15.1",
     "sharp": "^0.34.5",
-    "tesseract.js": "^7.0.0",
-    "wechatpay-node-v3": "^2.2.1"
+    "tesseract.js": "^7.0.0"
   }
 }
