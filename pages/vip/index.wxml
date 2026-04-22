@@ -1,120 +1,167 @@
-<view class="container">
-  <view class="hero vip-hero">
-    <view class="vip-hero__status" wx:if="{{memberStatus.active}}">
-      <text class="vip-hero__badge">会员</text>
-      <text class="vip-hero__plan">{{memberStatus.plan}}</text>
-      <text class="vip-hero__expire">剩余 {{memberStatus.remainingDays}} 天</text>
+<view class="vip-container">
+  <!-- 顶部状态卡片 - 温馨渐变 -->
+  <view class="vip-header">
+    <view class="vip-header-bg">
+      <view class="vip-header-glow"></view>
     </view>
-    <view class="vip-hero__status" wx:else>
-      <text class="vip-hero__badge vip-hero__badge--inactive">未开通</text>
-    </view>
-    <view class="vip-hero__points">
-      <text class="vip-hero__points-value">{{user.points}}</text>
-      <text class="vip-hero__points-label">积分余额</text>
-      <view class="debug-add-btn" bindtap="debugAddPoints">+10000</view>
-    </view>
-  </view>
-
-  <view class="tab-bar">
-    <view class="tab-item {{tab === 'member' ? 'tab-active' : ''}}" data-tab="member" bindtap="switchTab">会员</view>
-    <view class="tab-item {{tab === 'points' ? 'tab-active' : ''}}" data-tab="points" bindtap="switchTab">积分</view>
-    <view class="tab-item {{tab === 'records' ? 'tab-active' : ''}}" data-tab="records" bindtap="switchTab">记录</view>
-  </view>
-
-  <view class="section" wx:if="{{tab === 'member'}}">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Plans</text>
-        <text class="section-title">会员方案</text>
+    <view class="vip-header-content">
+      <view class="vip-status" wx:if="{{memberStatus.active}}">
+        <view class="vip-badge">
+          <text class="vip-badge-icon">✨</text>
+          <text class="vip-badge-text">会员</text>
+        </view>
+        <text class="vip-plan-name">{{memberStatus.plan}}</text>
+        <text class="vip-expire">剩余 {{memberStatus.remainingDays}} 天</text>
       </view>
+      <view class="vip-status" wx:else>
+        <view class="vip-badge vip-badge--inactive">
+          <text class="vip-badge-icon">🌙</text>
+          <text class="vip-badge-text">未开通</text>
+        </view>
+        <text class="vip-plan-name">开启会员之旅</text>
+        <text class="vip-expire">享受更多工具特权</text>
+      </view>
+      <view class="vip-points">
+        <view class="points-ring">
+          <text class="points-value">{{user.points}}</text>
+          <text class="points-label">积分</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 标签切换 -->
+  <view class="vip-tabs">
+    <view class="vip-tab {{tab === 'member' ? 'vip-tab-active' : ''}}" data-tab="member" bindtap="switchTab">
+      <text class="vip-tab-icon">👑</text>
+      <text>会员</text>
+    </view>
+    <view class="vip-tab {{tab === 'points' ? 'vip-tab-active' : ''}}" data-tab="points" bindtap="switchTab">
+      <text class="vip-tab-icon">💎</text>
+      <text>积分</text>
+    </view>
+    <view class="vip-tab {{tab === 'records' ? 'vip-tab-active' : ''}}" data-tab="records" bindtap="switchTab">
+      <text class="vip-tab-icon">📋</text>
+      <text>记录</text>
+    </view>
+  </view>
+
+  <!-- 会员方案 -->
+  <view class="vip-section" wx:if="{{tab === 'member'}}">
+    <view class="section-title">
+      <text class="section-title-text">选择会员方案</text>
+      <text class="section-title-sub">解锁全部工具特权</text>
     </view>
 
     <view class="plan-list">
       <view
-        class="card plan-card {{item.recommended ? 'plan-card--recommended' : ''}} {{selectedPlan && selectedPlan.id === item.id ? 'plan-card--selected' : ''}}"
+        class="plan-card {{item.recommended ? 'plan-card--recommended' : ''}} {{selectedPlan && selectedPlan.id === item.id ? 'plan-card--selected' : ''}}"
         wx:for="{{memberPlans}}"
         wx:key="id"
         data-id="{{item.id}}"
         bindtap="selectPlan"
       >
-        <view class="row space-between">
-          <text class="plan-card__name">{{item.name}}</text>
-          <text class="plan-card__badge" wx:if="{{item.recommended}}">推荐</text>
-        </view>
-        <view class="plan-card__price-row">
-          <text class="plan-card__price">¥{{item.price}}</text>
-          <text class="plan-card__period">/{{item.period}}</text>
-        </view>
-        <text class="plan-card__copy">{{item.highlight}}</text>
-      </view>
-    </view>
+        <view class="plan-card-content">
+          <!-- 左侧信息 -->
+          <view class="plan-info">
+            <view class="plan-header">
+              <text class="plan-name">{{item.name}}</text>
+              <view class="plan-badge" wx:if="{{item.recommended}}">
+                <text>推荐</text>
+              </view>
+            </view>
+            <view class="plan-price-row">
+              <text class="plan-price">¥{{item.price}}</text>
+              <text class="plan-period">/{{item.period}}</text>
+            </view>
+            <text class="plan-desc">{{item.highlight}}</text>
+          </view>
 
-    <view class="card action-card" wx:if="{{selectedPlan}}">
-      <text class="action-card__title">开通{{selectedPlan.name}}</text>
-      <text class="action-card__copy">支付 ¥{{selectedPlan.price}}，有效期{{selectedPlan.period}}</text>
-      <view class="action-card__buttons">
-        <view class="btn-primary action-card__button {{purchasing ? 'action-card__button-disabled' : ''}}" bindtap="handleBuyMember">
-          <text>{{purchasing ? '处理中...' : '立即开通'}}</text>
+          <!-- 右侧购买按钮 - 选中时弹出 -->
+          <view class="plan-action {{selectedPlan && selectedPlan.id === item.id ? 'plan-action--show' : ''}}">
+            <view class="buy-btn {{purchasing ? 'buy-btn--loading' : ''}}" catchtap="handleBuyMember">
+              <text class="buy-btn-text">{{purchasing ? '...' : '购买'}}</text>
+              <view class="buy-btn-shine"></view>
+            </view>
+          </view>
         </view>
+
+        <!-- 选中装饰线 -->
+        <view class="plan-selected-line" wx:if="{{selectedPlan && selectedPlan.id === item.id}}"></view>
       </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{tab === 'points'}}">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Points</text>
-        <text class="section-title">积分充值</text>
-      </view>
+  <!-- 积分充值 -->
+  <view class="vip-section" wx:if="{{tab === 'points'}}">
+    <view class="section-title">
+      <text class="section-title-text">积分充值</text>
+      <text class="section-title-sub">按需充值，灵活使用</text>
     </view>
 
     <view class="plan-list">
       <view
-        class="card points-card {{selectedPackage && selectedPackage.id === item.id ? 'plan-card--selected' : ''}}"
+        class="points-card {{selectedPackage && selectedPackage.id === item.id ? 'points-card--selected' : ''}}"
         wx:for="{{pointPackages}}"
         wx:key="id"
         data-id="{{item.id}}"
         bindtap="selectPackage"
       >
-        <view class="row space-between">
-          <text class="plan-card__name">{{item.points}} 积分</text>
-          <text class="plan-card__price">¥{{item.price}}</text>
-        </view>
-        <text class="plan-card__copy">{{item.bonus}}</text>
-      </view>
-    </view>
+        <view class="plan-card-content">
+          <view class="plan-info">
+            <view class="plan-header">
+              <text class="plan-name">{{item.points}} 积分</text>
+              <view class="points-bonus" wx:if="{{item.bonusPoints > 0}}">
+                <text>+{{item.bonusPoints}}</text>
+              </view>
+            </view>
+            <view class="plan-price-row">
+              <text class="plan-price">¥{{item.price}}</text>
+            </view>
+            <text class="plan-desc">{{item.bonus}}</text>
+          </view>
 
-    <view class="card action-card" wx:if="{{selectedPackage}}">
-      <text class="action-card__title">充值{{selectedPackage.points}}积分</text>
-      <text class="action-card__copy">支付 ¥{{selectedPackage.price}}，{{selectedPackage.bonus}}</text>
-      <view class="action-card__buttons">
-        <view class="btn-primary action-card__button {{purchasing ? 'action-card__button-disabled' : ''}}" bindtap="handleBuyPoints">
-          <text>{{purchasing ? '处理中...' : '立即充值'}}</text>
+          <view class="plan-action {{selectedPackage && selectedPackage.id === item.id ? 'plan-action--show' : ''}}">
+            <view class="buy-btn buy-btn--points {{purchasing ? 'buy-btn--loading' : ''}}" catchtap="handleBuyPoints">
+              <text class="buy-btn-text">{{purchasing ? '...' : '充值'}}</text>
+              <view class="buy-btn-shine"></view>
+            </view>
+          </view>
         </view>
+
+        <view class="plan-selected-line" wx:if="{{selectedPackage && selectedPackage.id === item.id}}"></view>
       </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{tab === 'records'}}">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Records</text>
-        <text class="section-title">积分记录</text>
-      </view>
+  <!-- 积分记录 -->
+  <view class="vip-section" wx:if="{{tab === 'records'}}">
+    <view class="section-title">
+      <text class="section-title-text">积分记录</text>
+      <text class="section-title-sub">最近 20 条变动记录</text>
     </view>
 
-    <view class="card" wx:if="{{!pointsRecords.length}}">
-      <text class="records-empty">暂无记录</text>
+    <view class="records-empty" wx:if="{{!pointsRecords.length}}">
+      <text class="records-empty-icon">📝</text>
+      <text class="records-empty-text">暂无记录</text>
     </view>
 
     <view class="records-list" wx:if="{{pointsRecords.length}}">
       <view class="record-item" wx:for="{{pointsRecords}}" wx:key="id">
-        <view class="record-item__left">
-          <text class="record-item__title">{{item.title}}</text>
-          <text class="record-item__time">{{item.timeLabel}}</text>
+        <view class="record-left">
+          <view class="record-icon {{item.change > 0 ? 'record-icon--plus' : (item.change < 0 ? 'record-icon--minus' : '')}}">
+            <text>{{item.change > 0 ? '✨' : (item.change < 0 ? '🔧' : '📌')}}</text>
+          </view>
+          <view class="record-info">
+            <text class="record-title">{{item.title}}</text>
+            <text class="record-time">{{item.timeLabel}}</text>
+          </view>
         </view>
-        <text class="record-item__change {{item.changeClass}}">{{item.changeText}}</text>
+        <text class="record-change {{item.changeClass}}">{{item.changeText}}</text>
       </view>
     </view>
   </view>
+
+  <!-- 底部留白 -->
+  <view class="vip-footer"></view>
 </view>

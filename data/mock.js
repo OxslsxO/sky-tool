@@ -393,7 +393,7 @@ const featuredBundles = [
 const visibleTools = tools.filter((tool) => !hiddenToolIds.includes(tool.id));
 
 const memberPlans = [
-  { id: "trial", name: "体验周卡", price: "9.9", period: "7 天", durationDays: 7, highlight: "低门槛体验高频工具", recommended: false },
+  { id: "trial", name: "体验周卡", price: "0.01", period: "7 天", durationDays: 7, highlight: "低门槛体验高频工具", recommended: false },
   { id: "month", name: "月度会员", price: "29", period: "30 天", durationDays: 30, highlight: "主推，适合高频使用图片与 PDF 工具", recommended: true },
   { id: "season", name: "季度会员", price: "68", period: "90 天", durationDays: 90, highlight: "单日成本更低，适合上班族和学生季节性需求", recommended: false },
   { id: "year", name: "年度会员", price: "198", period: "365 天", durationDays: 365, highlight: "年度超值套餐，适合长期高频使用", recommended: false },
