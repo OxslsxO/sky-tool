@@ -1,73 +1,340 @@
-.mine-hero {
-  background: linear-gradient(145deg, #ece5d6 0%, #f7f4ee 58%, #ffffff 100%);
+/* ===== 我的页面 - 温馨风格 ===== */
+
+.mine-container {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #fff8f0 0%, #fffaf5 30%, #fdf8f3 100%);
+  padding: 0 28rpx 40rpx;
 }
 
-.profile-card {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(244, 240, 233, 0.96));
+/* ===== 顶部个人信息 ===== */
+.mine-header {
+  position: relative;
+  margin: 0 -28rpx;
+  padding: 48rpx 28rpx 32rpx;
+  overflow: hidden;
 }
 
-.profile-card__head {
-  align-items: flex-start;
+.mine-header-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #f5e6d3 0%, #f0dcc8 40%, #e8d4c0 100%);
+  border-radius: 0 0 40rpx 40rpx;
 }
 
-.profile-card__title {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 34rpx;
+.mine-header-glow {
+  position: absolute;
+  top: -40rpx;
+  right: -20rpx;
+  width: 180rpx;
+  height: 180rpx;
+  background: radial-gradient(circle, rgba(255, 220, 180, 0.5) 0%, transparent 70%);
+}
+
+.mine-header-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.mine-avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e8a87c, #c4783a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 16rpx rgba(196, 120, 58, 0.25);
+  border: 4rpx solid rgba(255, 255, 255, 0.5);
+}
+
+.mine-avatar-text {
+  font-size: 40rpx;
   font-weight: 700;
-  color: #1f2b28;
+  color: #ffffff;
 }
 
-.profile-card__meta {
+.mine-info {
   display: flex;
   flex-direction: column;
   gap: 10rpx;
-  margin-top: 20rpx;
 }
 
-.profile-card__line {
-  font-size: 24rpx;
-  line-height: 1.6;
-  color: #666b64;
-  word-break: break-all;
+.mine-name {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #5a3d2b;
 }
 
-.profile-card__actions {
-  display: flex;
-  gap: 16rpx;
-  margin-top: 22rpx;
+.mine-member-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  width: fit-content;
+  padding: 6rpx 16rpx;
+  background: linear-gradient(135deg, #c4783a, #d4956a);
+  border-radius: 999rpx;
 }
 
-.profile-card__button {
-  flex: 1;
+.mine-member-icon {
+  font-size: 20rpx;
 }
 
-.vip-entry {
+.mine-member-text {
+  font-size: 22rpx;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.mine-member-tag--inactive {
+  background: rgba(160, 140, 120, 0.2);
+  color: #a89888;
+  font-size: 22rpx;
+}
+
+/* 统计数据 */
+.mine-stats {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  background: linear-gradient(135deg, #e3efe9 0%, #f4faf6 64%, #ffffff 100%);
+  margin-top: 32rpx;
+  padding: 24rpx;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.5);
 }
 
-.vip-entry__left {
+.mine-stat {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  align-items: center;
+  gap: 6rpx;
 }
 
-.vip-entry__title {
+.mine-stat-value {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #c4783a;
+}
+
+.mine-stat-label {
+  font-size: 22rpx;
+  color: #a89888;
+}
+
+.mine-stat-divider {
+  width: 1rpx;
+  height: 48rpx;
+  background: rgba(230, 210, 190, 0.4);
+}
+
+/* ===== 功能区 ===== */
+.mine-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 28rpx;
+}
+
+.action-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 28rpx;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(250, 245, 238, 0.9));
+  border-radius: 24rpx;
+  border: 2rpx solid rgba(230, 210, 190, 0.3);
+  box-shadow: 0 4rpx 20rpx rgba(160, 120, 80, 0.06);
+  transition: all 0.2s ease;
+}
+
+.action-card:active {
+  transform: scale(0.98);
+}
+
+.action-card--redeem {
+  background: linear-gradient(145deg, rgba(255, 248, 240, 0.98), rgba(255, 242, 230, 0.95));
+  border-color: rgba(232, 168, 124, 0.4);
+}
+
+.action-card-icon {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 18rpx;
+  background: rgba(230, 210, 190, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+}
+
+.action-card--redeem .action-card-icon {
+  background: linear-gradient(135deg, rgba(232, 168, 124, 0.3), rgba(196, 120, 58, 0.2));
+}
+
+.action-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.action-card-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #5a3d2b;
+}
+
+.action-card-desc {
+  font-size: 22rpx;
+  color: #a89888;
+}
+
+.action-card-arrow {
+  font-size: 36rpx;
+  color: #c4b8a8;
+  font-weight: 300;
+}
+
+/* ===== 区块 ===== */
+.mine-section {
+  margin-top: 32rpx;
+}
+
+.mine-section-head {
+  margin-bottom: 16rpx;
+}
+
+.mine-section-title {
   font-size: 30rpx;
   font-weight: 700;
-  color: #1d5c4b;
+  color: #5a3d2b;
 }
 
-.vip-entry__copy {
+.mine-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.mine-grid-item {
+  width: calc(50% - 8rpx);
+}
+
+/* ===== 口令兑换弹窗 ===== */
+.redeem-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(90, 61, 43, 0.4);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 48rpx;
+  animation: fadeIn 0.25s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.redeem-modal {
+  width: 100%;
+  background: linear-gradient(180deg, #fffbf7, #fff8f2);
+  border-radius: 32rpx;
+  padding: 48rpx 36rpx 36rpx;
+  box-shadow: 0 16rpx 48rpx rgba(90, 61, 43, 0.2);
+  animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(40rpx); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.redeem-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 36rpx;
+}
+
+.redeem-modal-icon {
+  font-size: 56rpx;
+}
+
+.redeem-modal-title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #5a3d2b;
+}
+
+.redeem-modal-sub {
   font-size: 24rpx;
-  color: #666b64;
+  color: #a89888;
 }
 
-.vip-entry__arrow {
-  font-size: 40rpx;
-  color: #1d5c4b;
-  font-weight: 300;
+.redeem-input-wrapper {
+  position: relative;
+  margin-bottom: 32rpx;
+}
+
+.redeem-input {
+  width: 100%;
+  height: 88rpx;
+  padding: 0 28rpx;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2rpx solid rgba(230, 210, 190, 0.5);
+  border-radius: 20rpx;
+  font-size: 28rpx;
+  color: #5a3d2b;
+  box-sizing: border-box;
+}
+
+.redeem-input::placeholder {
+  color: #c4b8a8;
+}
+
+.redeem-modal-buttons {
+  display: flex;
+  gap: 16rpx;
+}
+
+.redeem-btn {
+  flex: 1;
+  height: 84rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.redeem-btn:active {
+  transform: scale(0.96);
+}
+
+.redeem-btn--cancel {
+  background: rgba(230, 210, 190, 0.3);
+  color: #a89888;
+}
+
+.redeem-btn--confirm {
+  background: linear-gradient(135deg, #e8a87c, #c4783a);
+  color: #ffffff;
+  box-shadow: 0 4rpx 16rpx rgba(196, 120, 58, 0.25);
+}
+
+.redeem-btn--loading {
+  opacity: 0.7;
+}
+
+.mine-footer {
+  height: 40rpx;
 }

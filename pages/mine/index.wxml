@@ -1,67 +1,122 @@
-<view class="container">
-  <view class="hero mine-hero">
-    <text class="eyebrow">Profile</text>
-    <text class="hero-title">{{user.nickname || 'Toolbox User'}}</text>
+<view class="mine-container">
+  <!-- 顶部个人信息 -->
+  <view class="mine-header">
+    <view class="mine-header-bg">
+      <view class="mine-header-glow"></view>
+    </view>
+    <view class="mine-header-content">
+      <view class="mine-avatar">
+        <text class="mine-avatar-text">{{user.nickname ? user.nickname[0] : '万'}}</text>
+      </view>
+      <view class="mine-info">
+        <text class="mine-name">{{user.nickname || '万里用户'}}</text>
+        <view class="mine-member-tag" wx:if="{{memberStatus.active}}">
+          <text class="mine-member-icon">✨</text>
+          <text class="mine-member-text">{{memberStatus.plan}} · 剩余{{memberStatus.remainingDays}}天</text>
+        </view>
+        <text class="mine-member-tag mine-member-tag--inactive" wx:else>未开通会员</text>
+      </view>
+    </view>
 
-    <view class="hero-stat-row">
-      <view class="hero-stat" bindtap="openVip">
-        <text class="hero-stat-value">{{memberStatus.active ? memberStatus.plan : '未开通'}}</text>
-        <text class="hero-stat-label">会员</text>
+    <!-- 统计数据 -->
+    <view class="mine-stats">
+      <view class="mine-stat" bindtap="openVip">
+        <text class="mine-stat-value">{{user.points}}</text>
+        <text class="mine-stat-label">积分</text>
       </view>
-      <view class="hero-stat" bindtap="openVip">
-        <text class="hero-stat-value">{{user.points}}</text>
-        <text class="hero-stat-label">积分</text>
+      <view class="mine-stat-divider"></view>
+      <view class="mine-stat" bindtap="openVip">
+        <text class="mine-stat-value">{{taskCount}}</text>
+        <text class="mine-stat-label">任务</text>
       </view>
-      <view class="hero-stat">
-        <text class="hero-stat-value">{{taskCount}}</text>
-        <text class="hero-stat-label">任务</text>
+      <view class="mine-stat-divider"></view>
+      <view class="mine-stat">
+        <text class="mine-stat-value">{{memberStatus.active ? memberStatus.remainingDays + '天' : '--'}}</text>
+        <text class="mine-stat-label">会员</text>
       </view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="card vip-entry" bindtap="openVip">
-      <view class="vip-entry__left">
-        <text class="vip-entry__title">{{memberStatus.active ? '会员中心' : '开通会员'}}</text>
-        <text class="vip-entry__copy">{{memberStatus.active ? '剩余' + memberStatus.remainingDays + '天 · 积分' + user.points : '享受全部工具免费使用'}}</text>
+  <!-- 功能区 -->
+  <view class="mine-actions">
+    <!-- 口令兑换 -->
+    <view class="action-card action-card--redeem" bindtap="openRedeemModal">
+      <view class="action-card-icon">
+        <text>🎁</text>
       </view>
-      <text class="vip-entry__arrow">›</text>
+      <view class="action-card-info">
+        <text class="action-card-title">口令兑换</text>
+        <text class="action-card-desc">输入口令领取会员或积分</text>
+      </view>
+      <text class="action-card-arrow">›</text>
+    </view>
+
+    <!-- 会员中心 -->
+    <view class="action-card" bindtap="openVip">
+      <view class="action-card-icon">
+        <text>👑</text>
+      </view>
+      <view class="action-card-info">
+        <text class="action-card-title">{{memberStatus.active ? '会员中心' : '开通会员'}}</text>
+        <text class="action-card-desc">{{memberStatus.active ? '管理会员与积分' : '享受全部工具免费使用'}}</text>
+      </view>
+      <text class="action-card-arrow">›</text>
     </view>
   </view>
 
-  <!-- 完全移除账户卡片 -->
-  <!-- 数据恢复功能暂时隐藏 -->
-  
-  <!-- 如果后续需要恢复功能，可以在这里添加 -->
-
-
-  <view class="section" wx:if="{{favorites.length}}">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Favorites</text>
-        <text class="section-title">My Favorites</text>
-      </view>
+  <!-- 收藏工具 -->
+  <view class="mine-section" wx:if="{{favorites.length}}">
+    <view class="mine-section-head">
+      <text class="mine-section-title">我的收藏</text>
     </view>
-
-    <view class="grid-two">
-      <view class="grid-item" wx:for="{{favorites}}" wx:key="id">
+    <view class="mine-grid">
+      <view class="mine-grid-item" wx:for="{{favorites}}" wx:key="id">
         <tool-card tool="{{item}}" compact="{{true}}" bindselect="handleToolSelect" />
       </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{recents.length}}">
-    <view class="section-head">
-      <view>
-        <text class="eyebrow">Recent</text>
-        <text class="section-title">Recently Used</text>
-      </view>
+  <!-- 最近使用 -->
+  <view class="mine-section" wx:if="{{recents.length}}">
+    <view class="mine-section-head">
+      <text class="mine-section-title">最近使用</text>
     </view>
-
-    <view class="grid-two">
-      <view class="grid-item" wx:for="{{recents}}" wx:key="id">
+    <view class="mine-grid">
+      <view class="mine-grid-item" wx:for="{{recents}}" wx:key="id">
         <tool-card tool="{{item}}" compact="{{true}}" bindselect="handleToolSelect" />
       </view>
     </view>
   </view>
+
+  <!-- 口令兑换弹窗 -->
+  <view class="redeem-overlay" wx:if="{{showRedeemModal}}" bindtap="closeRedeemModal">
+    <view class="redeem-modal" catchtap="">
+      <view class="redeem-modal-header">
+        <text class="redeem-modal-icon">🎁</text>
+        <text class="redeem-modal-title">口令兑换</text>
+        <text class="redeem-modal-sub">输入口令领取专属福利</text>
+      </view>
+
+      <view class="redeem-input-wrapper">
+        <input
+          class="redeem-input"
+          placeholder="请输入口令"
+          value="{{redeemInput}}"
+          bindinput="onRedeemInput"
+          confirm-type="done"
+        />
+      </view>
+
+      <view class="redeem-modal-buttons">
+        <view class="redeem-btn redeem-btn--cancel" bindtap="closeRedeemModal">
+          <text>取消</text>
+        </view>
+        <view class="redeem-btn redeem-btn--confirm {{redeeming ? 'redeem-btn--loading' : ''}}" bindtap="handleRedeem">
+          <text>{{redeeming ? '兑换中...' : '确定兑换'}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="mine-footer"></view>
 </view>
