@@ -10,6 +10,7 @@ const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
+const Pay = require("wechatpay-node-v3");
 const {
   PDFServices,
   MimeType,
@@ -27,10 +28,44 @@ const {
 } = require("@adobe/pdfservices-node-sdk");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
 
-// ==================== 微信支付模拟初始化 ====================
-// 目前使用模拟支付，等项目稳定后再集成真实支付
-const wechatPay = null;
-console.log("ℹ️ 微信支付处于模拟模式，仅用于开发测试");
+// ==================== 微信支付初始化 ====================
+let wechatPay = null;
+function initWechatPay() {
+  try {
+    const appId = process.env.WECHAT_APPID;
+    const mchId = process.env.WECHAT_MCH_ID;
+    const apiV3Key = process.env.WECHAT_API_V3_KEY;
+    const serialNo = process.env.WECHAT_SERIAL_NO;
+    const privateKey = process.env.WECHAT_PRIVATE_KEY;
+    const publicKey = process.env.WECHAT_PUBLIC_KEY;
+
+    if (!appId || !mchId || !apiV3Key || !serialNo || !privateKey || !publicKey) {
+      console.warn("⚠️ 微信支付配置不完整，将使用模拟支付");
+      return null;
+    }
+
+    // 确保 PEM 格式正确
+    const cleanedPrivateKey = privateKey.replace(/\\n/g, "\n").trim();
+    const cleanedPublicKey = publicKey.replace(/\\n/g, "\n").trim();
+
+    const wp = new Pay({
+      appid: appId,
+      mchid: mchId,
+      serial_no: serialNo,
+      publicKey: cleanedPublicKey,
+      privateKey: cleanedPrivateKey,
+      key: apiV3Key,
+    });
+
+    console.log("✅ 微信支付已初始化");
+    return wp;
+  } catch (error) {
+    console.error("❌ 微信支付初始化失败:", error && error.message ? error.message : error);
+    return null;
+  }
+}
+
+wechatPay = initWechatPay();
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");
@@ -1133,8 +1168,11 @@ app.post("/api/pay/create", async (req, res) => {
 
   if (wechatPay) {
     try {
-      // 使用真实的微信支付
+      console.log(`[支付] 创建订单 ${orderId} - ${product.name} (${product.price}分)`);
+      
       const params = {
+        appid: process.env.WECHAT_APPID,
+        mchid: process.env.WECHAT_MCH_ID,
         description: product.name,
         out_trade_no: orderId,
         notify_url: `${process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3100"}/api/pay/notify`,
@@ -1143,39 +1181,30 @@ app.post("/api/pay/create", async (req, res) => {
           currency: "CNY",
         },
         payer: {
-          openid: userId || "default-openid", // 这里需要实际用户的 openid
+          openid: userId || "otO5s0d40q0jV8QqN5L5W8wZ9w", // 提供一个测试 openid
         },
       };
 
       const result = await wechatPay.transactions_jsapi(params);
 
-      // 生成小程序支付参数
-      const nonceStr = crypto.randomBytes(16).toString("hex");
-      const timeStamp = String(Math.floor(Date.now() / 1000));
-      const package = `prepay_id=${result.prepay_id}`;
+      if (result.status !== 200) {
+        console.error("[支付] 预下单失败:", result);
+        throw new Error("创建订单失败");
+      }
 
-      payment = {
-        timeStamp,
-        nonceStr,
-        package,
-        signType: "RSA",
-        paySign: wechatPay.sign({
-          appid: process.env.WECHAT_APPID,
-          nonceStr,
-          package,
-          timeStamp,
-        }),
-      };
+      console.log(`[支付] 预下单成功:`, result.data);
+      
+      // wechatpay-node-v3 已经在 data 里返回了签好名的小程序支付参数
+      payment = result.data;
 
-      console.log(`✅ 订单 ${orderId} 微信支付预下单成功`);
+      console.log(`[支付] 返回小程序支付参数:`, payment);
     } catch (error) {
       console.error("❌ 微信支付创建订单失败:", error && error.message ? error.message : error);
     }
   }
 
   if (!payment) {
-    // 回退到模拟支付
-    console.warn("⚠️ 使用模拟支付模式");
+    console.warn("⚠️ 回退到模拟支付模式");
     const nonceStr = crypto.randomBytes(16).toString("hex");
     const timeStamp = String(Math.floor(Date.now() / 1000));
 
@@ -1214,33 +1243,51 @@ app.post("/api/pay/verify", async (req, res) => {
     return res.status(404).json({ error: "ORDER_NOT_FOUND", message: "订单不存在" });
   }
 
-  order.status = "paid";
-  order.paidAt = Date.now();
-  pendingOrders.set(orderId, order);
+  if (wechatPay) {
+    try {
+      console.log(`[支付] 查询订单 ${orderId}`);
+      const result = await wechatPay.query({ out_trade_no: orderId });
 
-  res.json({ success: true, orderId, type: order.type, itemId: order.itemId });
+      if (result.status === 200 && (result.data.trade_state === "SUCCESS" || result.data.trade_state === "TRADE_SUCCESS")) {
+        order.status = "paid";
+        order.paidAt = Date.now();
+        order.transactionId = result.data.transaction_id;
+        pendingOrders.set(orderId, order);
+        console.log(`✅ 订单 ${orderId} 支付成功`);
+      } else {
+        console.log(`[支付] 订单 ${orderId} 未支付:`, result.data);
+      }
+    } catch (error) {
+      console.error("[支付] 查询订单失败:", error);
+    }
+  }
+
+  res.json({ success: true, orderId, status: order.status, type: order.type, itemId: order.itemId });
 });
 
 app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
   try {
     if (!wechatPay) {
-      // 模拟支付回调处理
+      console.warn("[支付] 收到模拟支付通知");
       const body = JSON.parse(req.body);
-      if (body.result_code === "SUCCESS" && body.orderId) {
-        const order = pendingOrders.get(body.orderId);
+      if (body.out_trade_no) {
+        const order = pendingOrders.get(body.out_trade_no);
         if (order) {
           order.status = "paid";
           order.paidAt = Date.now();
-          order.transactionId = body.out_trade_no;
-          pendingOrders.set(body.orderId, order);
+          order.transactionId = `SIM-${Date.now()}`;
+          pendingOrders.set(body.out_trade_no, order);
+          console.log(`✅ 模拟支付订单 ${body.out_trade_no} 标记为已支付`);
         }
       }
       return res.json({ code: "SUCCESS", message: "" });
     }
 
-    // 真实的微信支付回调处理
-    const result = wechatPay.decrypt_notification(req.body);
-    
+    console.log("[支付] 收到微信支付通知");
+
+    const result = wechatPay.decipher_gcm(req.body);
+    console.log("[支付] 解密通知结果:", result);
+
     if (result.trade_state === "SUCCESS" || result.trade_state === "TRADE_SUCCESS") {
       const orderId = result.out_trade_no;
       const order = pendingOrders.get(orderId);
@@ -1250,14 +1297,16 @@ app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
         order.paidAt = Date.now();
         order.transactionId = result.transaction_id;
         pendingOrders.set(orderId, order);
-        console.log(`✅ 订单 ${orderId} 支付成功`);
+        console.log(`✅ 订单 ${orderId} 支付成功 (transaction_id: ${result.transaction_id})`);
+      } else {
+        console.warn(`[支付] 收到通知但未找到订单: ${orderId}`);
       }
     }
 
     res.json({ code: "SUCCESS", message: "" });
   } catch (error) {
     console.error("❌ 支付通知处理失败:", error && error.message ? error.message : error);
-    res.json({ code: "FAIL", message: "失败" });
+    res.status(500).json({ code: "FAIL", message: "失败" });
   }
 });
 
