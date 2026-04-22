@@ -1167,14 +1167,16 @@ const pendingOrders = new Map();
 // 商品/会员套餐配置
 const PRODUCTS = {
   member: {
-    month: { name: "月度会员", price: 990 }, // 分
-    season: { name: "季度会员", price: 2490 }, // 分
-    year: { name: "年度会员", price: 7990 }, // 分
+    trial: { name: "体验周卡", price: 990, durationDays: 7 },
+    month: { name: "月度会员", price: 2900, durationDays: 30 },
+    season: { name: "季度会员", price: 6800, durationDays: 90 },
+    year: { name: "年度会员", price: 19800, durationDays: 365 },
   },
   points: {
-    p100: { name: "100积分", price: 100 }, // 分
-    p500: { name: "500积分", price: 450 }, // 分
-    p2000: { name: "2000积分", price: 1680 }, // 分
+    "p-50": { name: "50积分", price: 800, points: 50, bonusPoints: 5 },
+    "p-100": { name: "100积分", price: 1500, points: 100, bonusPoints: 15 },
+    "p-200": { name: "200积分", price: 2800, points: 200, bonusPoints: 40 },
+    "p-500": { name: "500积分", price: 6800, points: 500, bonusPoints: 120 },
   },
 };
 
