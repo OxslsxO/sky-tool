@@ -427,6 +427,13 @@ Page({
     pdfMergePreviewFiles: [], // 预览用的PDF文件信息（带页数）
     pdfMergeSorting: false, // 是否正在排序
     pdfMergeCurrentIndex: 0, // 当前预览的索引
+    pdfMergeResultReady: false,
+    pdfMergeResultPath: "",
+    pdfMergeResultRemoteUrl: "",
+    pdfMergeResultName: "",
+    pdfMergeResultHeadline: "",
+    pdfMergeResultDetail: "",
+    pdfMergeResultMetaLines: [],
     tool: null,
     category: null,
     selections: {},
@@ -1401,6 +1408,7 @@ Page({
           ...file,
           pageCount: 0,
         }));
+        Object.assign(nextState, this.getClearedPdfMergeResult());
         nextState.pdfMergePreviewFiles = initialPreviewFiles;
         nextState.pdfMergeSorting = false;
         nextState.pdfMergeCurrentIndex = 0;
@@ -1685,6 +1693,18 @@ Page({
       pdfMergePreviewFiles: [],
       pdfMergeSorting: false,
       pdfMergeCurrentIndex: 0,
+    };
+  },
+
+  getClearedPdfMergeResult() {
+    return {
+      pdfMergeResultReady: false,
+      pdfMergeResultPath: "",
+      pdfMergeResultRemoteUrl: "",
+      pdfMergeResultName: "",
+      pdfMergeResultHeadline: "",
+      pdfMergeResultDetail: "",
+      pdfMergeResultMetaLines: [],
     };
   },
 
@@ -2357,6 +2377,150 @@ Page({
     });
   },
 
+  async previewPdfMergeResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.pdfMergeResultPath;
+    const url = this.data.pdfMergeResultRemoteUrl;
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "预览链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在加载",
+      mask: true,
+    });
+
+    try {
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[PDF合并] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ pdfMergeResultPath: filePath });
+      }
+
+      // 打开文档
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: filePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("预览失败:", error);
+      wx.showModal({
+        title: "预览失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  async downloadPdfMergeResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.pdfMergeResultPath;
+    const url = this.data.pdfMergeResultRemoteUrl;
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "下载链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在打开",
+      mask: true,
+    });
+
+    try {
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[PDF合并] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ pdfMergeResultPath: filePath });
+      }
+
+      // 打开文档（用户可以在文档预览中选择保存）
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: filePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("打开失败:", error);
+      wx.showModal({
+        title: "打开失败",
+        content: "请尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  copyPdfMergeUrl() {
+    if (!this.data.pdfMergeResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.pdfMergeResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
   async uploadGeneratedOutput(filePath, options = {}) {
     if (!filePath || !hasBackendService()) {
       return null;
@@ -2979,20 +3143,77 @@ Page({
       return;
     }
 
-    this.updateProcessingProgress(18, "正在读取 PDF...");
-    const files = [];
-    for (let index = 0; index < backendFiles.length; index += 1) {
-      files.push(await packLocalFile(backendFiles[index]));
-      this.updateProcessingProgress(18 + Math.round(((index + 1) / backendFiles.length) * 24), "正在读取 PDF...");
-    }
+    try {
+      this.updateProcessingProgress(18, "正在读取 PDF...");
+      const files = [];
+      for (let index = 0; index < backendFiles.length; index += 1) {
+        files.push(await packLocalFile(backendFiles[index]));
+        this.updateProcessingProgress(18 + Math.round(((index + 1) / backendFiles.length) * 24), "正在读取 PDF...");
+      }
 
-    const beforeBytes = backendFiles.reduce((sum, file) => sum + (file.size || 0), 0);
-    const response = await this.requestJsonWithProgress("/api/pdf/merge", { files }, {
-      target: 84,
-      status: "正在合并 PDF...",
-      sizeBytes: beforeBytes,
-    });
-    await this.createRemoteDocumentTask(tool, selections, response, `${backendFiles.length} 份 PDF`, beforeBytes);
+      const beforeBytes = backendFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+      const response = await this.requestJsonWithProgress("/api/pdf/merge", { files }, {
+        target: 80,
+        status: "正在合并 PDF...",
+        sizeBytes: beforeBytes,
+      });
+
+      this.updateProcessingProgress(82, "正在保存结果...");
+      
+      // 创建任务记录
+      await this.createRemoteDocumentTask(tool, selections, response, `${backendFiles.length} 份 PDF`, beforeBytes);
+
+      const fileResponse = response.file || {};
+      const remoteUrl = fileResponse.url || "";
+      let localPath = "";
+
+      // 如果有远程URL，先下载到本地
+      if (remoteUrl) {
+        try {
+          console.log("[PDF合并] 正在下载文件:", remoteUrl);
+          const downloadRes = await new Promise((resolve, reject) => {
+            wx.downloadFile({
+              url: remoteUrl,
+              success: (res) => {
+                if (res.statusCode === 200) {
+                  resolve(res);
+                } else {
+                  reject(new Error(`下载失败: ${res.statusCode}`));
+                }
+              },
+              fail: (err) => reject(err),
+            });
+          });
+          localPath = downloadRes.tempFilePath;
+          console.log("[PDF合并] 文件已下载:", localPath);
+        } catch (downloadError) {
+          console.warn("[PDF合并] 下载文件失败，仅保留远程链接:", downloadError);
+        }
+      }
+
+      // 生成文件名
+      const fileName = "合并结果.pdf";
+
+      const afterBytes = fileResponse.sizeBytes || null;
+
+      this.setData({
+        pdfMergeResultReady: true,
+        pdfMergeResultPath: localPath,
+        pdfMergeResultRemoteUrl: remoteUrl,
+        pdfMergeResultName: fileName,
+        pdfMergeResultHeadline: response.headline || "PDF 合并已完成",
+        pdfMergeResultDetail: response.detail || "",
+        pdfMergeResultMetaLines: response.metaLines || [],
+      });
+
+      this.updateProcessingProgress(100, "合并完成");
+    } catch (error) {
+      console.error("PDF合并失败:", error);
+      wx.showToast({
+        title: "合并失败，请重试",
+        icon: "none",
+      });
+    }
   },
 
   async runRemotePdfSplit() {

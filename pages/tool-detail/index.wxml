@@ -423,11 +423,11 @@
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady}}">{{backendPickerButtonText}}</view>
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady && !pdfMergeResultReady}}">{{backendPickerButtonText}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady || pdfMergeResultReady}}">重新选择</view>
 
       <!-- PDF合并专用预览和排序UI -->
-      <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length}}">
+      <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length && !pdfMergeResultReady}}">
         <view class="pdf-merge-header">
           <text class="pdf-merge-title">已选择 {{pdfMergePreviewFiles.length}} 个PDF</text>
           <view class="btn-ghost" wx:if="{{pdfMergeSorting}}" bindtap="finishSorting">
@@ -477,6 +477,23 @@
         <!-- 排序提示 -->
         <view class="pdf-merge-sort-hint" wx:if="{{pdfMergeSorting}}">
           <text class="sort-hint-text">长按拖动调整顺序，点击完成保存</text>
+        </view>
+      </view>
+
+      <!-- PDF合并结果展示 -->
+      <view class="image-preview" wx:if="{{pdfMergeResultReady}}">
+        <view class="file-preview">
+          <text class="file-preview__icon">📄</text>
+          <text class="file-preview__name">{{pdfMergeResultName}}</text>
+        </view>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{pdfMergeResultHeadline}}</text>
+        <view class="chips-wrap" wx:if="{{pdfMergeResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{pdfMergeResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewPdfMergeResult">预览文件</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfMergeResult">下载文件</view>
+          <view class="btn-ghost action-card__button" wx:if="{{pdfMergeResultRemoteUrl}}" bindtap="copyPdfMergeUrl">复制链接</view>
         </view>
       </view>
 
