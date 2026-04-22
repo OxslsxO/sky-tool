@@ -28,6 +28,12 @@ const {
 } = require("@adobe/pdfservices-node-sdk");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
 
+// ==================== 启动优化配置 ====================
+process.env.PHOTO_ID_DISABLE_MODEL = process.env.PHOTO_ID_DISABLE_MODEL || "true"; // 默认禁用模型避免内存问题
+process.env.PHOTO_ID_WARM_MODEL = process.env.PHOTO_ID_WARM_MODEL || "false";      // 默认不预热模型
+
+console.log("🚀 sky-toolbox-backend 正在启动...");
+
 // ==================== 微信支付初始化 ====================
 let wechatPay = null;
 function initWechatPay() {
@@ -3270,11 +3276,17 @@ function cleanupOldTempDirs() {
   }
 }
 
-server.once("listening", () => {
+console.log(`📡 准备在 ${config.host}:${config.port} 监听...`);
+server.listen(config.port, config.host, (err) => {
+  if (err) {
+    console.error("❌ 启动失败:", err);
+    return process.exit(1);
+  }
+  
   const outputDeletedCount = storage.cleanupExpiredLocalOutputs();
   const tempDeletedCount = cleanupOldTempDirs();
   console.log(
-    `sky-toolbox-backend running at http://${config.host}:${config.port} (cleaned ${outputDeletedCount} outputs, ${tempDeletedCount} temp dirs)`
+    `✅ sky-toolbox-backend running at http://${config.host}:${config.port} (cleaned ${outputDeletedCount} outputs, ${tempDeletedCount} temp dirs)`
   );
 
   setInterval(() => {
@@ -3285,16 +3297,13 @@ server.once("listening", () => {
   }, 30 * 60 * 1000);
 });
 
-server.once("error", async (error) => {
-  console.error(
-    `failed to start sky-toolbox-backend at http://${config.host}:${config.port}`,
-    error
-  );
-  await closeResources();
-  process.exit(1);
+server.on("error", async (error) => {
+  console.error("❌ server error:", error);
+  if (!server.listening) {
+    await closeResources();
+    process.exit(1);
+  }
 });
-
-server.listen(config.port, config.host);
 
 async function shutdown(signal) {
   if (shuttingDown) {
