@@ -85,7 +85,7 @@
           bindtap="handleToolSelect"
         >
           <view class="tool-grid-badge" wx:if="{{item.badge}}">{{item.badge}}</view>
-          <view class="tool-grid-icon">{{item.icon || '🔧'}}</view>
+          <view class="tool-grid-icon"><image class="tool-icon-svg" src="{{item.icon}}" mode="aspectFit"/></view>
           <text class="tool-grid-name">{{item.name}}</text>
           <text class="tool-grid-desc">{{item.shortDescription}}</text>
           <text class="tool-grid-usage" wx:if="{{item.usageText}}">{{item.usageText}}</text>
@@ -105,7 +105,7 @@
           bindtap="handleToolSelect"
         >
           <view class="tool-list-icon-shell" style="background: {{item.accent}}20;">
-            <text class="tool-list-icon">{{item.icon || '🔧'}}</text>
+            <text class="tool-list-icon"><image class="tool-icon-svg tool-icon-svg--small" src="{{item.icon}}" mode="aspectFit"/></text>
           </view>
           <view class="tool-list-content">
             <view class="tool-list-header">
@@ -177,7 +177,7 @@
             bindtap="handleToolSelect"
           >
             <view class="recent-tool-mini-icon" style="background: {{item.accent}}20;">
-              <text>{{item.icon || '🔧'}}</text>
+              <image class="tool-icon-svg tool-icon-svg--mini" src="{{item.icon}}" mode="aspectFit"/>
             </view>
             <text class="recent-tool-mini-name">{{item.name}}</text>
           </view>

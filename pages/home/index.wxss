@@ -240,8 +240,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 36rpx;
   margin-bottom: 16rpx;
+}
+
+.tool-icon-svg {
+  width: 40rpx;
+  height: 40rpx;
+}
+
+.tool-icon-svg--small {
+  width: 44rpx;
+  height: 44rpx;
+}
+
+.tool-icon-svg--mini {
+  width: 32rpx;
+  height: 32rpx;
 }
 
 .tool-grid-name {
@@ -317,7 +331,9 @@
 }
 
 .tool-list-icon {
-  font-size: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tool-list-content {

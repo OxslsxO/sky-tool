@@ -3,18 +3,20 @@ const { getRecentTools, getTaskDashboard, getUserState, getRawTasks } = require(
 const { fetchToolUsageStats } = require("../../services/tool-usage");
 
 const TOOL_ICONS = {
-  "photo-id": "📷",
-  "universal-compress": "🗜️",
-  "image-convert": "🔁",
-  "resize-crop": "📐",
-  "image-to-pdf": "📄",
-  "pdf-merge": "➕",
-  "pdf-split": "✂️",
-  "office-to-pdf": "📑",
-  "ocr-text": "🔎",
-  "qr-maker": "▦",
-  "unit-convert": "📏",
-  "audio-convert": "🎵",
+  "photo-id": "/icons/photo-id.svg",
+  "universal-compress": "/icons/universal-compress.svg",
+  "image-compress": "/icons/image-compress.svg",
+  "image-convert": "/icons/image-convert.svg",
+  "resize-crop": "/icons/resize-crop.svg",
+  "image-to-pdf": "/icons/image-to-pdf.svg",
+  "pdf-merge": "/icons/pdf-merge.svg",
+  "pdf-split": "/icons/pdf-split.svg",
+  "office-to-pdf": "/icons/office-to-pdf.svg",
+  "pdf-to-word": "/icons/pdf-to-word.svg",
+  "ocr-text": "/icons/ocr-text.svg",
+  "qr-maker": "/icons/qr-maker.svg",
+  "unit-convert": "/icons/unit-convert.svg",
+  "audio-convert": "/icons/audio-convert.svg",
 };
 
 const HOT_SEARCHES = ["证件照", "PDF压缩", "OCR", "二维码", "图片转PDF", "音视频转换"];
@@ -98,7 +100,7 @@ Page({
       ...tool,
       usageCount,
       usageText,
-      icon: TOOL_ICONS[tool.id] || "🛠",
+      icon: TOOL_ICONS[tool.id] || "/icons/universal-compress.svg",
     };
   },
 
