@@ -6,8 +6,7 @@
   left: 0;
   right: 0;
   z-index: 999;
-  padding-bottom: env(safe-area-inset-bottom);
-  height: calc(100rpx + env(safe-area-inset-bottom));
+  height: calc(96rpx + env(safe-area-inset-bottom));
 }
 
 /* 背景层 - 毛玻璃效果 */
@@ -42,8 +41,9 @@
   display: flex;
   justify-content: space-around;
   align-items: flex-end;
-  height: 100rpx;
+  height: 96rpx;
   padding: 0 16rpx;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* ===== Tab 项 ===== */
@@ -54,8 +54,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  height: 100rpx;
-  padding-bottom: 8rpx;
+  height: 96rpx;
+  padding-bottom: 4rpx;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
