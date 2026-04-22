@@ -1,8 +1,5 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
-process.env.PHOTO_ID_DISABLE_MODEL = process.env.PHOTO_ID_DISABLE_MODEL || "true";
-process.env.PHOTO_ID_WARM_MODEL = process.env.PHOTO_ID_WARM_MODEL || "false";
-
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
 process.on("uncaughtException", (err) => {
@@ -154,16 +151,18 @@ app.get("/", (req, res) => {
   });
 });
 
-if (isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL) && process.env.PHOTO_ID_DISABLE_MODEL !== 'true' && photoIdModule) {
+if (photoIdModule && process.env.PHOTO_ID_DISABLE_MODEL !== 'true') {
+  const warmDelay = parseInt(process.env.PHOTO_ID_WARM_DELAY || '30', 10) * 1000;
+  console.log(`⏳ 证件照模型将在 ${warmDelay / 1000}s 后延迟加载...`);
   setTimeout(() => {
     photoIdModule.warmPhotoIdModel(config)
       .then(() => {
-        console.log("photo-id model warmed");
+        console.log("✅ 证件照模型预热完成");
       })
       .catch((error) => {
-        console.warn("photo-id model warmup failed", error && error.message ? error.message : error);
+        console.warn("⚠️ 证件照模型预热失败（首次使用时会自动加载）:", error && error.message ? error.message : error);
       });
-  }, 5000);
+  }, warmDelay);
 }
 
 function makeId() {
