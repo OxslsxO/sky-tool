@@ -10,6 +10,7 @@ const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
+const { Wechatpay } = require("wechatpay-node-v3");
 const {
   PDFServices,
   MimeType,
@@ -26,6 +27,40 @@ const {
   RemoveProtectionResult,
 } = require("@adobe/pdfservices-node-sdk");
 const { buildPhotoIdImage, warmPhotoIdModel } = require("./lib/photo-id");
+
+// ==================== 微信支付初始化 ====================
+let wechatpay = null;
+function initWechatPay() {
+  try {
+    const appId = process.env.WECHAT_APPID;
+    const mchId = process.env.WECHAT_MCH_ID;
+    const apiV3Key = process.env.WECHAT_API_V3_KEY;
+    const serialNo = process.env.WECHAT_SERIAL_NO;
+    const privateKey = process.env.WECHAT_PRIVATE_KEY;
+
+    if (!appId || !mchId || !apiV3Key || !serialNo || !privateKey) {
+      console.warn("⚠️ 微信支付配置不完整，将使用模拟支付");
+      return null;
+    }
+
+    wechatpay = new Wechatpay({
+      appid: appId,
+      mchid: mchId,
+      serial_no: serialNo,
+      privateKey: privateKey,
+      apiv3_private_key: apiV3Key,
+      notify_url: `${process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3100"}/api/pay/notify`,
+    });
+
+    console.log("✅ 微信支付已初始化");
+    return wechatpay;
+  } catch (error) {
+    console.error("❌ 微信支付初始化失败:", error && error.message ? error.message : error);
+    return null;
+  }
+}
+
+const wechatPay = initWechatPay();
 
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");
@@ -824,6 +859,9 @@ app.get("/health", async (req, res) => {
     }
   }
 
+  // 检查微信支付配置
+  const wechatPayAvailable = wechatPay !== null;
+
   res.json({
     ok: true,
     service: "sky-toolbox-backend",
@@ -859,6 +897,10 @@ app.get("/health", async (req, res) => {
       modelStatus: photoIdModelStatus,
       modelDisabled: process.env.PHOTO_ID_DISABLE_MODEL === 'true',
       warmModelEnabled: isTruthyEnv(process.env.PHOTO_ID_WARM_MODEL),
+    },
+    wechatPay: {
+      available: wechatPayAvailable,
+      mchId: process.env.WECHAT_MCH_ID || "",
     },
   });
 });
@@ -1089,33 +1131,105 @@ app.post("/api/files/upload", async (req, res) => {
 
 const pendingOrders = new Map();
 
+// 商品/会员套餐配置
+const PRODUCTS = {
+  member: {
+    month: { name: "月度会员", price: 990 }, // 分
+    season: { name: "季度会员", price: 2490 }, // 分
+    year: { name: "年度会员", price: 7990 }, // 分
+  },
+  points: {
+    p100: { name: "100积分", price: 100 }, // 分
+    p500: { name: "500积分", price: 450 }, // 分
+    p2000: { name: "2000积分", price: 1680 }, // 分
+  },
+};
+
 app.post("/api/pay/create", async (req, res) => {
-  const { type, itemId } = req.body || {};
+  const { type, itemId, userId, deviceId } = req.body || {};
 
   if (!type || !itemId) {
     return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
   }
 
   const orderId = `ORD-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
-  const nonceStr = crypto.randomBytes(16).toString("hex");
-  const timeStamp = String(Math.floor(Date.now() / 1000));
+  const product = PRODUCTS[type]?.[itemId];
 
-  const mockPayment = {
-    timeStamp,
-    nonceStr,
-    package: `prepay_id=wx${Date.now()}`,
-    signType: "MD5",
-    paySign: crypto.createHash("md5").update(`${orderId}${nonceStr}${timeStamp}`).digest("hex"),
-  };
+  if (!product) {
+    return res.status(400).json({ error: "INVALID_PRODUCT", message: "无效的商品" });
+  }
+
+  let payment = null;
+
+  if (wechatPay) {
+    try {
+      // 使用真实的微信支付
+      const params = {
+        description: product.name,
+        out_trade_no: orderId,
+        notify_url: `${process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3100"}/api/pay/notify`,
+        amount: {
+          total: product.price,
+          currency: "CNY",
+        },
+        payer: {
+          openid: userId || "default-openid", // 这里需要实际用户的 openid
+        },
+      };
+
+      const result = await wechatPay.transactions_jsapi(params);
+
+      // 生成小程序支付参数
+      const nonceStr = crypto.randomBytes(16).toString("hex");
+      const timeStamp = String(Math.floor(Date.now() / 1000));
+      const package = `prepay_id=${result.prepay_id}`;
+
+      payment = {
+        timeStamp,
+        nonceStr,
+        package,
+        signType: "RSA",
+        paySign: wechatPay.sign({
+          appid: process.env.WECHAT_APPID,
+          nonceStr,
+          package,
+          timeStamp,
+        }),
+      };
+
+      console.log(`✅ 订单 ${orderId} 微信支付预下单成功`);
+    } catch (error) {
+      console.error("❌ 微信支付创建订单失败:", error && error.message ? error.message : error);
+    }
+  }
+
+  if (!payment) {
+    // 回退到模拟支付
+    console.warn("⚠️ 使用模拟支付模式");
+    const nonceStr = crypto.randomBytes(16).toString("hex");
+    const timeStamp = String(Math.floor(Date.now() / 1000));
+
+    payment = {
+      timeStamp,
+      nonceStr,
+      package: `prepay_id=wx${Date.now()}`,
+      signType: "MD5",
+      paySign: crypto.createHash("md5").update(`${orderId}${nonceStr}${timeStamp}`).digest("hex"),
+    };
+  }
 
   pendingOrders.set(orderId, {
     type,
     itemId,
+    userId,
+    deviceId,
+    amount: product.price,
+    productName: product.name,
     status: "pending",
     createdAt: Date.now(),
   });
 
-  res.json({ orderId, payment: mockPayment });
+  res.json({ orderId, payment });
 });
 
 app.post("/api/pay/verify", async (req, res) => {
@@ -1137,20 +1251,44 @@ app.post("/api/pay/verify", async (req, res) => {
   res.json({ success: true, orderId, type: order.type, itemId: order.itemId });
 });
 
-app.post("/api/pay/notify", async (req, res) => {
-  const { orderId, result_code, out_trade_no } = req.body || {};
-
-  if (result_code === "SUCCESS" && orderId) {
-    const order = pendingOrders.get(orderId);
-    if (order) {
-      order.status = "paid";
-      order.paidAt = Date.now();
-      order.transactionId = out_trade_no;
-      pendingOrders.set(orderId, order);
+app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
+  try {
+    if (!wechatPay) {
+      // 模拟支付回调处理
+      const body = JSON.parse(req.body);
+      if (body.result_code === "SUCCESS" && body.orderId) {
+        const order = pendingOrders.get(body.orderId);
+        if (order) {
+          order.status = "paid";
+          order.paidAt = Date.now();
+          order.transactionId = body.out_trade_no;
+          pendingOrders.set(body.orderId, order);
+        }
+      }
+      return res.json({ code: "SUCCESS", message: "" });
     }
-  }
 
-  res.json({ code: "SUCCESS", message: "" });
+    // 真实的微信支付回调处理
+    const result = wechatPay.decrypt_notification(req.body);
+    
+    if (result.trade_state === "SUCCESS" || result.trade_state === "TRADE_SUCCESS") {
+      const orderId = result.out_trade_no;
+      const order = pendingOrders.get(orderId);
+
+      if (order) {
+        order.status = "paid";
+        order.paidAt = Date.now();
+        order.transactionId = result.transaction_id;
+        pendingOrders.set(orderId, order);
+        console.log(`✅ 订单 ${orderId} 支付成功`);
+      }
+    }
+
+    res.json({ code: "SUCCESS", message: "" });
+  } catch (error) {
+    console.error("❌ 支付通知处理失败:", error && error.message ? error.message : error);
+    res.json({ code: "FAIL", message: "失败" });
+  }
 });
 
 // ==================== 登录 API ====================

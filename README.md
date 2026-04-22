@@ -81,16 +81,49 @@ npm run backend:start
 
 复制 `.env.example` 后按需填写：
 
+### 基础配置
 ```bash
 HOST=0.0.0.0
 PORT=3100
 PUBLIC_BASE_URL=http://127.0.0.1:3100
 API_TOKEN=
+```
+
+### 微信支付 API V3 配置（可选）
+```bash
+# 小程序 AppID (微信公众平台 -> 开发 -> 开发管理 -> 开发设置)
+WECHAT_APPID=
+# 商户号 (微信商户平台 -> 账户中心 -> 商户信息)
+WECHAT_MCH_ID=
+# API V3 密钥 (商户平台 -> 账户中心 -> API安全 -> 设置API V3密钥)
+WECHAT_API_V3_KEY=
+# 证书序列号 (证书文件名中可以看到，例如 apiclient_cert.p12)
+WECHAT_SERIAL_NO=
+# 商户私钥内容 (下载证书后，apiclient_key.pem 文件内容)
+WECHAT_PRIVATE_KEY=
+```
+
+### 文件清理策略
+```bash
 FILE_TTL_HOURS=24
+```
+
+### LibreOffice 配置（可选，用于 Office 转 PDF）
+```bash
+# Windows: 完整路径如 C:\Program Files\LibreOffice\program\soffice.exe
+# Linux: 通常留空即可，会自动检测 which soffice
 SOFFICE_PATH=
+```
+
+### MongoDB 配置（可选，记录任务日志）
+```bash
 MONGODB_URI=
 MONGODB_DB_NAME=sky_toolbox
 MONGODB_COLLECTION_NAME=operation_logs
+```
+
+### 七牛云 Kodo 配置（可选，保存结果文件）
+```bash
 QINIU_ACCESS_KEY=
 QINIU_SECRET_KEY=
 QINIU_BUCKET=
@@ -99,6 +132,23 @@ QINIU_PREFIX=sky-toolbox
 QINIU_PUBLIC_BASE_URL=
 QINIU_PRIVATE_BUCKET=false
 QINIU_DOWNLOAD_EXPIRES_SECONDS=3600
+```
+
+### Adobe PDF Services 配置（可选，PDF 转 Word）
+```bash
+PDF_SERVICES_CLIENT_ID=
+PDF_SERVICES_CLIENT_SECRET=
+PDF_SERVICES_REGION=
+PDF_SERVICES_OCR_LOCALE=zh-CN
+PDF_SERVICES_TIMEOUT_MS=120000
+```
+
+### 证件照功能配置
+```bash
+# 强制禁用模型（节省内存），适合免费实例
+PHOTO_ID_DISABLE_MODEL=false
+# 最大处理尺寸，默认 800px，越小越快
+PHOTO_ID_MAX_SIZE=800
 ```
 
 ## MongoDB 与七牛云说明
@@ -129,6 +179,33 @@ QINIU_DOWNLOAD_EXPIRES_SECONDS=3600
 
 `QINIU_PUBLIC_BASE_URL` 填七牛空间绑定的访问域名或 CDN 域名，例如 `https://cdn.example.com`。公开空间会直接返回该域名下的文件地址；私有空间会通过后端代理下载。
 
+## 微信支付
+
+项目已集成微信支付 API V3：
+
+### 配置说明
+
+在 `.env` 中配置以下参数后即可使用真实支付：
+
+| 配置项 | 说明 | 获取位置 |
+|-------|------|---------|
+| `WECHAT_APPID` | 小程序 AppID | 微信公众平台 -> 开发 -> 开发管理 -> 开发设置 |
+| `WECHAT_MCH_ID` | 商户号 | 微信商户平台 -> 账户中心 -> 商户信息 |
+| `WECHAT_API_V3_KEY` | API V3 密钥 | 商户平台 -> 账户中心 -> API安全 -> 设置API V3密钥 |
+| `WECHAT_SERIAL_NO` | 证书序列号 | 在申请的证书文件名中可以看到 |
+| `WECHAT_PRIVATE_KEY` | 商户私钥内容 | 下载证书后，解压看 `apiclient_key.pem` |
+
+### 注意事项
+
+1. **`PUBLIC_BASE_URL` 必须配置**，作为支付回调地址
+2. **证书和密钥要安全保存**，不要提交到 Git 仓库
+3. **小程序需要配置支付目录**，在微信公众平台设置
+4. 如果配置不完整，会自动回退到模拟支付模式
+
+### 商品配置
+
+目前商品配置在 `backend/server.js` 中的 `PRODUCTS` 对象，你可以根据需要修改价格和套餐内容。
+
 ## 健康检查
 
 后端提供：
@@ -145,6 +222,7 @@ GET /health
 - 存储提供方：`local` 或 `qiniu`
 - 日志持久化提供方：`local-file` 或 `mongodb`
 - LibreOffice 是否可用
+- 微信支付是否已配置
 
 ## Office 转 PDF
 
