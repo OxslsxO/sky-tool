@@ -5,26 +5,26 @@ Component({
       {
         pagePath: "/pages/home/index",
         text: "首页",
-        icon: "🏠",
-        activeIcon: "🏡"
+        icon: "/custom-tab-bar/icons/home.svg",
+        activeIcon: "/custom-tab-bar/icons/home-active.svg"
       },
       {
         pagePath: "/pages/tasks/index",
         text: "任务",
-        icon: "📋",
-        activeIcon: "✅"
+        icon: "/custom-tab-bar/icons/tasks.svg",
+        activeIcon: "/custom-tab-bar/icons/tasks-active.svg"
       },
       {
         pagePath: "/pages/vip/index",
         text: "会员",
-        icon: "👑",
-        activeIcon: "💎"
+        icon: "/custom-tab-bar/icons/vip.svg",
+        activeIcon: "/custom-tab-bar/icons/vip-active.svg"
       },
       {
         pagePath: "/pages/mine/index",
         text: "我的",
-        icon: "👤",
-        activeIcon: "😊"
+        icon: "/custom-tab-bar/icons/mine.svg",
+        activeIcon: "/custom-tab-bar/icons/mine-active.svg"
       }
     ]
   },

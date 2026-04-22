@@ -1,4 +1,4 @@
-/* ===== 温馨暖色调 TabBar 样式 ===== */
+/* ===== 创新 TabBar 样式 - 图标上浮 + 毛玻璃 ===== */
 
 .tab-bar {
   position: fixed;
@@ -7,83 +7,134 @@
   right: 0;
   z-index: 999;
   padding-bottom: env(safe-area-inset-bottom);
-  background: linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(250, 245, 238, 0.98) 100%);
-  backdrop-filter: blur(20rpx);
-  -webkit-backdrop-filter: blur(20rpx);
-  border-top: 1rpx solid rgba(230, 210, 190, 0.4);
-  box-shadow: 0 -4rpx 24rpx rgba(180, 140, 100, 0.08);
+  height: calc(100rpx + env(safe-area-inset-bottom));
 }
 
-/* 顶部柔和光晕 */
+/* 背景层 - 毛玻璃效果 */
+.tab-bar-bg {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  background: rgba(255, 250, 245, 0.85);
+  backdrop-filter: blur(20rpx) saturate(1.2);
+  -webkit-backdrop-filter: blur(20rpx) saturate(1.2);
+  border-top: 1rpx solid rgba(230, 210, 190, 0.35);
+  box-shadow: 0 -8rpx 32rpx rgba(160, 120, 80, 0.1);
+}
+
+/* 顶部光晕 */
 .tab-bar-glow {
   position: absolute;
-  top: -20rpx;
-  left: 10%;
-  right: 10%;
-  height: 40rpx;
-  background: radial-gradient(ellipse at center, rgba(255, 200, 150, 0.15) 0%, transparent 70%);
+  top: -30rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 60rpx;
+  background: radial-gradient(ellipse at center, rgba(255, 200, 150, 0.2) 0%, transparent 70%);
   pointer-events: none;
 }
 
-.tab-bar-inner {
+/* 内容层 */
+.tab-bar-content {
+  position: relative;
   display: flex;
   justify-content: space-around;
-  align-items: center;
+  align-items: flex-end;
   height: 100rpx;
-  padding: 0 20rpx;
+  padding: 0 16rpx;
 }
 
 /* ===== Tab 项 ===== */
-.tab-bar-item {
+.tab-item {
   position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  height: 88rpx;
-  border-radius: 24rpx;
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  justify-content: flex-end;
+  height: 100rpx;
+  padding-bottom: 8rpx;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* 点击反馈 */
-.tab-bar-item:active {
-  transform: scale(0.92);
-  background: rgba(230, 200, 170, 0.15);
+.tab-item:active {
+  transform: scale(0.95);
 }
 
-/* ===== 图标容器 ===== */
-.tab-icon-wrapper {
+/* ===== 图标气泡 - 选中时上浮 ===== */
+.icon-bubble {
   position: relative;
-  width: 52rpx;
-  height: 52rpx;
+  width: 56rpx;
+  height: 56rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 4rpx;
+  margin-bottom: 6rpx;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.svg-icon {
+  width: 44rpx;
+  height: 44rpx;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* 默认图标 */
-.tab-icon {
+.icon-default {
   position: absolute;
-  font-size: 40rpx;
-  opacity: 0.55;
-  filter: grayscale(30%);
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 0.5;
   transform: scale(1);
+  transition: all 0.35s ease;
+}
+
+.tab-item.active .icon-default {
+  opacity: 0;
+  transform: scale(0.6);
 }
 
 /* 选中图标 */
-.tab-icon-active {
+.icon-active {
   position: absolute;
-  font-size: 40rpx;
   opacity: 0;
-  transform: scale(0.5) translateY(10rpx);
+  transform: scale(0.6) translateY(8rpx);
   transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-  filter: drop-shadow(0 2rpx 4rpx rgba(200, 120, 60, 0.3));
 }
 
-/* ===== 文字 ===== */
+.tab-item.active .icon-active {
+  opacity: 1;
+  transform: scale(1.1) translateY(0);
+}
+
+/* ===== 选中状态 - 图标上浮突出 ===== */
+.tab-item.active .icon-bubble {
+  transform: translateY(-28rpx);
+  width: 72rpx;
+  height: 72rpx;
+  background: linear-gradient(135deg, #fff5e8 0%, #ffe8d0 100%);
+  border-radius: 50%;
+  box-shadow:
+    0 4rpx 16rpx rgba(200, 130, 70, 0.2),
+    0 2rpx 4rpx rgba(200, 130, 70, 0.1),
+    inset 0 1rpx 2rpx rgba(255, 255, 255, 0.8);
+}
+
+.tab-item.active .svg-icon {
+  width: 40rpx;
+  height: 40rpx;
+}
+
+/* ===== 文字包装器 ===== */
+.text-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
 .tab-text {
   font-size: 20rpx;
   color: #b8a898;
@@ -92,56 +143,45 @@
   transition: all 0.3s ease;
 }
 
-/* ===== 选中状态 ===== */
-.tab-bar-item.active {
-  background: linear-gradient(135deg, rgba(255, 230, 200, 0.4) 0%, rgba(255, 210, 170, 0.3) 100%);
-  box-shadow: inset 0 1rpx 2rpx rgba(255, 255, 255, 0.6), 0 2rpx 8rpx rgba(200, 140, 80, 0.1);
-}
-
-.tab-bar-item.active .tab-icon {
+/* ===== 横线指示器 ===== */
+.tab-line {
+  width: 0;
+  height: 3rpx;
+  border-radius: 2rpx;
+  background: linear-gradient(90deg, #e8a87c, #c4783a);
   opacity: 0;
-  transform: scale(0.5) translateY(-10rpx);
+  transform: scaleX(0);
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.tab-bar-item.active .tab-icon-active {
-  opacity: 1;
-  transform: scale(1.15) translateY(0);
-}
-
-.tab-bar-item.active .tab-text {
+/* 选中状态文字 */
+.tab-item.active .tab-text {
   color: #c4783a;
   font-weight: 600;
-  text-shadow: 0 1rpx 2rpx rgba(200, 120, 60, 0.1);
+  font-size: 21rpx;
 }
 
-/* ===== 选中指示器（小圆点） ===== */
-.tab-bar-item.active::after {
-  content: '';
-  position: absolute;
-  bottom: 4rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 16rpx;
-  height: 4rpx;
-  background: linear-gradient(90deg, #e8a87c, #d4956a);
-  border-radius: 2rpx;
-  box-shadow: 0 1rpx 4rpx rgba(200, 120, 60, 0.2);
+/* 选中状态横线 */
+.tab-item.active .tab-line {
+  width: 32rpx;
+  opacity: 1;
+  transform: scaleX(1);
+  box-shadow: 0 1rpx 4rpx rgba(200, 120, 60, 0.25);
 }
 
-/* ===== 首页特殊样式（中间凸起） ===== */
-.tab-bar-item:nth-child(1).active {
-  background: linear-gradient(135deg, rgba(255, 220, 180, 0.5) 0%, rgba(255, 200, 150, 0.4) 100%);
+/* ===== 会员特殊金色 ===== */
+.tab-item:nth-child(3).active .icon-bubble {
+  background: linear-gradient(135deg, #fff8e8 0%, #ffe8b8 100%);
+  box-shadow:
+    0 4rpx 16rpx rgba(200, 160, 60, 0.25),
+    0 2rpx 4rpx rgba(200, 160, 60, 0.1),
+    inset 0 1rpx 2rpx rgba(255, 255, 255, 0.8);
 }
 
-/* ===== 会员特殊样式（金色质感） ===== */
-.tab-bar-item:nth-child(3).active {
-  background: linear-gradient(135deg, rgba(255, 235, 200, 0.5) 0%, rgba(255, 220, 160, 0.4) 100%);
-}
-
-.tab-bar-item:nth-child(3).active .tab-text {
+.tab-item:nth-child(3).active .tab-text {
   color: #c4953a;
 }
 
-.tab-bar-item:nth-child(3).active::after {
-  background: linear-gradient(90deg, #e8c07c, #d4a56a);
+.tab-item:nth-child(3).active .tab-line {
+  background: linear-gradient(90deg, #e8c07c, #c4953a);
 }

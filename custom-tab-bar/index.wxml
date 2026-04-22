@@ -1,19 +1,32 @@
 <view class="tab-bar">
-  <view class="tab-bar-glow"></view>
-  <view class="tab-bar-inner">
+  <view class="tab-bar-bg">
+    <view class="tab-bar-glow"></view>
+  </view>
+
+  <view class="tab-bar-content">
     <view
-      class="tab-bar-item {{selected === index ? 'active' : ''}}"
+      class="tab-item {{selected === index ? 'active' : ''}}"
       wx:for="{{list}}"
       wx:key="index"
       data-path="{{item.pagePath}}"
       data-index="{{index}}"
       bindtap="switchTab"
     >
-      <view class="tab-icon-wrapper">
-        <view class="tab-icon">{{item.icon}}</view>
-        <view class="tab-icon-active">{{item.activeIcon}}</view>
+      <!-- 图标容器 - 选中时上浮 -->
+      <view class="icon-bubble">
+        <view class="icon-default">
+          <image class="svg-icon" src="{{item.icon}}" mode="aspectFit"/>
+        </view>
+        <view class="icon-active">
+          <image class="svg-icon" src="{{item.activeIcon}}" mode="aspectFit"/>
+        </view>
       </view>
-      <text class="tab-text">{{item.text}}</text>
+
+      <!-- 文字 + 横线 -->
+      <view class="text-wrapper">
+        <text class="tab-text">{{item.text}}</text>
+        <view class="tab-line"></view>
+      </view>
     </view>
   </view>
 </view>
