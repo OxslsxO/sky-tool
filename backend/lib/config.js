@@ -9,6 +9,7 @@ const OUTPUT_DIR = path.join(STORAGE_DIR, "outputs");
 const TEMP_DIR = path.join(STORAGE_DIR, "temp");
 const OPERATIONS_LOG_PATH = path.join(STORAGE_DIR, "operations.ndjson");
 const CLIENT_STATE_PATH = path.join(STORAGE_DIR, "client-state.json");
+const HUGGING_FACE_SPACE_PORT = 7860;
 
 function ensureLocalDirs() {
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
@@ -16,10 +17,30 @@ function ensureLocalDirs() {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+function isHuggingFaceSpaceRuntime() {
+  return Boolean(process.env.SPACE_ID || process.env.SPACE_HOST);
+}
+
+function getRuntimePort() {
+  if (isHuggingFaceSpaceRuntime()) {
+    return HUGGING_FACE_SPACE_PORT;
+  }
+
+  return Number(process.env.PORT || 3100);
+}
+
+function getRuntimeHost() {
+  if (isHuggingFaceSpaceRuntime()) {
+    return "0.0.0.0";
+  }
+
+  return process.env.HOST || "0.0.0.0";
+}
+
 function buildConfig() {
   return {
-    port: Number(process.env.PORT || 3100),
-    host: process.env.HOST || "0.0.0.0",
+    port: getRuntimePort(),
+    host: getRuntimeHost(),
     publicBaseUrl: process.env.PUBLIC_BASE_URL || "",
     apiToken: process.env.API_TOKEN || "",
     fileTtlHours: Number(process.env.FILE_TTL_HOURS || 24),
