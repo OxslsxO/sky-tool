@@ -242,12 +242,32 @@
 }
 
 .redeem-modal {
+  position: relative;
   width: 100%;
   background: linear-gradient(180deg, #fffbf7, #fff8f2);
   border-radius: 32rpx;
   padding: 48rpx 36rpx 36rpx;
   box-shadow: 0 16rpx 48rpx rgba(90, 61, 43, 0.2);
   animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.redeem-modal-close {
+  position: absolute;
+  top: 20rpx;
+  right: 20rpx;
+  width: 52rpx;
+  height: 52rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+  color: #b8a898;
+  border-radius: 50%;
+  background: rgba(230, 210, 190, 0.2);
+}
+
+.redeem-modal-close:active {
+  background: rgba(230, 210, 190, 0.4);
 }
 
 @keyframes slideUp {

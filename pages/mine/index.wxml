@@ -89,8 +89,9 @@
   </view>
 
   <!-- 口令兑换弹窗 -->
-  <view class="redeem-overlay" wx:if="{{showRedeemModal}}" bindtap="closeRedeemModal">
-    <view class="redeem-modal" catchtap="">
+  <view class="redeem-overlay" wx:if="{{showRedeemModal}}" catchtap="preventBubble">
+    <view class="redeem-modal" catchtap="preventBubble">
+      <view class="redeem-modal-close" bindtap="closeRedeemModal">✕</view>
       <view class="redeem-modal-header">
         <text class="redeem-modal-icon">🎁</text>
         <text class="redeem-modal-title">口令兑换</text>

@@ -79,6 +79,10 @@ Page({
     });
   },
 
+  preventBubble() {
+    // 阻止事件冒泡，防止点击弹窗内容时关闭
+  },
+
   onRedeemInput(e) {
     this.setData({
       redeemInput: e.detail.value,
