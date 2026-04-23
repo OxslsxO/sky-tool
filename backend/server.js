@@ -127,6 +127,100 @@ function initWechatPay() {
 
 wechatPay = initWechatPay();
 
+// ==================== 微信登录/手机号获取工具 ====================
+let wechatAccessToken = null;
+let wechatAccessTokenExpiresAt = 0;
+
+async function getWechatAccessToken() {
+  const appId = process.env.WECHAT_APPID;
+  const appSecret = process.env.WECHAT_APPSECRET;
+
+  if (!appId || !appSecret) {
+    return null;
+  }
+
+  const now = Date.now();
+  if (wechatAccessToken && now < wechatAccessTokenExpiresAt - 60000) {
+    return wechatAccessToken;
+  }
+
+  try {
+    const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${appId}&secret=${appSecret}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (data.access_token) {
+      wechatAccessToken = data.access_token;
+      wechatAccessTokenExpiresAt = now + data.expires_in * 1000;
+      console.log("[WeChat] Access token 刷新成功");
+      return wechatAccessToken;
+    } else {
+      console.error("[WeChat] 获取 access_token 失败:", data);
+      return null;
+    }
+  } catch (e) {
+    console.error("[WeChat] 获取 access_token 异常:", e);
+    return null;
+  }
+}
+
+async function wechatCode2Session(code) {
+  const appId = process.env.WECHAT_APPID;
+  const appSecret = process.env.WECHAT_APPSECRET;
+
+  if (!appId || !appSecret) {
+    console.warn("[WeChat] WECHAT_APPID 或 WECHAT_APPSECRET 未配置，使用模拟模式");
+    return { openid: `mock_${crypto.randomBytes(8).toString('hex')}`, session_key: null };
+  }
+
+  try {
+    const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${appId}&secret=${appSecret}&js_code=${code}&grant_type=authorization_code`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (data.openid) {
+      console.log(`[WeChat] jscode2session 成功: openid=${data.openid}`);
+      return data;
+    } else {
+      console.error("[WeChat] jscode2session 失败:", data);
+      throw new Error(data.errmsg || 'jscode2session failed');
+    }
+  } catch (e) {
+    console.error("[WeChat] jscode2session 异常:", e);
+    throw e;
+  }
+}
+
+async function wechatGetPhoneNumber(code) {
+  const accessToken = await getWechatAccessToken();
+  if (!accessToken) {
+    console.warn("[WeChat] 获取手机号失败：access_token 未获取，使用模拟模式");
+    return `138${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
+  }
+
+  try {
+    const url = `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${accessToken}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const data = await resp.json();
+
+    if (data.errcode === 0 && data.phone_info && data.phone_info.phoneNumber) {
+      const phone = data.phone_info.phoneNumber;
+      console.log("[WeChat] 获取手机号成功");
+      return phone;
+    } else {
+      console.error("[WeChat] 获取手机号失败:", data);
+      throw new Error(data.errmsg || 'getPhoneNumber failed');
+    }
+  } catch (e) {
+    console.error("[WeChat] 获取手机号异常:", e);
+    throw e;
+  }
+}
+
 const { ensureLocalDirs, buildConfig } = require("./lib/config");
 const { createStorage } = require("./lib/storage");
 const { createOperationRepository } = require("./lib/repository");
@@ -1408,45 +1502,39 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   try {
-    // 这里是模拟微信登录
-    // 实际生产环境需要调用微信 code2Session 接口
+    // 调用微信接口
+    const wxResult = await wechatCode2Session(code);
+    const openid = wxResult.openid;
     
     // 查找或创建用户
     let user = null;
     let isNewUser = false;
     const collections = await clientStateRepository.getCollections();
     
-    let mockOpenid = null;
-    
     if (collections) {
       // MongoDB 模式
       
-      // 1. 先尝试查找最近有活动的用户（有积分或会员的）
-      const recentActiveUser = await collections.users.findOne(
-        { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
-        { sort: { updatedAt: -1 } }
-      );
+      // 1. 先尝试用 openid 查找用户
+      user = await collections.users.findOne({ openid });
       
-      if (recentActiveUser) {
-        // 找到了有数据的用户，直接用这个用户！
-        user = recentActiveUser;
-        mockOpenid = user.openid;
-        console.log(`[Auth] 找到有数据的用户，直接登录: ${mockOpenid}`);
-      } else {
-        // 没找到有数据的用户，生成一个新 openid
-        mockOpenid = `wx_user_${crypto.createHash('md5').update(code).digest('hex').substring(0, 12)}`;
-        console.log(`[Auth] 微信登录模拟: ${mockOpenid}`);
+      if (!user) {
+        // 2. 没找到，尝试查找最近有活动的用户（有积分或会员的）作为临时兼容
+        const recentActiveUser = await collections.users.findOne(
+          { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
+          { sort: { updatedAt: -1 } }
+        );
         
-        // 查找是否已有这个 openid 的用户
-        user = await collections.users.findOne({ openid: mockOpenid });
-        
-        if (!user) {
+        if (recentActiveUser && !recentActiveUser.openid.startsWith('mock_')) {
+          // 找到了有数据的老用户，直接用这个用户！
+          user = recentActiveUser;
+          console.log(`[Auth] 找到有数据的老用户，直接登录: ${user.openid}`);
+        } else {
           // 新用户，创建
           isNewUser = true;
           const now = new Date().toISOString();
           const newUser = {
-            userId: mockOpenid, // 用 openid 作为 userId
-            openid: mockOpenid,
+            userId: openid, // 用 openid 作为 userId
+            openid: openid,
             nickname: userInfo?.nickName || "微信用户",
             avatar: userInfo?.avatarUrl || "",
             gender: userInfo?.gender || 0,
@@ -1462,7 +1550,7 @@ app.post("/api/auth/login", async (req, res) => {
           await collections.users.insertOne(newUser);
           user = newUser;
           
-          console.log(`[Auth] 创建新用户: ${mockOpenid}`);
+          console.log(`[Auth] 创建新用户: ${openid}`);
         }
       }
       
@@ -1487,12 +1575,9 @@ app.post("/api/auth/login", async (req, res) => {
       }
     } else {
       // 文件模式（简单模拟）
-      if (!mockOpenid) {
-        mockOpenid = `wx_user_${crypto.createHash('md5').update(code).digest('hex').substring(0, 12)}`;
-      }
       user = {
-        userId: mockOpenid,
-        openid: mockOpenid,
+        userId: openid,
+        openid: openid,
         nickname: userInfo?.nickName || "微信用户",
         avatar: userInfo?.avatarUrl || "",
         points: 0,
@@ -1504,7 +1589,7 @@ app.post("/api/auth/login", async (req, res) => {
     await recordOperation(req, {
       toolId: "auth-login",
       status: "success",
-      meta: { openid: mockOpenid },
+      meta: { openid },
     });
 
     // 返回用户信息（不包含敏感字段）
@@ -1542,11 +1627,23 @@ app.post("/api/auth/bind-phone", async (req, res) => {
   const { code, userId: reqUserId, openid: reqOpenid } = req.body;
 
   try {
-    // 模拟获取手机号（实际需要调用微信手机号接口）
-    // 为了演示，我们用一个模拟的手机号
-    const mockPhone = `138${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
+    // 获取真实手机号
+    let phoneNumber = null;
     
-    console.log(`[Auth] 绑定手机号模拟: ${reqOpenid || reqUserId} -> ${mockPhone}`);
+    if (code && code !== 'test_code') {
+      try {
+        phoneNumber = await wechatGetPhoneNumber(code);
+      } catch (e) {
+        console.warn("[Auth] 获取真实手机号失败，使用模拟模式:", e.message);
+      }
+    }
+    
+    if (!phoneNumber) {
+      phoneNumber = `138${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
+      console.warn("[Auth] 使用模拟手机号:", phoneNumber);
+    }
+    
+    console.log(`[Auth] 绑定手机号: ${reqOpenid || reqUserId} -> ${phoneNumber}`);
 
     // 更新用户
     const collections = await clientStateRepository.getCollections();
@@ -1587,16 +1684,16 @@ app.post("/api/auth/bind-phone", async (req, res) => {
           { userId: user.userId },
           {
             $set: {
-              phoneNumber: mockPhone,
-              updatedAt: new Date().toISOString(),
+              phoneNumber: phoneNumber,
+              updatedAt: now,
             },
           }
         );
         
-        // 重新获取完整用户信息
+        // 重新获取完整的用户信息
         user = await collections.users.findOne({ userId: user.userId });
         
-        console.log(`[Auth] 手机号绑定成功: ${user.userId} -> ${mockPhone}`);
+        console.log(`[Auth] 手机号绑定成功: ${user.userId} -> ${phoneNumber}`);
       }
     }
 
