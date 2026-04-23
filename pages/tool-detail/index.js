@@ -19,7 +19,7 @@ const BACKGROUND_COLOR_MAP = {
 const DEFAULT_BACKGROUND_COLORS = ["白色", "蓝色", "红色"];
 const AUDIO_CONVERT_AUDIO_FORMATS = ["MP3", "WAV", "FLAC", "OGG", "M4A", "AAC"];
 const AUDIO_CONVERT_VIDEO_FORMATS = ["MP4", "MOV", "WEBM"];
-const AUDIO_CONVERT_AUDIO_EXTS = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
+const AUDIO_CONVERT_AUDIO_EXTS = ["mp3", "wav", "flac", "ogg", "m4a", "aac", "ncm"];
 const AUDIO_CONVERT_VIDEO_EXTS = ["mp4", "mov", "webm", "avi", "mkv", "wmv", "flv"];
 const {
   createTask,
@@ -3388,7 +3388,7 @@ Page({
     const targetOptions = getAudioConvertTargetOptions(inputKind);
     const target = selections.target || targetOptions[0] || "";
     const supportedExts = AUDIO_CONVERT_AUDIO_EXTS.concat(AUDIO_CONVERT_VIDEO_EXTS);
-    const unsupportedExts = ["ncm", "kgm", "vpr", "mgg", "qmc", "kwm", "xm", "tm", "bkcmp3", "bkcflac", "tkm"];
+    const unsupportedExts = ["kgm", "vpr", "mgg", "qmc", "kwm", "xm", "tm", "bkcmp3", "bkcflac", "tkm"];
 
     if (unsupportedExts.includes(ext)) {
       wx.showModal({
@@ -3832,7 +3832,7 @@ Page({
         fileType = "pdf";
       } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) {
         fileType = "office";
-      } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) {
+      } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "ncm"].includes(ext)) {
         fileType = "audio";
       } else if (["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"].includes(ext)) {
         fileType = "video";

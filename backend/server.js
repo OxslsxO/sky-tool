@@ -48,6 +48,13 @@ try {
   console.warn("⚠️ photo-id 模块加载失败:", e.message);
 }
 
+let ncmDecrypt = null;
+try {
+  ncmDecrypt = require("./lib/ncm-decrypt");
+} catch (e) {
+  console.warn("⚠️ NCM 解密模块加载失败:", e.message);
+}
+
 // ==================== 微信支付初始化 ====================
 let wechatPay = null;
 function initWechatPay() {
@@ -2077,13 +2084,28 @@ app.post("/api/file/compress", async (req, res) => {
       throw new Error("需要上传文件");
     }
 
-    const ext = normalizeExtension(file.name ? file.name.split('.').pop() : "bin");
-    const fileBytes = decodeBase64File(file);
+    let ext = normalizeExtension(file.name ? file.name.split('.').pop() : "bin");
+    let fileBytes = decodeBase64File(file);
 
     let outputBytes = fileBytes;
     let outputExt = ext;
     let compressed = false;
     let compressionNote = "当前文件未发现可进一步压缩的空间";
+
+    // 检测并处理 NCM 格式
+    const isNcmMagic = fileBytes.slice(0, 8).toString("hex") === "4354454e";
+    let isNcm = ext === "ncm" || isNcmMagic;
+
+    if (isNcm && ncmDecrypt) {
+      console.log("万能压缩：检测到 NCM 格式，先进行解密");
+      const decryptResult = ncmDecrypt.decryptNcm(fileBytes);
+      fileBytes = decryptResult.musicData;
+      const detectedFormat = decryptResult.format || "mp3";
+      outputExt = detectedFormat;
+      ext = detectedFormat;
+      compressionNote = "已将网易云音乐加密格式解密为 " + detectedFormat.toUpperCase();
+      compressed = true;
+    }
 
     // 根据文件类型进行不同的压缩处理
     if (ext === "pdf") {
@@ -2136,7 +2158,7 @@ app.post("/api/file/compress", async (req, res) => {
       outputBytes = fileBytes;
       outputExt = ext;
       compressionNote = "当前图片格式暂不做有损压缩，已保留原文件";
-    } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) {
+    } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "ncm"].includes(ext)) {
       // 音频压缩 - 使用ffmpeg
       const ffmpegPath = resolveFfmpegPath();
       if (ffmpegPath) {
@@ -2434,7 +2456,7 @@ function getMediaExtension(targetFormat) {
 }
 
 function isAudioExtension(ext) {
-  return ["mp3", "wav", "flac", "ogg", "m4a", "aac"].includes(String(ext || "").toLowerCase());
+  return ["mp3", "wav", "flac", "ogg", "m4a", "aac", "ncm"].includes(String(ext || "").toLowerCase());
 }
 
 function isVideoExtension(ext) {
@@ -2578,9 +2600,9 @@ app.post("/api/audio/convert", async (req, res) => {
     }
 
     const originalBaseName = path.parse(originalInputName).name || "media";
-    const safeBaseName = originalBaseName.replace(/[^\w\u4e00-\u9fa5\-_]/g, "_");
-    const outputName = `${safeBaseName}.${targetExt}`;
-    const outputPath = path.join(tempDir, outputName);
+    let safeBaseName = originalBaseName.replace(/[^\w\u4e00-\u9fa5\-_]/g, "_");
+    let outputName = `${safeBaseName}.${targetExt}`;
+    let outputPath = path.join(tempDir, outputName);
 
     const fileBuffer = decodeBase64File(file);
     console.log("[Media Convert] 写入文件:", inputPath, "大小:", fileBuffer.length, "bytes");
@@ -2603,19 +2625,34 @@ app.post("/api/audio/convert", async (req, res) => {
 
     let formatMatch = true;
     let formatHint = "";
+    let actualInputPath = inputPath;
+    let isNcmFile = false;
 
-    if (inputExt.toLowerCase() === ".flac" && !isFlac) {
-      formatMatch = false;
-      if (isNcm) formatHint = "这看起来是网易云音乐的加密格式 (.ncm)，不是真正的 FLAC。";
-      else if (isKgm) formatHint = "这看起来是酷狗音乐的加密格式 (.kgm)，不是真正的 FLAC。";
-      else if (isQmc) formatHint = "这看起来是 QQ 音乐的加密格式 (.qmc)，不是真正的 FLAC。";
-      else formatHint = "这个文件的扩展名是 .flac，但内容不是标准 FLAC 格式。";
+    if (inputExt.toLowerCase() === ".ncm") {
+      isNcmFile = true;
+    } else if (inputExt.toLowerCase() === ".flac" && !isFlac) {
+      if (isNcm) {
+        isNcmFile = true;
+      } else {
+        formatMatch = false;
+        if (isKgm) formatHint = "这看起来是酷狗音乐的加密格式 (.kgm)，不是真正的 FLAC。";
+        else if (isQmc) formatHint = "这看起来是 QQ 音乐的加密格式 (.qmc)，不是真正的 FLAC。";
+        else formatHint = "这个文件的扩展名是 .flac，但内容不是标准 FLAC 格式。";
+      }
     } else if (inputExt.toLowerCase() === ".mp3" && !isMp3) {
-      formatMatch = false;
-      formatHint = "这个文件的扩展名是 .mp3，但内容看起来不像是标准 MP3 格式。";
+      if (isNcm) {
+        isNcmFile = true;
+      } else {
+        formatMatch = false;
+        formatHint = "这个文件的扩展名是 .mp3，但内容看起来不像是标准 MP3 格式。";
+      }
     } else if (inputExt.toLowerCase() === ".wav" && !isWav) {
-      formatMatch = false;
-      formatHint = "这个文件的扩展名是 .wav，但内容看起来不像是标准 WAV 格式。";
+      if (isNcm) {
+        isNcmFile = true;
+      } else {
+        formatMatch = false;
+        formatHint = "这个文件的扩展名是 .wav，但内容看起来不像是标准 WAV 格式。";
+      }
     }
 
     if (!formatMatch) {
@@ -2624,13 +2661,30 @@ app.post("/api/audio/convert", async (req, res) => {
       throw error;
     }
 
-    fs.writeFileSync(inputPath, fileBuffer);
+    if (isNcmFile && ncmDecrypt) {
+      console.log("[Media Convert] 检测到 NCM 格式，开始解密...");
+      const decryptResult = ncmDecrypt.decryptNcm(fileBuffer);
+      const detectedFormat = decryptResult.format || "mp3";
+      const decryptedPath = path.join(tempDir, `decrypted-${makeId()}.${detectedFormat}`);
+      fs.writeFileSync(decryptedPath, decryptResult.musicData);
+      actualInputPath = decryptedPath;
+      console.log("[Media Convert] NCM 解密完成，实际格式:", detectedFormat);
+      
+      if (decryptResult.metaData && decryptResult.metaData.musicName) {
+        const originalBaseName = decryptResult.metaData.musicName.replace(/[^\w\u4e00-\u9fa5\-_]/g, "_");
+        safeBaseName = originalBaseName;
+        outputName = `${safeBaseName}.${targetExt}`;
+        outputPath = path.join(tempDir, outputName);
+      }
+    } else {
+      fs.writeFileSync(inputPath, fileBuffer);
+    }
 
-    const stats = fs.statSync(inputPath);
+    const stats = fs.statSync(actualInputPath);
     console.log("[Media Convert] 文件已写入，实际大小:", stats.size, "bytes");
     console.log("[Media Convert] 输出路径:", outputPath);
 
-    await runFfmpegConvert(ffmpegPath, inputPath, outputPath, target, quality);
+    await runFfmpegConvert(ffmpegPath, actualInputPath, outputPath, target, quality);
 
     const bytes = fs.readFileSync(outputPath);
     const contentType = getMediaContentType(targetExt);

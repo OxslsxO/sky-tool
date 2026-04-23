@@ -1,7 +1,7 @@
 const STORAGE_KEY = "sky_tools_backend_service";
 const DEFAULT_SERVICE_CONFIG = {
-  baseUrl: "https://OxslsxO-sky-tool.hf.space",
-  //baseUrl: "http://127.0.0.1:3100",
+  //baseUrl: "https://oxslsxo-sky-tool.hf.space",
+  baseUrl: "http://127.0.0.1:3100",
   //baseUrl: "https://intercounty-distastefully-shanelle.ngrok-free.dev",
   token: "",
 };
