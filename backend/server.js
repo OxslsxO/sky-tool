@@ -1,4 +1,4 @@
-require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
@@ -57,17 +57,66 @@ try {
 
 // ==================== 微信支付初始化 ====================
 let wechatPay = null;
+
+function resolveWechatPemSource(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const looksLikePath = /^[A-Za-z]:[\\/]|^\.\.?[\\/]|^\//.test(raw);
+  if (looksLikePath && fs.existsSync(raw)) {
+    return fs.readFileSync(raw, "utf8").trim();
+  }
+
+  return raw;
+}
+
+function normalizeWechatPem(value, fallbackLabel) {
+  const source = resolveWechatPemSource(value).replace(/\r/g, "").replace(/\\n/g, "\n").trim();
+  if (!source) {
+    return "";
+  }
+
+  const headerMatch = source.match(/-----BEGIN ([^-]+)-----/);
+  const label = headerMatch ? headerMatch[1].trim() : fallbackLabel;
+  const beginMarker = `-----BEGIN ${label}-----`;
+  const endMarker = `-----END ${label}-----`;
+
+  const body = source
+    .replace(beginMarker, "")
+    .replace(endMarker, "")
+    .replace(/\s+/g, "");
+
+  const lines = body.match(/.{1,64}/g);
+  if (!lines || !lines.length) {
+    return source;
+  }
+
+  return `${beginMarker}\n${lines.join("\n")}\n${endMarker}`;
+}
+
 function initWechatPay() {
   try {
     const appId = process.env.WECHAT_APPID;
     const mchId = process.env.WECHAT_MCH_ID;
     const apiV3Key = process.env.WECHAT_API_V3_KEY;
     const serialNo = process.env.WECHAT_SERIAL_NO;
-    const privateKey = process.env.WECHAT_PRIVATE_KEY;
-    const publicKey = process.env.WECHAT_PUBLIC_KEY;
+    const privateKeyPath = String(
+      process.env.WECHAT_PRIVATE_KEY_PATH || process.env.WECHAT_KEY_PATH || ""
+    ).trim();
+    const publicKeyPath = String(
+      process.env.WECHAT_PUBLIC_KEY_PATH || process.env.WECHAT_CERT_PATH || ""
+    ).trim();
+    const privateKey = privateKeyPath && fs.existsSync(privateKeyPath)
+      ? privateKeyPath
+      : process.env.WECHAT_PRIVATE_KEY;
+    const publicKey = publicKeyPath && fs.existsSync(publicKeyPath)
+      ? publicKeyPath
+      : process.env.WECHAT_PUBLIC_KEY;
 
     if (!appId || !mchId || !apiV3Key || !serialNo || !privateKey || !publicKey) {
-      console.warn("⚠️ 微信支付配置不完整，将使用模拟支付");
+      console.error("WeChat Pay config is incomplete; real payment is unavailable");
       console.warn("   缺少的配置项:", {
         appId: !!appId,
         mchId: !!mchId,
@@ -79,45 +128,36 @@ function initWechatPay() {
       return null;
     }
 
-    // 确保 PEM 格式正确 - 更健壮的处理
-    let cleanedPrivateKey = privateKey;
-    let cleanedPublicKey = publicKey;
-    
-    // 处理各种可能的格式
     try {
-      // 先尝试处理 \n 转义的情况
-      cleanedPrivateKey = cleanedPrivateKey.replace(/\\n/g, "\n").trim();
-      cleanedPublicKey = cleanedPublicKey.replace(/\\n/g, "\n").trim();
-      
-      // 确保有正确的头部和尾部
-      if (!cleanedPrivateKey.startsWith("-----BEGIN")) {
-        cleanedPrivateKey = "-----BEGIN PRIVATE KEY-----\n" + cleanedPrivateKey + "\n-----END PRIVATE KEY-----";
-      }
-      if (!cleanedPublicKey.startsWith("-----BEGIN")) {
-        cleanedPublicKey = "-----BEGIN CERTIFICATE-----\n" + cleanedPublicKey + "\n-----END CERTIFICATE-----";
-      }
-      
-      console.log("✅ PEM格式处理完成");
-    } catch (e) {
-      console.warn("⚠️ PEM格式处理警告，尝试直接使用原始值:", e.message);
-    }
+      const cleanedPrivateKey = normalizeWechatPem(privateKey, "PRIVATE KEY");
+      const cleanedPublicKey = normalizeWechatPem(publicKey, "CERTIFICATE");
 
-    if (!Pay) {
-      console.warn("⚠️ wechatpay-node-v3 模块未加载，跳过微信支付初始化");
+      crypto.createPrivateKey(cleanedPrivateKey);
+      new crypto.X509Certificate(cleanedPublicKey);
+
+      console.log("✅ 微信支付 PEM 格式校验通过");
+
+      if (!Pay) {
+        console.warn("⚠️ wechatpay-node-v3 模块未加载，跳过微信支付初始化");
+        return null;
+      }
+
+      const wp = new Pay({
+        appid: appId,
+        mchid: mchId,
+        serial_no: serialNo,
+        publicKey: cleanedPublicKey,
+        privateKey: cleanedPrivateKey,
+        key: apiV3Key,
+      });
+
+      console.log("✅ 微信支付已初始化");
+      return wp;
+    } catch (e) {
+      console.error("❌ 微信支付证书/密钥解析失败:", e && e.message ? e.message : e);
+      console.error("   建议检查 .env 中的 WECHAT_PRIVATE_KEY / WECHAT_PUBLIC_KEY 是否为完整 PEM 或有效文件路径");
       return null;
     }
-
-    const wp = new Pay({
-      appid: appId,
-      mchid: mchId,
-      serial_no: serialNo,
-      publicKey: cleanedPublicKey,
-      privateKey: cleanedPrivateKey,
-      key: apiV3Key,
-    });
-
-    console.log("✅ 微信支付已初始化");
-    return wp;
   } catch (error) {
     console.error("❌ 微信支付初始化失败:", error && error.message ? error.message : error);
     console.error("   错误详情:", error);
@@ -1319,11 +1359,16 @@ const PRODUCTS = {
 app.post("/api/pay/create", async (req, res) => {
   console.log(`[支付] 收到创建订单请求:`, req.body);
   
-  const { type, itemId, userId, deviceId } = req.body || {};
+  const { type, itemId, userId, openid, deviceId } = req.body || {};
 
   if (!type || !itemId) {
     console.warn(`[支付] 缺少参数: type=${type}, itemId=${itemId}`);
     return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
+  }
+
+  const isRealOpenid = openid && typeof openid === 'string' && openid.startsWith('o');
+  if (!userId || !isRealOpenid) {
+    console.warn(`[支付] 非真实微信openid: ${openid}，回退到模拟支付`);
   }
 
   const orderId = `ORD-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -1338,7 +1383,7 @@ app.post("/api/pay/create", async (req, res) => {
 
   let payment = null;
 
-  if (wechatPay) {
+  if (wechatPay && isRealOpenid) {
     try {
       console.log(`[支付] 尝试使用微信支付创建订单 ${orderId}`);
       
@@ -1355,7 +1400,7 @@ app.post("/api/pay/create", async (req, res) => {
           currency: "CNY",
         },
         payer: {
-          openid: userId || "otO5s0d40q0jV8QqN5L5W8wZ9w", // 提供一个测试 openid
+          openid,
         },
       };
 
@@ -1381,27 +1426,22 @@ app.post("/api/pay/create", async (req, res) => {
       console.error("   完整错误:", error);
     }
   } else {
-    console.log(`[支付] wechatPay未初始化，直接使用模拟支付`);
+    console.error("[payment] wechatPay is not initialized; cannot create a real order");
   }
 
   if (!payment) {
-    console.warn("⚠️ 回退到模拟支付模式");
-    const nonceStr = crypto.randomBytes(16).toString("hex");
-    const timeStamp = String(Math.floor(Date.now() / 1000));
-
-    payment = {
-      timeStamp,
-      nonceStr,
-      package: `prepay_id=wx${Date.now()}`,
-      signType: "MD5",
-      paySign: crypto.createHash("md5").update(`${orderId}${nonceStr}${timeStamp}`).digest("hex"),
-    };
+    console.error("[payment] failed to create a real order; no usable payment payload returned");
+    return res.status(503).json({
+      error: "WECHAT_PAY_UNAVAILABLE",
+      message: "WeChat Pay is unavailable. Check merchant config and backend logs.",
+    });
   }
 
   pendingOrders.set(orderId, {
     type,
     itemId,
     userId,
+    openid,
     deviceId,
     amount: product.price,
     productName: product.name,
@@ -1450,19 +1490,8 @@ app.post("/api/pay/verify", async (req, res) => {
 app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
   try {
     if (!wechatPay) {
-      console.warn("[支付] 收到模拟支付通知");
-      const body = JSON.parse(req.body);
-      if (body.out_trade_no) {
-        const order = pendingOrders.get(body.out_trade_no);
-        if (order) {
-          order.status = "paid";
-          order.paidAt = Date.now();
-          order.transactionId = `SIM-${Date.now()}`;
-          pendingOrders.set(body.out_trade_no, order);
-          console.log(`✅ 模拟支付订单 ${body.out_trade_no} 标记为已支付`);
-        }
-      }
-      return res.json({ code: "SUCCESS", message: "" });
+      console.error("[payment] pay notify received but wechatPay is not initialized");
+      return res.status(503).json({ code: "FAIL", message: "wechat pay unavailable" });
     }
 
     console.log("[支付] 收到微信支付通知");
@@ -1502,87 +1531,73 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   try {
-    // 调用微信接口
     const wxResult = await wechatCode2Session(code);
     const openid = wxResult.openid;
-    
-    // 查找或创建用户
+    const collections = await clientStateRepository.getCollections();
     let user = null;
     let isNewUser = false;
-    const collections = await clientStateRepository.getCollections();
-    
+
     if (collections) {
-      // MongoDB 模式
-      
-      // 1. 先尝试用 openid 查找用户
       user = await collections.users.findOne({ openid });
-      
+
       if (!user) {
-        // 2. 没找到，尝试查找最近有活动的用户（有积分或会员的）作为临时兼容
-        const recentActiveUser = await collections.users.findOne(
-          { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
-          { sort: { updatedAt: -1 } }
-        );
-        
-        if (recentActiveUser && !recentActiveUser.openid.startsWith('mock_')) {
-          // 找到了有数据的老用户，直接用这个用户！
-          user = recentActiveUser;
-          console.log(`[Auth] 找到有数据的老用户，直接登录: ${user.openid}`);
-        } else {
-          // 新用户，创建
-          isNewUser = true;
-          const now = new Date().toISOString();
-          const newUser = {
-            userId: openid, // 用 openid 作为 userId
-            openid: openid,
-            nickname: userInfo?.nickName || "微信用户",
-            avatar: userInfo?.avatarUrl || "",
-            gender: userInfo?.gender || 0,
-            points: 0,
-            memberPlan: null,
-            memberActive: false,
-            memberExpire: null,
-            phoneNumber: null,
-            createdAt: now,
-            updatedAt: now,
-          };
-          
-          await collections.users.insertOne(newUser);
-          user = newUser;
-          
-          console.log(`[Auth] 创建新用户: ${openid}`);
-        }
-      }
-      
-      if (user && user.openid) {
-        // 老用户，更新一下信息
+        isNewUser = true;
         const now = new Date().toISOString();
+        const avatarUrl = userInfo?.avatarUrl || "";
+        const newUser = {
+          userId: openid,
+          openid,
+          nickname: userInfo?.nickName || "微信用户",
+          avatarUrl,
+          avatar: avatarUrl,
+          gender: userInfo?.gender || 0,
+          points: 0,
+          memberPlan: "",
+          memberActive: false,
+          memberExpire: "",
+          phoneNumber: "",
+          authMode: "wechat",
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        await collections.users.insertOne(newUser);
+        user = newUser;
+      }
+
+      if (user) {
+        const now = new Date().toISOString();
+        const avatarUrl = userInfo?.avatarUrl || user.avatarUrl || user.avatar || "";
+
         await collections.users.updateOne(
-          { openid: user.openid },
+          { openid },
           {
             $set: {
               updatedAt: now,
-              ...(userInfo?.nickName && { nickname: userInfo.nickName }),
-              ...(userInfo?.avatarUrl && { avatar: userInfo.avatarUrl }),
+              nickname: userInfo?.nickName || user.nickname || "微信用户",
+              avatarUrl,
+              avatar: avatarUrl,
+              authMode: "wechat",
             },
           }
         );
-        
-        // 重新获取最新的用户信息
-        user = await collections.users.findOne({ openid: user.openid });
-        
-        console.log(`[Auth] 老用户登录: ${user.openid}`);
+
+        user = await collections.users.findOne({ openid });
       }
     } else {
-      // 文件模式（简单模拟）
+      const avatarUrl = userInfo?.avatarUrl || "";
       user = {
         userId: openid,
-        openid: openid,
+        openid,
         nickname: userInfo?.nickName || "微信用户",
-        avatar: userInfo?.avatarUrl || "",
+        avatarUrl,
+        avatar: avatarUrl,
         points: 0,
+        memberPlan: "",
         memberActive: false,
-        phoneNumber: null,
+        memberExpire: "",
+        phoneNumber: "",
+        authMode: "wechat",
       };
     }
 
@@ -1592,23 +1607,22 @@ app.post("/api/auth/login", async (req, res) => {
       meta: { openid },
     });
 
-    // 返回用户信息（不包含敏感字段）
-    const safeUser = {
-      userId: user.userId,
-      openid: user.openid,
-      nickname: user.nickname,
-      avatar: user.avatar,
-      points: user.points,
-      memberPlan: user.memberPlan,
-      memberActive: user.memberActive,
-      memberExpire: user.memberExpire,
-      phoneNumber: user.phoneNumber,
-    };
-
     res.json({
       ok: true,
-      user: safeUser,
-      isNewUser: isNewUser,
+      isNewUser,
+      user: {
+        userId: user.userId,
+        openid: user.openid,
+        nickname: user.nickname,
+        avatarUrl: user.avatarUrl || user.avatar || "",
+        avatar: user.avatar || user.avatarUrl || "",
+        points: user.points || 0,
+        memberPlan: user.memberPlan || "",
+        memberActive: !!user.memberActive,
+        memberExpire: user.memberExpire || "",
+        phoneNumber: user.phoneNumber || "",
+        authMode: "wechat",
+      },
     });
   } catch (error) {
     console.error("[Auth] 登录失败:", error);
@@ -1620,121 +1634,6 @@ app.post("/api/auth/login", async (req, res) => {
     });
 
     sendError(res, 500, "LOGIN_FAILED", "Login failed");
-  }
-});
-
-app.post("/api/auth/bind-phone", async (req, res) => {
-  const { code, userId: reqUserId, openid: reqOpenid } = req.body;
-
-  try {
-    // 获取真实手机号
-    let phoneNumber = null;
-    
-    if (code && code !== 'test_code') {
-      try {
-        phoneNumber = await wechatGetPhoneNumber(code);
-      } catch (e) {
-        console.warn("[Auth] 获取真实手机号失败，使用模拟模式:", e.message);
-      }
-    }
-    
-    if (!phoneNumber) {
-      phoneNumber = `138${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
-      console.warn("[Auth] 使用模拟手机号:", phoneNumber);
-    }
-    
-    console.log(`[Auth] 绑定手机号: ${reqOpenid || reqUserId} -> ${phoneNumber}`);
-
-    // 更新用户
-    const collections = await clientStateRepository.getCollections();
-    let user = null;
-    
-    if (collections) {
-      // 查找用户策略：
-      // 1. 先用 openid 查找（如果有）
-      // 2. 再用 userId 查找（如果有）
-      // 3. 最后找最近更新的有数据的用户
-      if (reqOpenid) {
-        user = await collections.users.findOne({ openid: reqOpenid });
-      }
-      if (!user && reqUserId) {
-        user = await collections.users.findOne({ userId: reqUserId });
-      }
-      if (!user) {
-        // 找最近有数据的用户
-        const recentUser = await collections.users.findOne(
-          { $or: [ { memberActive: true }, { points: { $gt: 0 } } ] },
-          { sort: { updatedAt: -1 } }
-        );
-        user = recentUser;
-      }
-      // 如果还没有，找最近更新的任意用户
-      if (!user) {
-        const recentUser = await collections.users
-          .find({})
-          .sort({ updatedAt: -1 })
-          .limit(1)
-          .toArray();
-        user = recentUser.length > 0 ? recentUser[0] : null;
-      }
-      
-      if (user) {
-        // 更新手机号
-        await collections.users.updateOne(
-          { userId: user.userId },
-          {
-            $set: {
-              phoneNumber: phoneNumber,
-              updatedAt: now,
-            },
-          }
-        );
-        
-        // 重新获取完整的用户信息
-        user = await collections.users.findOne({ userId: user.userId });
-        
-        console.log(`[Auth] 手机号绑定成功: ${user.userId} -> ${phoneNumber}`);
-      }
-    }
-
-    if (!user) {
-      sendError(res, 404, "USER_NOT_FOUND", "User not found");
-      return;
-    }
-
-    await recordOperation(req, {
-      toolId: "auth-bind-phone",
-      status: "success",
-      meta: { userId: user.userId },
-    });
-
-    // 返回用户信息
-    const safeUser = {
-      userId: user.userId,
-      openid: user.openid,
-      nickname: user.nickname,
-      avatar: user.avatar,
-      points: user.points,
-      memberPlan: user.memberPlan,
-      memberActive: user.memberActive,
-      memberExpire: user.memberExpire,
-      phoneNumber: user.phoneNumber,
-    };
-
-    res.json({
-      ok: true,
-      user: safeUser,
-    });
-  } catch (error) {
-    console.error("[Auth] 绑定手机失败:", error);
-    await recordOperation(req, {
-      toolId: "auth-bind-phone",
-      status: "failed",
-      errorCode: error.code || "BIND_FAILED",
-      errorMessage: error.message,
-    });
-
-    sendError(res, 500, "BIND_FAILED", "Bind failed");
   }
 });
 
@@ -1771,23 +1670,12 @@ app.get("/api/auth/me", async (req, res) => {
 app.get("/api/client/state", async (req, res) => {
   const userId = String(req.query.userId || "").trim();
   const deviceId = String(req.query.deviceId || "").trim();
-  const tryRecover = req.query.tryRecover === "1";
 
   try {
-    let state = await clientStateRepository.getState({
+    const state = await clientStateRepository.getState({
       userId,
       deviceId,
     });
-
-    // 如果没找到，但在恢复模式，尝试查找最近的用户
-    if (!state && tryRecover) {
-      console.log("🔄 恢复模式：未找到精确匹配，尝试查找最近用户...");
-      state = await clientStateRepository.tryFindRecentState();
-      
-      if (state) {
-        console.log("✅ 恢复模式：找到最近用户:", state.user && state.user.userId);
-      }
-    }
 
     if (!state) {
       sendError(res, 404, "CLIENT_STATE_NOT_FOUND", "Client state was not found");
@@ -1801,7 +1689,6 @@ app.get("/api/client/state", async (req, res) => {
         userId: state.user && state.user.userId ? state.user.userId : userId,
         deviceId: state.user && state.user.deviceId ? state.user.deviceId : deviceId,
         taskCount: (state.tasks || []).length,
-        tryRecover,
       },
     });
 
@@ -1818,7 +1705,6 @@ app.get("/api/client/state", async (req, res) => {
       meta: {
         userId,
         deviceId,
-        tryRecover,
       },
     });
 
