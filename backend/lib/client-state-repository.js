@@ -98,9 +98,6 @@ function createClientStateRepository(config) {
       nickname: baseUser.nickname || "Toolbox User",
       points: Number.isFinite(Number(baseUser.points)) ? Number(baseUser.points) : 0,
       freeQuota: Number.isFinite(Number(baseUser.freeQuota)) ? Number(baseUser.freeQuota) : 0,
-      memberPlan: String(baseUser.memberPlan || ""),
-      memberExpire: String(baseUser.memberExpire || ""),
-      memberActive: Boolean(baseUser.memberActive),
       userId: String((baseUser.userId || existingUser && existingUser.userId || makeUserId())),
       deviceId: String(baseUser.deviceId || existingUser && existingUser.deviceId || ""),
       authMode: String(baseUser.authMode || existingUser && existingUser.authMode || "guest"),
@@ -262,21 +259,6 @@ function createClientStateRepository(config) {
         console.log("✅ 在 snapshot 中找到，尝试关联用户:", snapshot.userId);
         user = await collections.users.findOne({ userId: snapshot.userId });
         if (user) console.log("✅ 通过 snapshot 关联找到用户");
-      }
-    }
-
-    // 4. 最后尝试：查找最近活跃的用户（作为最后手段，防止数据完全丢失）
-    if (!user) {
-      console.log("⚠️ 未找到精确匹配，尝试查找最近更新的用户...");
-      const recentUsers = await collections.users
-        .find({})
-        .sort({ updatedAt: -1 })
-        .limit(3)
-        .toArray();
-      
-      if (recentUsers.length > 0) {
-        console.log("🔍 找到最近活跃用户:", recentUsers.map(u => ({ userId: u.userId, updatedAt: u.updatedAt })));
-        // 暂时返回第一个（仅用于恢复测试，实际应该更谨慎）
       }
     }
 
@@ -634,50 +616,12 @@ function createClientStateRepository(config) {
     }
   }
 
-  async function tryFindRecentState() {
-    const collections = await getCollections();
-    if (!collections) return null;
-
-    console.log("🔍 查找最近更新的用户...");
-
-    try {
-      // 1. 查找最近更新的用户
-      const recentUsers = await collections.users
-        .find({})
-        .sort({ updatedAt: -1 })
-        .limit(5)
-        .toArray();
-
-      console.log("📋 找到最近用户:", recentUsers.map(u => ({ userId: u.userId, updatedAt: u.updatedAt })));
-
-      if (recentUsers.length === 0) return null;
-
-      // 2. 用找到的第一个用户来获取完整状态
-      for (const user of recentUsers) {
-        try {
-          const state = await findMongoRecord(collections, { userId: user.userId });
-          if (state) {
-            console.log("✅ 成功恢复用户:", user.userId);
-            return state;
-          }
-        } catch (e) {
-          console.warn("⚠️ 恢复用户失败:", user.userId, e);
-        }
-      }
-    } catch (e) {
-      console.error("❌ 查找最近用户失败:", e);
-    }
-
-    return null;
-  }
-
   return {
     getState,
     syncState,
     getToolUsageStats,
     getHealth,
-    tryFindRecentState,
-    getCollections, // 暴露给登录接口使用
+    getCollections,
     close,
   };
 }

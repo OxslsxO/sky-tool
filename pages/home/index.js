@@ -42,7 +42,6 @@ Page({
     toolUsageProvider: "",
     viewMode: "grid",
     selectedCategory: "all",
-    memberExpireText: "",
   },
 
   onLoad() {
@@ -72,7 +71,6 @@ Page({
     }));
 
     const user = getUserState();
-    const memberExpireText = this.formatExpireDate(user.memberExpire);
 
     this.setData({
       displayTools: this.filterTools(this.data.keyword),
@@ -80,7 +78,6 @@ Page({
       bundles,
       dashboard: getTaskDashboard(),
       user,
-      memberExpireText,
     });
   },
 
@@ -188,18 +185,6 @@ Page({
     this.setData({ greeting });
   },
 
-  formatExpireDate(dateStr) {
-    if (!dateStr) return "未开通";
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffDays = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return "已过期";
-    if (diffDays === 0) return "今天";
-    if (diffDays <= 7) return `${diffDays}天后`;
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  },
-
   handleSearchInput(event) {
     const keyword = event.detail.value.trim();
     this.setData({
@@ -256,12 +241,6 @@ Page({
   goTasks() {
     wx.switchTab({
       url: "/pages/tasks/index",
-    });
-  },
-
-  goVip() {
-    wx.switchTab({
-      url: "/pages/vip/index",
     });
   },
 

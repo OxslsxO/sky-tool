@@ -1,11 +1,4 @@
 const STORAGE_KEY = "sky_tools_backend_service";
-const DEFAULT_SERVICE_CONFIG = {
-  //baseUrl: "https://oxslsxo-sky-tool.hf.space",
-  baseUrl: "http://127.0.0.1:3100",
-  //baseUrl: "https://intercounty-distastefully-shanelle.ngrok-free.dev",
-  token: "",
-};
-
 function getMiniProgramEnvVersion() {
   try {
     const accountInfo = wx.getAccountInfoSync ? wx.getAccountInfoSync() : null;
@@ -17,15 +10,27 @@ function getMiniProgramEnvVersion() {
   }
 }
 
+function getDefaultBaseUrl() {
+  const envVersion = getMiniProgramEnvVersion();
+  return envVersion === "develop" || envVersion === "trial"
+    ? "http://127.0.0.1:3100"
+    : "https://oxslsxo-sky-tool.hf.space";
+}
+
 function shouldAllowManualServiceConfig() {
   const envVersion = getMiniProgramEnvVersion();
-  return envVersion === "develop" || envVersion === "trial";
+  if (envVersion === "develop" || envVersion === "trial") {
+    return true;
+  }
+
+  return false;
 }
 
 function getServiceConfig() {
   const stored = wx.getStorageSync(STORAGE_KEY) || {};
   return {
-    ...DEFAULT_SERVICE_CONFIG,
+    baseUrl: getDefaultBaseUrl(),
+    token: "",
     ...stored,
   };
 }

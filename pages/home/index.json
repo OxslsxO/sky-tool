@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "晴空工具箱",
+  "navigationBarTitleText": "万里工具箱",
   "usingComponents": {
     "tool-card": "/components/tool-card/index"
   }

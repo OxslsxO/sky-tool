@@ -1,6 +1,5 @@
-const membership = require("../services/membership");
 const { getUserState, getPointsRecords } = require("./task-store");
-const { memberPlans, pointPackages, redeemCodeSamples } = require("../data/mock");
+const { pointPackages, redeemCodeSamples } = require("../data/mock");
 
 function formatPoints(points) {
   if (points >= 10000) {
@@ -19,39 +18,24 @@ function formatDate(dateString) {
 }
 
 function getMembershipInfo() {
-  const status = membership.getMemberStatus();
   const user = getUserState();
-  const summary = membership.getUsageSummary();
 
   return {
-    active: status.active,
-    expired: status.expired,
-    plan: status.plan,
-    expireDate: status.expireDate,
-    remainingDays: status.remainingDays,
     points: user.points || 0,
-    freeUsage: summary.freeUsage,
   };
 }
 
 function getToolBillingInfo(tool) {
   const preview = require("./task-store").getBillingPreview(tool);
-  const memberInfo = getMembershipInfo();
 
   return {
     preview,
-    memberInfo,
     tool,
   };
 }
 
 function getPricingData() {
   return {
-    memberPlans: memberPlans.map((plan) => ({
-      ...plan,
-      isPopular: plan.recommended,
-      originalPrice: plan.price,
-    })),
     pointPackages: pointPackages.map((pkg) => ({
       ...pkg,
       totalPoints: pkg.points + (pkg.bonusPoints || 0),
@@ -81,9 +65,6 @@ function getPointsHistory() {
 }
 
 function calculateToolCost(tool, count = 1) {
-  if (tool.memberFree) {
-    return { free: true, points: 0, member: true };
-  }
   return { free: false, points: tool.points * count, member: false };
 }
 

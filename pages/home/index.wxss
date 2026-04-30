@@ -368,14 +368,6 @@
   color: #1d5c4b;
 }
 
-.tool-list-member {
-  padding: 4rpx 12rpx;
-  border-radius: 999rpx;
-  background: rgba(214, 106, 77, 0.1);
-  font-size: 20rpx;
-  color: #d66a4d;
-}
-
 .tool-list-desc {
   font-size: 24rpx;
   color: #626761;
@@ -683,11 +675,6 @@
   font-size: 32rpx;
   font-weight: 700;
   color: #1e2d29;
-}
-
-.member-plan {
-  font-size: 24rpx;
-  color: #1d5c4b;
 }
 
 .member-points-shell {

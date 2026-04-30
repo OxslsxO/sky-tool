@@ -25,22 +25,13 @@
   flex-wrap: wrap;
 }
 
-.tool-card__badge,
-.tool-card__member {
+.tool-card__badge {
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
   font-size: 20rpx;
   line-height: 1.2;
-}
-
-.tool-card__badge {
   background: rgba(29, 92, 75, 0.12);
   color: #1d5c4b;
-}
-
-.tool-card__member {
-  background: rgba(214, 106, 77, 0.12);
-  color: #c66543;
 }
 
 .tool-card__points {

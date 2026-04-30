@@ -4,7 +4,6 @@
     "pages/home/index",
     "pages/category/index",
     "pages/tasks/index",
-    "pages/vip/index",
     "pages/mine/index",
     "pages/workbench/index",
     "pages/service-config/index",
@@ -13,7 +12,7 @@
     "pages/task-detail/index"
   ],
   "window": {
-    "navigationBarTitleText": "晴空工具箱",
+    "navigationBarTitleText": "万里工具箱",
     "navigationBarBackgroundColor": "#f7f3ea",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f7f3ea",
@@ -33,10 +32,6 @@
       {
         "pagePath": "pages/tasks/index",
         "text": "历史"
-      },
-      {
-        "pagePath": "pages/vip/index",
-        "text": "会员"
       },
       {
         "pagePath": "pages/mine/index",

@@ -41,7 +41,6 @@ const tools = [
     categoryId: "image",
     badge: "高频",
     points: 8,
-    memberFree: false,
     accent: "#d66a4d",
     cardBackground: "linear-gradient(135deg, rgba(239, 208, 194, 0.95), rgba(255, 249, 244, 0.96))",
     heroBackground: "linear-gradient(145deg, #efddd2 0%, #f9f4ee 58%, #ffffff 100%)",
@@ -65,7 +64,6 @@ const tools = [
     categoryId: "image",
     badge: "热门",
     points: 4,
-    memberFree: true,
     accent: "#cb8554",
     cardBackground: "linear-gradient(135deg, rgba(245, 226, 194, 0.95), rgba(255, 250, 242, 0.96))",
     heroBackground: "linear-gradient(145deg, #f3e4ca 0%, #f8f4eb 55%, #ffffff 100%)",
@@ -88,7 +86,6 @@ const tools = [
     categoryId: "image",
     badge: "基础",
     points: 3,
-    memberFree: true,
     accent: "#bb7147",
     cardBackground: "linear-gradient(135deg, rgba(246, 232, 220, 0.96), rgba(255, 252, 247, 0.96))",
     heroBackground: "linear-gradient(145deg, #f2e3d6 0%, #faf6f0 55%, #ffffff 100%)",
@@ -111,7 +108,6 @@ const tools = [
     categoryId: "image",
     badge: "设计",
     points: 4,
-    memberFree: true,
     accent: "#9e7f4d",
     cardBackground: "linear-gradient(135deg, rgba(239, 232, 208, 0.95), rgba(255, 251, 242, 0.96))",
     heroBackground: "linear-gradient(145deg, #eee6d2 0%, #faf7ef 55%, #ffffff 100%)",
@@ -134,7 +130,6 @@ const tools = [
     categoryId: "document",
     badge: "常用",
     points: 5,
-    memberFree: true,
     accent: "#2f6a58",
     cardBackground: "linear-gradient(135deg, rgba(212, 229, 221, 0.95), rgba(247, 251, 248, 0.96))",
     heroBackground: "linear-gradient(145deg, #d9e6e0 0%, #f0f7f3 55%, #ffffff 100%)",
@@ -158,7 +153,6 @@ const tools = [
     categoryIds: ["image", "document"],
     badge: "高频",
     points: 5,
-    memberFree: true,
     accent: "#9b59b6",
     cardBackground: "linear-gradient(135deg, rgba(230, 214, 240, 0.95), rgba(255, 255, 255, 0.96))",
     heroBackground: "linear-gradient(145deg, #e6d6f0 0%, #f8f5fc 55%, #ffffff 100%)",
@@ -178,7 +172,6 @@ const tools = [
     categoryId: "document",
     badge: "高频",
     points: 6,
-    memberFree: true,
     accent: "#2d745d",
     cardBackground: "linear-gradient(135deg, rgba(210, 232, 223, 0.95), rgba(250, 252, 250, 0.96))",
     heroBackground: "linear-gradient(145deg, #d5e7df 0%, #f0f7f4 55%, #ffffff 100%)",
@@ -198,7 +191,6 @@ const tools = [
     categoryId: "document",
     badge: "办公",
     points: 5,
-    memberFree: true,
     accent: "#3a7d68",
     cardBackground: "linear-gradient(135deg, rgba(219, 235, 230, 0.95), rgba(250, 253, 251, 0.96))",
     heroBackground: "linear-gradient(145deg, #dcece6 0%, #f4faf7 55%, #ffffff 100%)",
@@ -218,7 +210,6 @@ const tools = [
     categoryId: "document",
     badge: "办公",
     points: 5,
-    memberFree: true,
     accent: "#487462",
     cardBackground: "linear-gradient(135deg, rgba(223, 233, 228, 0.95), rgba(252, 253, 252, 0.96))",
     heroBackground: "linear-gradient(145deg, #dce7e2 0%, #f4f8f6 55%, #ffffff 100%)",
@@ -238,7 +229,6 @@ const tools = [
     categoryId: "document",
     badge: "付费强需",
     points: 9,
-    memberFree: false,
     accent: "#1d5c4b",
     cardBackground: "linear-gradient(135deg, rgba(208, 223, 217, 0.95), rgba(245, 249, 247, 0.96))",
     heroBackground: "linear-gradient(145deg, #d7e3de 0%, #edf5f2 55%, #ffffff 100%)",
@@ -261,7 +251,6 @@ const tools = [
     categoryId: "document",
     badge: "高频",
     points: 8,
-    memberFree: false,
     accent: "#3a7d68",
     cardBackground: "linear-gradient(135deg, rgba(218, 232, 225, 0.95), rgba(248, 252, 250, 0.96))",
     heroBackground: "linear-gradient(145deg, #d8e8e0 0%, #f0f7f3 55%, #ffffff 100%)",
@@ -284,7 +273,6 @@ const tools = [
     categoryId: "image",
     badge: "效率",
     points: 6,
-    memberFree: true,
     accent: "#6e8b74",
     cardBackground: "linear-gradient(135deg, rgba(222, 232, 223, 0.95), rgba(249, 252, 248, 0.96))",
     heroBackground: "linear-gradient(145deg, #dfe9df 0%, #f3f8f1 55%, #ffffff 100%)",
@@ -307,7 +295,6 @@ const tools = [
     categoryId: "utility",
     badge: "轻量",
     points: 2,
-    memberFree: true,
     accent: "#8f6f4f",
     cardBackground: "linear-gradient(135deg, rgba(235, 224, 210, 0.95), rgba(255, 251, 246, 0.96))",
     heroBackground: "linear-gradient(145deg, #ede1d2 0%, #faf6ef 55%, #ffffff 100%)",
@@ -330,7 +317,6 @@ const tools = [
     categoryId: "utility",
     badge: "常开",
     points: 1,
-    memberFree: true,
     accent: "#7a664c",
     cardBackground: "linear-gradient(135deg, rgba(240, 230, 217, 0.95), rgba(255, 252, 248, 0.96))",
     heroBackground: "linear-gradient(145deg, #efe5d8 0%, #fbf8f2 55%, #ffffff 100%)",
@@ -353,7 +339,6 @@ const tools = [
     categoryId: "utility",
     badge: "常用",
     points: 4,
-    memberFree: true,
     accent: "#9e7f4d",
     cardBackground: "linear-gradient(135deg, rgba(239, 232, 208, 0.95), rgba(255, 251, 242, 0.96))",
     heroBackground: "linear-gradient(145deg, #eee6d2 0%, #faf7ef 55%, #ffffff 100%)",
@@ -392,13 +377,6 @@ const featuredBundles = [
 
 const visibleTools = tools.filter((tool) => !hiddenToolIds.includes(tool.id));
 
-const memberPlans = [
-  { id: "trial", name: "体验周卡", price: "0.01", period: "7 天", durationDays: 7, highlight: "低门槛体验高频工具", recommended: false },
-  { id: "month", name: "月度会员", price: "29", period: "30 天", durationDays: 30, highlight: "主推，适合高频使用图片与 PDF 工具", recommended: true },
-  { id: "season", name: "季度会员", price: "68", period: "90 天", durationDays: 90, highlight: "单日成本更低，适合上班族和学生季节性需求", recommended: false },
-  { id: "year", name: "年度会员", price: "198", period: "365 天", durationDays: 365, highlight: "年度超值套餐，适合长期高频使用", recommended: false },
-];
-
 const pointPackages = [
   { id: "p-50", points: 50, price: "8", bonus: "送 5 积分", bonusPoints: 5 },
   { id: "p-100", points: 100, price: "15", bonus: "送 15 积分", bonusPoints: 15 },
@@ -408,15 +386,12 @@ const pointPackages = [
 
 const redeemCodeSamples = [
   { code: "WELCOME100", description: "新用户专属100积分礼包", type: "points", value: 100 },
-  { code: "VIP7DAYS", description: "7天会员免费体验", type: "member", value: 7 },
   { code: "POINTS50", description: "50积分奖励兑换码", type: "points", value: 50 },
-  { code: "FREETRIAL", description: "3天免费会员体验", type: "member", value: 3 },
 ];
 
 const heroStats = [
   { label: "首发工具", value: "12" },
   { label: "统一任务流", value: "1 套" },
-  { label: "会员体系", value: "已预留" },
 ];
 
 function getCategoryById(categoryId) {
@@ -445,7 +420,6 @@ module.exports = {
   categories,
   tools: visibleTools,
   featuredBundles,
-  memberPlans,
   pointPackages,
   redeemCodeSamples,
   heroStats,

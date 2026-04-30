@@ -112,7 +112,6 @@
               <text class="tool-list-name">{{item.name}}</text>
               <view class="tool-list-badges">
                 <text class="tool-list-badge" wx:if="{{item.badge}}">{{item.badge}}</text>
-                <text class="tool-list-member" wx:if="{{item.memberFree}}">会员</text>
               </view>
             </view>
             <text class="tool-list-desc">{{item.shortDescription}}</text>
@@ -228,7 +227,6 @@
         </view>
         <view class="member-info">
           <text class="member-name">{{user.nickname}}</text>
-          <text class="member-plan">{{user.memberPlan}}</text>
         </view>
         <view class="member-points-shell">
           <text class="member-points-value">{{user.points}}</text>
@@ -243,14 +241,13 @@
         </view>
         <view class="member-stat-divider"></view>
         <view class="member-stat">
-          <text class="member-stat-value">{{memberExpireText}}</text>
-          <text class="member-stat-label">会员到期</text>
+          <text class="member-stat-value">{{taskCount}}</text>
+          <text class="member-stat-label">已完成任务</text>
         </view>
       </view>
 
       <view class="member-actions">
         <view class="btn-ghost member-button" bindtap="goTasks">任务中心</view>
-        <view class="btn-secondary member-button" bindtap="goVip">升级会员</view>
       </view>
     </view>
   </view>

@@ -1,4 +1,4 @@
-﻿﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
@@ -1338,21 +1338,87 @@ app.post("/api/files/upload", async (req, res) => {
   }
 });
 
-const pendingOrders = new Map();
+const PENDING_ORDERS_PATH = path.join(path.dirname(config.clientStatePath), "pending-orders.json");
+const PENDING_ORDER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-// 商品/会员套餐配置
+function normalizePendingOrderEntries(entries) {
+  const now = Date.now();
+  return (entries || []).filter((entry) => {
+    if (!entry || !entry.orderId) {
+      return false;
+    }
+
+    const updatedAt = Number(entry.updatedAt || entry.paidAt || entry.createdAt || 0);
+    if (!updatedAt) {
+      return false;
+    }
+
+    return now - updatedAt <= PENDING_ORDER_TTL_MS;
+  });
+}
+
+function loadPendingOrdersFromDisk() {
+  if (!fs.existsSync(PENDING_ORDERS_PATH)) {
+    return new Map();
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PENDING_ORDERS_PATH, "utf8"));
+    const map = new Map();
+    normalizePendingOrderEntries(parsed.orders).forEach((entry) => {
+      const { orderId, ...order } = entry;
+      map.set(orderId, order);
+    });
+    return map;
+  } catch (error) {
+    console.error("[payment] failed to load pending orders:", error && error.message ? error.message : error);
+    return new Map();
+  }
+}
+
+function savePendingOrdersToDisk(orderMap) {
+  try {
+    const orders = normalizePendingOrderEntries(
+      Array.from(orderMap.entries()).map(([orderId, order]) => ({
+        orderId,
+        ...order,
+      }))
+    );
+    fs.writeFileSync(
+      PENDING_ORDERS_PATH,
+      JSON.stringify({ orders }, null, 2),
+      "utf8"
+    );
+  } catch (error) {
+    console.error("[payment] failed to persist pending orders:", error && error.message ? error.message : error);
+  }
+}
+
+const pendingOrders = loadPendingOrdersFromDisk();
+
+// 积分套餐配置和单次工具使用配置
 const PRODUCTS = {
-  member: {
-    trial: { name: "体验周卡", price: 990, durationDays: 7 },
-    month: { name: "月度会员", price: 2900, durationDays: 30 },
-    season: { name: "季度会员", price: 6800, durationDays: 90 },
-    year: { name: "年度会员", price: 19800, durationDays: 365 },
-  },
   points: {
-    "p-50": { name: "50积分", price: 800, points: 50, bonusPoints: 5 },
-    "p-100": { name: "100积分", price: 1500, points: 100, bonusPoints: 15 },
-    "p-200": { name: "200积分", price: 2800, points: 200, bonusPoints: 40 },
-    "p-500": { name: "500积分", price: 6800, points: 500, bonusPoints: 120 },
+    "p-50": { name: "50积分", price: 500, points: 50, bonusPoints: 10 },
+    "p-200": { name: "200积分", price: 1800, points: 200, bonusPoints: 50 },
+    "p-500": { name: "500积分", price: 4000, points: 500, bonusPoints: 150 },
+  },
+  tool: {
+    "photo-id": { name: "证件照制作", price: 80, points: 8 },
+    "image-compress": { name: "图片压缩", price: 40, points: 4 },
+    "image-convert": { name: "图片格式转换", price: 30, points: 3 },
+    "resize-crop": { name: "图片改尺寸", price: 40, points: 4 },
+    "image-to-pdf": { name: "图片转PDF", price: 50, points: 5 },
+    "universal-compress": { name: "万能压缩", price: 50, points: 5 },
+    "pdf-compress": { name: "PDF压缩", price: 60, points: 6 },
+    "pdf-merge": { name: "PDF合并", price: 50, points: 5 },
+    "pdf-split": { name: "PDF拆分", price: 50, points: 5 },
+    "office-to-pdf": { name: "Office转PDF", price: 90, points: 9 },
+    "pdf-to-word": { name: "PDF转Word", price: 80, points: 8 },
+    "ocr-text": { name: "OCR文字识别", price: 60, points: 6 },
+    "qr-maker": { name: "二维码生成", price: 20, points: 2 },
+    "unit-convert": { name: "单位换算", price: 10, points: 1 },
+    "audio-convert": { name: "音视频格式转换", price: 40, points: 4 },
   },
 };
 
@@ -1366,9 +1432,9 @@ app.post("/api/pay/create", async (req, res) => {
     return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
   }
 
-  const isRealOpenid = openid && typeof openid === 'string' && openid.startsWith('o');
-  if (!userId || !isRealOpenid) {
-    console.warn(`[支付] 非真实微信openid: ${openid}，回退到模拟支付`);
+  if (!userId || !openid) {
+    console.warn(`[支付] 缺少 userId 或 openid: userId=${userId}, openid=${openid}`);
+    return res.status(400).json({ error: "MISSING_USER_ID", message: "缺少 userId 或 openid" });
   }
 
   const orderId = `ORD-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -1383,11 +1449,11 @@ app.post("/api/pay/create", async (req, res) => {
 
   let payment = null;
 
-  if (wechatPay && isRealOpenid) {
+  if (wechatPay) {
     try {
       console.log(`[支付] 尝试使用微信支付创建订单 ${orderId}`);
       
-      const notifyUrl = `${process.env.PUBLIC_BASE_URL || "https://OxslsxO-sky-tool.hf.space"}/api/pay/notify`;
+      const notifyUrl = `${process.env.PUBLIC_BASE_URL || "https://oxslsxo-sky-tool.hf.space"}/api/pay/notify`;
       
       const params = {
         appid: process.env.WECHAT_APPID,
@@ -1447,7 +1513,9 @@ app.post("/api/pay/create", async (req, res) => {
     productName: product.name,
     status: "pending",
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   });
+  savePendingOrdersToDisk(pendingOrders);
 
   console.log(`[支付] 返回订单: orderId=${orderId}`);
   res.json({ orderId, payment });
@@ -1474,9 +1542,14 @@ app.post("/api/pay/verify", async (req, res) => {
         order.status = "paid";
         order.paidAt = Date.now();
         order.transactionId = result.data.transaction_id;
+        order.updatedAt = Date.now();
         pendingOrders.set(orderId, order);
+        savePendingOrdersToDisk(pendingOrders);
         console.log(`✅ 订单 ${orderId} 支付成功`);
       } else {
+        order.updatedAt = Date.now();
+        pendingOrders.set(orderId, order);
+        savePendingOrdersToDisk(pendingOrders);
         console.log(`[支付] 订单 ${orderId} 未支付:`, result.data);
       }
     } catch (error) {
@@ -1484,7 +1557,14 @@ app.post("/api/pay/verify", async (req, res) => {
     }
   }
 
-  res.json({ success: true, orderId, status: order.status, type: order.type, itemId: order.itemId });
+  res.json({
+    success: true,
+    orderId,
+    status: order.status,
+    paid: order.status === "paid",
+    type: order.type,
+    itemId: order.itemId,
+  });
 });
 
 app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
@@ -1507,7 +1587,9 @@ app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
         order.status = "paid";
         order.paidAt = Date.now();
         order.transactionId = result.transaction_id;
+        order.updatedAt = Date.now();
         pendingOrders.set(orderId, order);
+        savePendingOrdersToDisk(pendingOrders);
         console.log(`✅ 订单 ${orderId} 支付成功 (transaction_id: ${result.transaction_id})`);
       } else {
         console.warn(`[支付] 收到通知但未找到订单: ${orderId}`);
@@ -1552,9 +1634,6 @@ app.post("/api/auth/login", async (req, res) => {
           avatar: avatarUrl,
           gender: userInfo?.gender || 0,
           points: 0,
-          memberPlan: "",
-          memberActive: false,
-          memberExpire: "",
           phoneNumber: "",
           authMode: "wechat",
           createdAt: now,
@@ -1593,9 +1672,6 @@ app.post("/api/auth/login", async (req, res) => {
         avatarUrl,
         avatar: avatarUrl,
         points: 0,
-        memberPlan: "",
-        memberActive: false,
-        memberExpire: "",
         phoneNumber: "",
         authMode: "wechat",
       };
@@ -1617,9 +1693,6 @@ app.post("/api/auth/login", async (req, res) => {
         avatarUrl: user.avatarUrl || user.avatar || "",
         avatar: user.avatar || user.avatarUrl || "",
         points: user.points || 0,
-        memberPlan: user.memberPlan || "",
-        memberActive: !!user.memberActive,
-        memberExpire: user.memberExpire || "",
         phoneNumber: user.phoneNumber || "",
         authMode: "wechat",
       },
@@ -1655,9 +1728,6 @@ app.get("/api/auth/me", async (req, res) => {
         nickname: state.user.nickname,
         avatar: state.user.avatar,
         points: state.user.points,
-        memberPlan: state.user.memberPlan,
-        memberActive: state.user.memberActive,
-        memberExpire: state.user.memberExpire,
         phoneNumber: state.user.phoneNumber,
       },
     });
@@ -1665,6 +1735,7 @@ app.get("/api/auth/me", async (req, res) => {
     sendError(res, 500, "FETCH_FAILED", "Failed to fetch user");
   }
 });
+
 // ==================== 登录 API 结束 ====================
 
 app.get("/api/client/state", async (req, res) => {
@@ -1779,6 +1850,8 @@ app.post("/api/client/state/sync", async (req, res) => {
     );
   }
 });
+
+
 
 // 获取PDF信息（页数、基本信息）
 app.post("/api/pdf/preview", async (req, res) => {

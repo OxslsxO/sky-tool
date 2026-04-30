@@ -3,24 +3,21 @@ const {
   getRecentTools,
   getUserState,
   listTasks,
-  getMemberStatus,
   updateUserState,
   addPointsRecord,
 } = require("../../utils/task-store");
 
 const REDEEM_CODES = {
   "万里第一帅": {
-    type: "member",
-    name: "体验周卡",
-    durationDays: 7,
-    description: "7天体验周卡",
+    type: "points",
+    points: 100,
+    description: "100积分",
   },
 };
 
 Page({
   data: {
     user: {},
-    memberStatus: {},
     favorites: [],
     recents: [],
     taskCount: 0,
@@ -34,18 +31,16 @@ Page({
 
     if (typeof this.getTabBar === "function" && this.getTabBar()) {
       this.getTabBar().setData({
-        selected: 3,
+        selected: 2,
       });
     }
   },
 
   refreshPage() {
     const user = getUserState();
-    const memberStatus = getMemberStatus();
 
     this.setData({
       user,
-      memberStatus,
       favorites: listFavoriteTools(),
       recents: getRecentTools(),
       taskCount: listTasks().length,
@@ -56,12 +51,6 @@ Page({
     const { id } = event.detail;
     wx.navigateTo({
       url: `/pages/tool-detail/index?id=${id}`,
-    });
-  },
-
-  openVip() {
-    wx.switchTab({
-      url: "/pages/vip/index",
     });
   },
 
@@ -79,9 +68,7 @@ Page({
     });
   },
 
-  preventBubble() {
-    // 阻止事件冒泡，防止点击弹窗内容时关闭
-  },
+  preventBubble() {},
 
   onRedeemInput(e) {
     this.setData({
@@ -106,37 +93,7 @@ Page({
     this.setData({ redeeming: true });
 
     try {
-      if (reward.type === "member") {
-        const user = getUserState();
-        const memberStatus = getMemberStatus();
-        const now = new Date();
-        let baseDate = now;
-
-        if (memberStatus.active && user.memberExpire) {
-          const expireDate = new Date(user.memberExpire);
-          if (expireDate > now) {
-            baseDate = expireDate;
-          }
-        }
-
-        const newExpire = new Date(
-          baseDate.getTime() + reward.durationDays * 24 * 60 * 60 * 1000
-        );
-
-        updateUserState({
-          memberPlan: reward.name,
-          memberActive: true,
-          memberExpire: newExpire.toISOString().split("T")[0],
-        });
-
-        addPointsRecord({
-          type: "member",
-          title: `口令兑换${reward.description}`,
-          change: 0,
-        });
-
-        wx.showToast({ title: `兑换成功！${reward.description}`, icon: "none" });
-      } else if (reward.type === "points") {
+      if (reward.type === "points") {
         const user = getUserState();
         updateUserState({
           points: user.points + reward.points,
@@ -163,4 +120,5 @@ Page({
       this.setData({ redeeming: false });
     }
   },
+
 });

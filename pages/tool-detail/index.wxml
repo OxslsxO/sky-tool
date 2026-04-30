@@ -6,11 +6,6 @@
     </view>
     <view class="hero-right" wx:if="{{userState}}">
       <view class="user-info">
-        <text class="user-info__label">{{userState.memberPlan}}</text>
-        <text class="user-info__value" wx:if="{{userState.memberActive}}">有效期至 {{userState.memberExpire}}</text>
-        <text class="user-info__value" wx:if="{{!userState.memberActive}}">已过期</text>
-      </view>
-      <view class="user-info">
         <text class="user-info__label">积分</text>
         <text class="user-info__value">{{userState.points}}</text>
       </view>
@@ -383,6 +378,45 @@
         <view class="cost-hint" wx:if="{{billing}}">
           <text class="cost-hint__text">{{billing.text}}</text>
         </view>
+        
+        <!-- 支付方式选择（积分足够时可选） -->
+        <view class="payment-options" wx:if="{{billing && billing.mode === 'points'}}">
+          <view 
+            class="payment-option {{selectedPayment === 'points' ? 'selected' : ''}}"
+            bindtap="selectPayment"
+            data-type="points"
+          >
+            <view class="payment-option-icon">🎟️</view>
+            <view class="payment-option-content">
+              <text class="payment-option-title">使用积分</text>
+              <text class="payment-option-desc">消耗 {{tool.points}} 积分（当前 {{userState.points}} 积分）</text>
+            </view>
+            <view class="payment-option-check">
+              <view class="checkmark {{selectedPayment === 'points' ? 'checked' : ''}}"></view>
+            </view>
+          </view>
+          
+          <view 
+            class="payment-option {{selectedPayment === 'direct' ? 'selected' : ''}}"
+            bindtap="selectPayment"
+            data-type="direct"
+          >
+            <view class="payment-option-icon">💳</view>
+            <view class="payment-option-content">
+              <text class="payment-option-title">直接支付</text>
+              <text class="payment-option-desc">支付 ¥{{directPriceDisplay}}（{{tool.points}}积分等值）</text>
+            </view>
+            <view class="payment-option-check">
+              <view class="checkmark {{selectedPayment === 'direct' ? 'checked' : ''}}"></view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 积分不足提示 -->
+        <view class="payment-locked-tip" wx:if="{{billing && billing.mode === 'locked'}}">
+          <text class="payment-locked-text">积分不足，需支付 ¥{{directPriceDisplay}} 后使用</text>
+        </view>
+        
         <view class="action-card__buttons" style="margin-top: 16rpx;">
           <view class="btn-primary action-card__button {{!imageInput || isWorking ? 'action-card__button-disabled' : ''}}" bindtap="handleExecute">
             <view wx:if="{{isWorking}}" class="loading-wrap">
@@ -393,13 +427,13 @@
               </view>
               <text class="loading-text">处理中</text>
             </view>
-            <text wx:else>开始处理</text>
+            <text wx:else>{{primaryActionText}}</text>
           </view>
         </view>
       </view>
 
       <view class="image-preview" wx:if="{{photoIdResultReady}}">
-        <image class="image-preview__image" src="{{photoIdResultPath}}" mode="aspectFit"></image>
+        <image class="result-card__image" src="{{photoIdResultPath}}" mode="aspectFit" style="height: 420rpx;"></image>
         <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{photoIdResultHeadline}}</text>
         <view class="chips-wrap" wx:if="{{photoIdResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
           <text class="chip-static" wx:for="{{photoIdResultMetaLines}}" wx:key="*this">{{item}}</text>
@@ -628,6 +662,45 @@
   <view class="section" wx:if="{{tool.id !== 'photo-id'}}">
     <view class="card action-card">
       <text class="action-card__title">{{actionTitle}}</text>
+      
+      <!-- 支付方式选择（积分足够时可选） -->
+      <view class="payment-options" wx:if="{{billing && billing.mode === 'points'}}">
+        <view 
+          class="payment-option {{selectedPayment === 'points' ? 'selected' : ''}}"
+          bindtap="selectPayment"
+          data-type="points"
+        >
+          <view class="payment-option-icon">🎟️</view>
+          <view class="payment-option-content">
+            <text class="payment-option-title">使用积分</text>
+            <text class="payment-option-desc">消耗 {{tool.points}} 积分（当前 {{userState.points}} 积分）</text>
+          </view>
+          <view class="payment-option-check">
+            <view class="checkmark {{selectedPayment === 'points' ? 'checked' : ''}}"></view>
+          </view>
+        </view>
+        
+        <view 
+          class="payment-option {{selectedPayment === 'direct' ? 'selected' : ''}}"
+          bindtap="selectPayment"
+          data-type="direct"
+        >
+          <view class="payment-option-icon">💳</view>
+          <view class="payment-option-content">
+            <text class="payment-option-title">直接支付</text>
+            <text class="payment-option-desc">支付 ¥{{directPriceDisplay}}（{{tool.points}}积分等值）</text>
+          </view>
+          <view class="payment-option-check">
+            <view class="checkmark {{selectedPayment === 'direct' ? 'checked' : ''}}"></view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 积分不足提示 -->
+      <view class="payment-locked-tip" wx:if="{{billing && billing.mode === 'locked'}}">
+        <text class="payment-locked-text">积分不足，需支付 ¥{{directPriceDisplay}} 后使用</text>
+      </view>
+      
       <text class="action-card__copy">{{billing ? billing.text : ''}}</text>
       <text class="action-card__hint" wx:if="{{actionHint}}">{{actionHint}}</text>
 

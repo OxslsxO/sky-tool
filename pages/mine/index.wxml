@@ -1,5 +1,4 @@
 <view class="mine-container">
-  <!-- 顶部个人信息 -->
   <view class="mine-header">
     <view class="mine-header-bg">
       <view class="mine-header-glow"></view>
@@ -10,61 +9,35 @@
       </view>
       <view class="mine-info">
         <text class="mine-name">{{user.nickname || '万里用户'}}</text>
-        <view class="mine-member-tag" wx:if="{{memberStatus.active}}">
-          <text class="mine-member-icon">✨</text>
-          <text class="mine-member-text">{{memberStatus.plan}} · 剩余{{memberStatus.remainingDays}}天</text>
-        </view>
-        <text class="mine-member-tag mine-member-tag--inactive" wx:else>未开通会员</text>
       </view>
     </view>
 
-    <!-- 统计数据 -->
     <view class="mine-stats">
-      <view class="mine-stat" bindtap="openVip">
+      <view class="mine-stat">
         <text class="mine-stat-value">{{user.points}}</text>
         <text class="mine-stat-label">积分</text>
       </view>
       <view class="mine-stat-divider"></view>
-      <view class="mine-stat" bindtap="openVip">
+      <view class="mine-stat">
         <text class="mine-stat-value">{{taskCount}}</text>
         <text class="mine-stat-label">任务</text>
-      </view>
-      <view class="mine-stat-divider"></view>
-      <view class="mine-stat">
-        <text class="mine-stat-value">{{memberStatus.active ? memberStatus.remainingDays + '天' : '--'}}</text>
-        <text class="mine-stat-label">会员</text>
       </view>
     </view>
   </view>
 
-  <!-- 功能区 -->
   <view class="mine-actions">
-    <!-- 口令兑换 -->
     <view class="action-card action-card--redeem" bindtap="openRedeemModal">
       <view class="action-card-icon">
         <text>🎁</text>
       </view>
       <view class="action-card-info">
         <text class="action-card-title">口令兑换</text>
-        <text class="action-card-desc">输入口令领取会员或积分</text>
-      </view>
-      <text class="action-card-arrow">›</text>
-    </view>
-
-    <!-- 会员中心 -->
-    <view class="action-card" bindtap="openVip">
-      <view class="action-card-icon">
-        <text>👑</text>
-      </view>
-      <view class="action-card-info">
-        <text class="action-card-title">{{memberStatus.active ? '会员中心' : '开通会员'}}</text>
-        <text class="action-card-desc">{{memberStatus.active ? '管理会员与积分' : '享受全部工具免费使用'}}</text>
+        <text class="action-card-desc">输入口令领取积分</text>
       </view>
       <text class="action-card-arrow">›</text>
     </view>
   </view>
 
-  <!-- 收藏工具 -->
   <view class="mine-section" wx:if="{{favorites.length}}">
     <view class="mine-section-head">
       <text class="mine-section-title">我的收藏</text>
@@ -76,7 +49,6 @@
     </view>
   </view>
 
-  <!-- 最近使用 -->
   <view class="mine-section" wx:if="{{recents.length}}">
     <view class="mine-section-head">
       <text class="mine-section-title">最近使用</text>
@@ -88,7 +60,6 @@
     </view>
   </view>
 
-  <!-- 口令兑换弹窗 -->
   <view class="redeem-overlay" wx:if="{{showRedeemModal}}" catchtap="preventBubble">
     <view class="redeem-modal" catchtap="preventBubble">
       <view class="redeem-modal-close" bindtap="closeRedeemModal">✕</view>

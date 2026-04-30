@@ -13,10 +13,9 @@ COPY --chown=node:node . .
 RUN mkdir -p backend/storage/models backend/storage/outputs backend/storage/temp /home/node/.sky-toolbox-runtime \
   && chown -R node:node /home/node/app /home/node/.sky-toolbox-runtime
 
-RUN cd backend/storage/models \
-  && if [ ! -f u2net_human_seg.onnx ]; then \
-    echo "Downloading u2net_human_seg.onnx..." \
-    && curl -fSL -o u2net_human_seg.onnx "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx" \
+RUN if [ ! -f backend/storage/models/u2net_human_seg.onnx ]; then \
+    echo "Downloading backend/storage/models/u2net_human_seg.onnx..." \
+    && curl -fSL -o backend/storage/models/u2net_human_seg.onnx "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx" \
     || echo "WARN: model download failed, will retry at runtime"; \
   fi
 

@@ -2,7 +2,6 @@
   <view class="tool-card__top">
     <view class="tool-card__badge-row">
       <text class="tool-card__badge" wx:if="{{tool.badge}}">{{tool.badge}}</text>
-      <text class="tool-card__member" wx:if="{{tool.memberFree}}">会员内</text>
     </view>
     <text class="tool-card__points">{{tool.points}} 积分</text>
   </view>

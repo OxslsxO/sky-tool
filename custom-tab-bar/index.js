@@ -15,12 +15,6 @@ Component({
         activeIcon: "/custom-tab-bar/icons/tasks-active.svg"
       },
       {
-        pagePath: "/pages/vip/index",
-        text: "会员",
-        icon: "/custom-tab-bar/icons/vip.svg",
-        activeIcon: "/custom-tab-bar/icons/vip-active.svg"
-      },
-      {
         pagePath: "/pages/mine/index",
         text: "我的",
         icon: "/custom-tab-bar/icons/mine.svg",

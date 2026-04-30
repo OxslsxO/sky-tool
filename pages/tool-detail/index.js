@@ -24,13 +24,13 @@ const AUDIO_CONVERT_VIDEO_EXTS = ["mp4", "mov", "webm", "avi", "mkv", "wmv", "fl
 const {
   createTask,
   getBillingPreview,
+  commitUsage,
   toggleFavorite,
   isFavoriteTool,
   touchRecentTool,
   listTasks,
   getPhotoIdStats,
   incrementPhotoIdUsage,
-  consumePoints,
   getUserState,
 } = require("../../utils/task-store");
 const { isClientTool } = require("../../utils/tool-engine");
@@ -44,6 +44,7 @@ const {
   downloadRemoteFile,
   uploadLocalFile,
 } = require("../../services/remote-executor");
+const payment = require("../../services/payment");
 
 function chooseImage(count) {
   return new Promise((resolve, reject) => {
@@ -573,6 +574,7 @@ Page({
     showProcessingOverlay: false,
     showMoreColors: false,
     userState: null,
+    selectedPayment: "points", // 默认选择积分支付
   },
 
   onLoad(options) {
@@ -596,6 +598,9 @@ Page({
     // 添加 silent 选项，避免触发同步操作导致页面刷新
     touchRecentTool(tool.id, { silent: true });
 
+    // 计算直接支付的价格显示
+    const directPriceDisplay = (tool.points * 0.1).toFixed(1);
+
     const nextState = {
       tool,
       category: getCategoryById(tool.categoryId),
@@ -609,12 +614,23 @@ Page({
       backendPickerTitle: this.getBackendPickerTitle(tool.id),
       backendPickerButtonText: this.getBackendPickerButtonText(tool.id),
       userState: getUserState(),
+      directPriceDisplay,
       ...viewState,
       ...(photoIdSession || {}),
       ...(photoIdStats || {}),
     };
 
     this.setData(nextState);
+
+    const finalBilling = this.data.billing;
+    if (finalBilling && !finalBilling.usable) {
+      this.setData({
+        primaryActionText: this.getPrimaryActionText({
+          isClientTool: this.data.isClientTool,
+          backendConfigured: this.data.backendConfigured,
+        }),
+      });
+    }
   },
 
   onShow() {
@@ -763,6 +779,17 @@ Page({
   getPrimaryActionText({ isClientTool: clientTool, backendConfigured }) {
     if (this.data.isWorking) {
       return "处理中...";
+    }
+
+    const billing = this.data.billing;
+    if (billing && !billing.usable) {
+      if (clientTool) {
+        return "支付并处理";
+      }
+      if (backendConfigured) {
+        return "支付并提交";
+      }
+      return "支付并处理";
     }
 
     if (clientTool) {
@@ -1118,6 +1145,13 @@ Page({
     });
   },
 
+  selectPayment(e) {
+    const { type } = e.currentTarget.dataset;
+    this.setData({
+      selectedPayment: type,
+    });
+  },
+
   openTask(event) {
     const { id } = event.currentTarget.dataset;
     if (!id) {
@@ -1189,26 +1223,49 @@ Page({
     logger.log("[处理执行] 计费信息:", billing);
 
     if (!billing.usable) {
-      logger.log("[处理执行] 计费不可用", billing.costText);
-      wx.showToast({
-        title: billing.costText,
-        icon: "none",
-      });
-      return;
-    }
+      logger.log("[处理执行] 计费不可用，进入支付流程");
+      try {
+        const payResult = await payment.purchaseTool(this.data.tool);
+        if (!payResult.success) {
+          wx.showToast({
+            title: payResult.message || "支付失败",
+            icon: "none",
+          });
+          return;
+        }
+        this.setData({
+          billing: getBillingPreview(this.data.tool),
+          userState: getUserState(),
+          primaryActionText: this.getPrimaryActionText({
+            isClientTool: this.data.isClientTool,
+            backendConfigured: this.data.backendConfigured,
+          }),
+        });
+      } catch (err) {
+        if (err.cancelled) {
+          return;
+        }
+        wx.showToast({
+          title: err.message || "支付失败，请重试",
+          icon: "none",
+        });
+        return;
+      }
+    } else {
+      const usageResult = commitUsage(this.data.tool);
+      if (!usageResult.usable) {
+        wx.showToast({
+          title: usageResult.text || "资源不足",
+          icon: "none",
+        });
+        return;
+      }
 
-    const consumeResult = consumePoints(this.data.tool);
-    if (!consumeResult.success) {
-      wx.showToast({
-        title: consumeResult.billing.costText,
-        icon: "none",
+      this.setData({
+        billing: getBillingPreview(this.data.tool),
+        userState: getUserState(),
       });
-      return;
     }
-
-    this.setData({
-      billing: getBillingPreview(this.data.tool),
-    });
 
     logger.log("[处理执行] 检查工具类型和合规性");
     const { tool, imageInput } = this.data;
@@ -1552,6 +1609,7 @@ Page({
 
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: "image",
       ...taskOptions,
       remoteUrl: remoteFile ? remoteFile.url : taskOptions.remoteUrl,
@@ -2585,6 +2643,7 @@ Page({
     const file = response.file || {};
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: response.resultType || "document",
       inputName,
       outputName: file.name || tool.name,
@@ -2638,6 +2697,7 @@ Page({
     const resultLines = buildOcrLineItems(response.lines, resultText);
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: "text",
       inputName: getFileName(imageInput.path),
       outputName: "OCR 文本结果",
@@ -3445,6 +3505,7 @@ Page({
     };
     const result = createTask(tool, finalSelections, {
       instant: true,
+      skipUsage: true,
       resultType: "document",
       inputName: backendFiles[0].name,
       outputName,
@@ -3949,7 +4010,6 @@ Page({
 
   // 处理通用文件压缩
   async processFileCompress(file, selections, fileType) {
-    // 调用后端通用文件压缩API
     this.updateProcessingProgress(12, "正在读取文件...");
     const packedFile = await packLocalFile(file);
     packedFile.name = packedFile.name || getFileName(file.path) || "压缩结果";
@@ -4086,6 +4146,7 @@ Page({
     });
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: "image",
       inputName: "二维码内容",
       outputName: "二维码.png",
@@ -4140,6 +4201,7 @@ Page({
     this.updateProcessingProgress(78, "正在保存结果...");
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: "text",
       inputName: `${numberInput} ${fromUnit}`,
       outputName: "换算结果",
@@ -4260,6 +4322,7 @@ Page({
     const totalInputSize = imageInputs.reduce((sum, item) => sum + (item.size || 0), 0);
     const result = createTask(tool, selections, {
       instant: true,
+      skipUsage: true,
       resultType: "document",
       inputName: `${imageInputs.length} 张图片`,
       outputName: "图片合集.pdf",

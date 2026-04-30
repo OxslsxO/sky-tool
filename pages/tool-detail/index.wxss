@@ -355,6 +355,85 @@
   margin-top: 24rpx;
 }
 
+.payment-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.payment-option {
+  display: flex;
+  align-items: center;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.7);
+  border: 2rpx solid #e8ddd3;
+  transition: all 0.2s ease;
+}
+
+.payment-option.selected {
+  border-color: #c4783a;
+  background: rgba(196, 120, 58, 0.08);
+}
+
+.payment-option-disabled {
+  opacity: 0.45;
+}
+
+.payment-option-icon {
+  font-size: 36rpx;
+  margin-right: 20rpx;
+}
+
+.payment-option-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.payment-option-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #3e2723;
+}
+
+.payment-option-desc {
+  font-size: 24rpx;
+  color: #8d6e63;
+}
+
+.payment-option-check {
+  margin-left: 16rpx;
+}
+
+.checkmark {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  border: 3rpx solid #d7ccc8;
+  transition: all 0.2s ease;
+}
+
+.checkmark.checked {
+  background: #c4783a;
+  border-color: #c4783a;
+}
+
+.payment-locked-tip {
+  margin-top: 16rpx;
+  padding: 16rpx 24rpx;
+  background: rgba(255, 152, 0, 0.08);
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 152, 0, 0.2);
+}
+
+.payment-locked-text {
+  font-size: 26rpx;
+  color: #e65100;
+}
+
 .action-card__button {
   flex: 1;
   min-width: 240rpx;

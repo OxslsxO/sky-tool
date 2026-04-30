@@ -23,15 +23,9 @@ function forceUpdateTest() {
   console.log("=== 强制更新测试 ===");
   
   try {
-    const now = new Date();
-    const expireDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    
     const testUser = {
       nickname: "测试用户",
       points: 500,
-      memberPlan: "月度会员",
-      memberActive: true,
-      memberExpire: expireDate.toISOString().split("T")[0],
       deviceId: "test_device_123",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()

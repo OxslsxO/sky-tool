@@ -5,6 +5,7 @@ const {
   formatDateTime,
   bytesToMegabytesValue,
 } = require("./format");
+const { buildLoggedOutUserPatch } = require("./auth-session");
 
 const STORAGE_KEYS = {
   tasks: "sky_tools_tasks",
@@ -15,14 +16,12 @@ const STORAGE_KEYS = {
   photoIdStats: "sky_tools_photo_id_stats",
   pointsRecords: "sky_tools_points_records",
   orders: "sky_tools_orders",
+  dailyFreeUsage: "sky_tools_daily_free",
 };
 
 const DEFAULT_USER = {
   nickname: "微信用户",
-  points: 100,
-  memberPlan: "普通会员",
-  memberExpire: null,
-  memberActive: false,
+  points: 0,
   userId: "",
   deviceId: "",
   authMode: "guest",
@@ -68,6 +67,25 @@ function markSyncDirty() {
 
 function clearSyncDirty() {
   wx.removeStorageSync(STORAGE_KEYS.syncDirty);
+}
+
+function clearUserScopedStorage() {
+  [
+    STORAGE_KEYS.tasks,
+    STORAGE_KEYS.favorites,
+    STORAGE_KEYS.recent,
+    STORAGE_KEYS.photoIdStats,
+    STORAGE_KEYS.pointsRecords,
+    STORAGE_KEYS.orders,
+    STORAGE_KEYS.dailyFreeUsage,
+    STORAGE_KEYS.syncDirty,
+  ].forEach((key) => {
+    try {
+      wx.removeStorageSync(key);
+    } catch (error) {
+      console.error("清理用户本地状态失败:", key, error);
+    }
+  });
 }
 
 function hasDirtySyncState() {
@@ -214,6 +232,20 @@ function updateUserState(patch, options = {}) {
   return next;
 }
 
+function logoutCurrentUser() {
+  const currentUser = normalizeUserState(readStorage(STORAGE_KEYS.user, null));
+  clearUserScopedStorage();
+
+  const loggedOutUser = normalizeUserState({
+    ...buildLoggedOutUserPatch(),
+    deviceId: currentUser.deviceId,
+    createdAt: currentUser.createdAt,
+  });
+
+  writeStorage(STORAGE_KEYS.user, loggedOutUser);
+  return loggedOutUser;
+}
+
 function getFavorites() {
   return readStorage(STORAGE_KEYS.favorites, []);
 }
@@ -335,15 +367,6 @@ function getBillingPreview(tool) {
       };
     }
 
-    if (priority.priority === 'member') {
-      return {
-        usable: true,
-        mode: 'member',
-        text: '本次使用会员权益',
-        costText: '会员免费',
-      };
-    }
-
     if (priority.priority === 'points') {
       const user = getUserState();
       return {
@@ -357,7 +380,7 @@ function getBillingPreview(tool) {
     return {
       usable: false,
       mode: 'locked',
-      text: priority.text || '积分不足，请先开通会员或购买积分包',
+      text: priority.text || '积分不足，请购买积分包',
       costText: '资源不足',
       needUpgrade: true,
     };
@@ -393,13 +416,32 @@ function commitUsage(tool) {
     return { usable: true, mode: result.mode, text: result.text };
   } catch {
     const preview = getBillingPreview(tool);
-    const user = getUserState();
 
     if (!preview.usable) {
       return preview;
     }
 
+    if (preview.mode === 'free') {
+      const dailyUsage = readStorage(STORAGE_KEYS.dailyFreeUsage, {});
+      if (!dailyUsage.tools) {
+        dailyUsage.tools = {};
+      }
+      if (!dailyUsage.tools[tool.id]) {
+        dailyUsage.tools[tool.id] = { count: 0 };
+      }
+      dailyUsage.tools[tool.id].count += 1;
+      dailyUsage.tools[tool.id].lastUsedAt = Date.now();
+      writeStorage(STORAGE_KEYS.dailyFreeUsage, dailyUsage);
+      addPointsRecord({
+        type: 'free',
+        title: `${tool.name}（免费体验）`,
+        change: 0,
+      });
+      return { usable: true, mode: 'free', text: '使用免费次数成功' };
+    }
+
     if (preview.mode === 'points') {
+      const user = getUserState();
       updateUserState({
         points: Math.max(user.points - tool.points, 0),
       });
@@ -408,6 +450,7 @@ function commitUsage(tool) {
         title: tool.name,
         change: -tool.points,
       });
+      return { usable: true, mode: 'points', text: `消耗${tool.points}积分成功` };
     }
 
     return preview;
@@ -915,25 +958,21 @@ function updateOrder(orderId, patch) {
 }
 
 function consumePoints(tool) {
-  const user = getUserState();
   const billing = getBillingPreview(tool);
 
   if (!billing.usable) {
     return { success: false, billing };
   }
 
-  if (billing.mode === "member") {
-    addPointsRecord({
-      type: "member",
-      title: `${tool.name}（会员权益）`,
-      change: 0,
-    });
-    return { success: true, billing, mode: "member" };
-  }
-
   if (billing.mode === "free") {
-    const nextQuota = Math.max(user.freeQuota - 1, 0);
-    updateUserState({ freeQuota: nextQuota });
+    try {
+      const membership = require('../services/membership');
+      membership.consumeFreeQuota(tool.id);
+    } catch {
+      const user = getUserState();
+      const nextQuota = Math.max(user.freeQuota - 1, 0);
+      updateUserState({ freeQuota: nextQuota });
+    }
     addPointsRecord({
       type: "free",
       title: `${tool.name}（免费体验）`,
@@ -943,6 +982,7 @@ function consumePoints(tool) {
   }
 
   if (billing.mode === "points") {
+    const user = getUserState();
     const nextPoints = Math.max(user.points - tool.points, 0);
     updateUserState({ points: nextPoints });
     addPointsRecord({
@@ -954,31 +994,6 @@ function consumePoints(tool) {
   }
 
   return { success: false, billing };
-}
-
-function getMemberStatus() {
-  const user = getUserState();
-  if (!user.memberActive || !user.memberExpire) {
-    return { active: false, expired: true };
-  }
-
-  const expireDate = new Date(user.memberExpire);
-  const now = new Date();
-  const expired = now > expireDate;
-
-  if (expired && user.memberActive) {
-    updateUserState({ memberActive: false });
-  }
-
-  const remainingDays = expired ? 0 : Math.ceil((expireDate - now) / (24 * 60 * 60 * 1000));
-
-  return {
-    active: !expired,
-    expired,
-    plan: user.memberPlan,
-    expireDate: user.memberExpire,
-    remainingDays,
-  };
 }
 
 function applyRemoteState(state) {
@@ -999,9 +1014,6 @@ function applyRemoteState(state) {
         ...currentUser,             // 本地覆盖
         // 积分、会员状态永远优先本地（本地更新触发同步）
         points: currentUser.points ?? snapshot.user.points,
-        memberPlan: currentUser.memberPlan ?? snapshot.user.memberPlan,
-        memberActive: currentUser.memberActive ?? snapshot.user.memberActive,
-        memberExpire: currentUser.memberExpire ?? snapshot.user.memberExpire,
         // 更新时间取最新的
         updatedAt: new Date(Math.max(localTime, remoteTime)).toISOString()
       };
@@ -1050,6 +1062,7 @@ module.exports = {
   seedUserState,
   getUserState,
   updateUserState,
+  logoutCurrentUser,
   getBillingPreview,
   createTask,
   listTasks,
@@ -1074,5 +1087,5 @@ module.exports = {
   addOrder,
   updateOrder,
   consumePoints,
-  getMemberStatus,
+  commitUsage,
 };

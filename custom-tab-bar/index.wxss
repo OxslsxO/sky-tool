@@ -169,19 +169,4 @@
   box-shadow: 0 1rpx 4rpx rgba(200, 120, 60, 0.25);
 }
 
-/* ===== 会员特殊金色 ===== */
-.tab-item:nth-child(3).active .icon-bubble {
-  background: linear-gradient(135deg, #fff8e8 0%, #ffe8b8 100%);
-  box-shadow:
-    0 4rpx 16rpx rgba(200, 160, 60, 0.25),
-    0 2rpx 4rpx rgba(200, 160, 60, 0.1),
-    inset 0 1rpx 2rpx rgba(255, 255, 255, 0.8);
-}
 
-.tab-item:nth-child(3).active .tab-text {
-  color: #c4953a;
-}
-
-.tab-item:nth-child(3).active .tab-line {
-  background: linear-gradient(90deg, #e8c07c, #c4953a);
-}

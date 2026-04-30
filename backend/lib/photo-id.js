@@ -297,7 +297,9 @@ async function getSession(config) {
       
       // 60秒超时（Render 等环境可能需要更长时间）
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 60000);
+        const timeoutId = setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 60000);
+        timeoutId.unref?.();
+        sessionCreatePromise.finally(() => clearTimeout(timeoutId));
       });
 
       const session = await Promise.race([sessionCreatePromise, timeoutPromise]);
@@ -1025,7 +1027,9 @@ async function removeBackgroundWithModel(config, inputBuffer) {
     // 添加推理超时 - 在 Render 等内存受限环境中可能需要更长时间
     const runPromise = session.run({ [getInputShape(session, model).inputName]: tensor });
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Model inference timeout")), 120000);
+      const runTimeoutId = setTimeout(() => reject(new Error("Model inference timeout")), 120000);
+      runTimeoutId.unref?.();
+      runPromise.finally(() => clearTimeout(runTimeoutId));
     });
 
     result = await Promise.race([runPromise, timeoutPromise]);

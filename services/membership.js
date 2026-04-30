@@ -6,13 +6,6 @@ const STORAGE_KEYS = {
   usageLogs: 'sky_tools_usage_logs',
 };
 
-const MEMBERSHIP_PLANS = [
-  { id: 'trial', name: '体验周卡', durationDays: 7, price: '9.9', highlight: '低门槛体验高频工具', recommended: false },
-  { id: 'month', name: '月度会员', durationDays: 30, price: '29', highlight: '主推，适合高频使用图片与 PDF 工具', recommended: true },
-  { id: 'season', name: '季度会员', durationDays: 90, price: '68', highlight: '单日成本更低，适合上班族和学生季节性需求', recommended: false },
-  { id: 'year', name: '年度会员', durationDays: 365, price: '198', highlight: '年度超值套餐，适合长期高频使用', recommended: false },
-];
-
 const POINT_PACKAGES = [
   { id: 'p-50', points: 50, price: '8', bonus: '送 5 积分', bonusPoints: 5 },
   { id: 'p-100', points: 100, price: '15', bonus: '送 15 积分', bonusPoints: 15 },
@@ -27,7 +20,6 @@ const POINTS_SOURCE = {
   TASK_COMPLETE: { type: 'earn', title: '完成任务', points: 3 },
   REDEEM_CODE: { type: 'earn', title: '兑换码兑换', points: 0 },
   PURCHASE: { type: 'earn', title: '购买积分', points: 0 },
-  MEMBER_GIFT: { type: 'earn', title: '会员礼包', points: 50 },
 };
 
 function readStorage(key, fallback) {
@@ -83,78 +75,6 @@ function consumeFreeQuota(toolId) {
   writeStorage(STORAGE_KEYS.dailyFreeUsage, dailyUsage);
 }
 
-function getMemberStatus() {
-  const user = getUserState();
-  if (!user.memberActive || !user.memberExpire) {
-    return {
-      active: false,
-      expired: true,
-      plan: null,
-      expireDate: null,
-      remainingDays: 0,
-    };
-  }
-
-  const expireDate = new Date(user.memberExpire);
-  const now = new Date();
-  const expired = now > expireDate;
-
-  if (expired && user.memberActive) {
-    updateUserState({ memberActive: false });
-  }
-
-  const remainingDays = expired ? 0 : Math.ceil((expireDate - now) / (24 * 60 * 60 * 1000));
-
-  return {
-    active: !expired,
-    expired,
-    plan: user.memberPlan || '普通会员',
-    expireDate: user.memberExpire,
-    remainingDays,
-  };
-}
-
-function activateMembership(planId) {
-  const plan = MEMBERSHIP_PLANS.find((p) => p.id === planId);
-  if (!plan) {
-    return { success: false, message: '无效的会员套餐' };
-  }
-
-  const user = getUserState();
-  const now = new Date();
-  let newExpireDate;
-
-  if (user.memberActive && user.memberExpire) {
-    const currentExpire = new Date(user.memberExpire);
-    newExpireDate = new Date(Math.max(now.getTime(), currentExpire.getTime()) + plan.durationDays * 24 * 60 * 60 * 1000);
-  } else {
-    newExpireDate = new Date(now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
-  }
-
-  updateUserState({
-    memberActive: true,
-    memberPlan: plan.name,
-    memberExpire: newExpireDate.toISOString().split('T')[0],
-  });
-
-  addPointsRecord({
-    type: 'member_activate',
-    title: `开通${plan.name}`,
-    change: 0,
-  });
-
-  if (plan.id === 'month' || plan.id === 'season' || plan.id === 'year') {
-    const bonusPoints = plan.id === 'year' ? 100 : (plan.id === 'season' ? 50 : 20);
-    addPoints(bonusPoints, '开通会员礼包');
-  }
-
-  return {
-    success: true,
-    plan,
-    expireDate: newExpireDate.toISOString().split('T')[0],
-  };
-}
-
 function addPoints(points, reason = '积分充值') {
   if (points <= 0) {
     return { success: false, message: '积分数量必须大于0' };
@@ -196,15 +116,10 @@ function consumePoints(points, reason = '工具使用') {
 }
 
 function getUsagePriority(tool) {
-  const memberStatus = getMemberStatus();
   const hasFreeQuota = canUseFreeQuota(tool.id);
 
   if (hasFreeQuota) {
     return { priority: 'free', text: '使用免费次数', usable: true };
-  }
-
-  if (memberStatus.active && tool.memberFree) {
-    return { priority: 'member', text: '使用会员权益', usable: true };
   }
 
   const user = getUserState();
@@ -212,7 +127,7 @@ function getUsagePriority(tool) {
     return { priority: 'points', text: `消耗${tool.points}积分`, usable: true };
   }
 
-  return { priority: 'none', text: '积分不足，请充值或开通会员', usable: false };
+  return { priority: 'none', text: '积分不足，请充值', usable: false };
 }
 
 function commitToolUsage(tool) {
@@ -232,15 +147,6 @@ function commitToolUsage(tool) {
     return { success: true, mode: 'free', text: '使用免费次数成功' };
   }
 
-  if (priority.priority === 'member') {
-    addPointsRecord({
-      type: 'member',
-      title: `${tool.name}（会员权益）`,
-      change: 0,
-    });
-    return { success: true, mode: 'member', text: '使用会员权益成功' };
-  }
-
   if (priority.priority === 'points') {
     const result = consumePoints(tool.points, tool.name);
     if (!result.success) {
@@ -254,7 +160,6 @@ function commitToolUsage(tool) {
 
 function getUsageSummary() {
   const user = getUserState();
-  const memberStatus = getMemberStatus();
   const dailyUsage = getDailyFreeUsage();
 
   const freeToolsUsed = Object.keys(dailyUsage.tools).filter(
@@ -263,7 +168,6 @@ function getUsageSummary() {
 
   return {
     points: user.points || 0,
-    member: memberStatus,
     freeUsage: {
       date: dailyUsage.date,
       usedCount: freeToolsUsed,
@@ -297,9 +201,7 @@ function validateAndRedeemCode(code) {
   const codeUpper = code.trim().toUpperCase();
   const redeemRules = {
     'WELCOME100': { type: 'points', value: 100, title: '新用户礼包', maxUse: 1 },
-    'VIP7DAYS': { type: 'member', value: 7, title: '7天会员体验', maxUse: 1 },
     'POINTS50': { type: 'points', value: 50, title: '积分奖励', maxUse: 1 },
-    'FREETRIAL': { type: 'member', value: 3, title: '3天免费体验', maxUse: 1 },
   };
 
   const rule = redeemRules[codeUpper];
@@ -326,44 +228,7 @@ function validateAndRedeemCode(code) {
     return result;
   }
 
-  if (rule.type === 'member') {
-    const user = getUserState();
-    const now = new Date();
-    let newExpireDate;
-
-    if (user.memberActive && user.memberExpire) {
-      const currentExpire = new Date(user.memberExpire);
-      newExpireDate = new Date(Math.max(now.getTime(), currentExpire.getTime()) + rule.value * 24 * 60 * 60 * 1000);
-    } else {
-      newExpireDate = new Date(now.getTime() + rule.value * 24 * 60 * 60 * 1000);
-    }
-
-    updateUserState({
-      memberActive: true,
-      memberPlan: rule.title,
-      memberExpire: newExpireDate.toISOString().split('T')[0],
-    });
-
-    addPointsRecord({
-      type: 'member_activate',
-      title: rule.title,
-      change: 0,
-    });
-
-    return {
-      success: true,
-      type: 'member',
-      value: rule.value,
-      title: rule.title,
-      expireDate: newExpireDate.toISOString().split('T')[0],
-    };
-  }
-
   return { success: false, message: '兑换失败' };
-}
-
-function getMembershipPlans() {
-  return MEMBERSHIP_PLANS;
 }
 
 function getPointPackages() {
@@ -375,8 +240,6 @@ function getPointsSourceConfig() {
 }
 
 module.exports = {
-  getMemberStatus,
-  activateMembership,
   addPoints,
   consumePoints,
   getUsagePriority,
@@ -386,7 +249,6 @@ module.exports = {
   consumeFreeQuota,
   addUsageLog,
   validateAndRedeemCode,
-  getMembershipPlans,
   getPointPackages,
   getPointsSourceConfig,
   getTodayKey,
