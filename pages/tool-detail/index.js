@@ -4031,7 +4031,7 @@ Page({
     this.updateProcessingProgress(84, "正在取回结果...");
 
     // 如果没有 file.url，检查是否有 externalUrl 或其他字段
-    let downloadUrl = response.file.externalUrl || response.file.url || response.file.fallbackUrl || "";
+    let downloadUrl = response.file.url || response.file.externalUrl || response.file.fallbackUrl || "";
 
     console.log("尝试下载的URL:", downloadUrl);
 
