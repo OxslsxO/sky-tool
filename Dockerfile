@@ -22,6 +22,7 @@ RUN if [ ! -f backend/storage/models/u2net_human_seg.onnx ]; then \
 ENV PORT=7860
 ENV HOST=0.0.0.0
 ENV STORAGE_ROOT_DIR=/home/node/.sky-toolbox-runtime
+ENV PUBLIC_BASE_URL=https://oxslsxo-sky-tool.hf.space
 EXPOSE 7860
 
 USER node

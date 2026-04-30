@@ -23,7 +23,7 @@ function createStorage(config) {
   }
 
   function buildLocalFileUrl(req, fileName) {
-    return `${getPublicBaseUrl(req)}/files/${encodeURIComponent(fileName)}`;
+    return `${getPublicBaseUrl(req)}/output-files/${encodeURIComponent(fileName)}`;
   }
 
   function buildQiniuFileUrl(req, key, fileName) {
@@ -31,7 +31,7 @@ function createStorage(config) {
       `key=${encodeURIComponent(key)}`,
       fileName ? `fallback=${encodeURIComponent(fileName)}` : "",
     ].filter(Boolean).join("&");
-    return `${getPublicBaseUrl(req)}/files/qiniu?${query}`;
+    return `${getPublicBaseUrl(req)}/output-files/qiniu?${query}`;
   }
 
   function buildQiniuExternalUrl(key) {

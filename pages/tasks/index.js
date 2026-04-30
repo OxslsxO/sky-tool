@@ -1,4 +1,5 @@
 const { listTasks, getTaskDashboard } = require("../../utils/task-store");
+const { ensureWechatLogin } = require("../../utils/page-auth");
 
 Page({
   data: {
@@ -10,6 +11,10 @@ Page({
   },
 
   onShow() {
+    if (!ensureWechatLogin()) {
+      return;
+    }
+
     this.refreshPage();
     this.startTimer();
     

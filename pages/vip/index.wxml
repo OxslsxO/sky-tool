@@ -1,0 +1,75 @@
+<view class="container">
+  <view class="hero vip-hero">
+    <view class="vip-hero__status">
+      <text class="vip-hero__badge vip-hero__badge--inactive">积分</text>
+    </view>
+    <view class="vip-hero__points">
+      <text class="vip-hero__points-value">{{user.points}}</text>
+      <text class="vip-hero__points-label">积分余额</text>
+      <view class="debug-add-btn" bindtap="debugAddPoints">+10000</view>
+    </view>
+  </view>
+
+  <view class="tab-bar">
+    <view class="tab-item {{tab === 'points' ? 'tab-active' : ''}}" data-tab="points" bindtap="switchTab">充值</view>
+    <view class="tab-item {{tab === 'records' ? 'tab-active' : ''}}" data-tab="records" bindtap="switchTab">记录</view>
+  </view>
+
+  <view class="section" wx:if="{{tab === 'points'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Points</text>
+        <text class="section-title">积分充值</text>
+      </view>
+    </view>
+
+    <view class="plan-list">
+      <view
+        class="card points-card {{selectedPackage && selectedPackage.id === item.id ? 'plan-card--selected' : ''}}"
+        wx:for="{{pointPackages}}"
+        wx:key="id"
+        data-id="{{item.id}}"
+        bindtap="selectPackage"
+      >
+        <view class="row space-between">
+          <text class="plan-card__name">{{item.points}} 积分</text>
+          <text class="plan-card__price">¥{{item.price}}</text>
+        </view>
+        <text class="plan-card__copy">{{item.bonus}}</text>
+      </view>
+    </view>
+
+    <view class="card action-card" wx:if="{{selectedPackage}}">
+      <text class="action-card__title">充值{{selectedPackage.points}}积分</text>
+      <text class="action-card__copy">支付 ¥{{selectedPackage.price}}，{{selectedPackage.bonus}}</text>
+      <view class="action-card__buttons">
+        <view class="btn-primary action-card__button {{purchasing ? 'action-card__button-disabled' : ''}}" bindtap="handleBuyPoints">
+          <text>{{purchasing ? '处理中...' : '立即充值'}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section" wx:if="{{tab === 'records'}}">
+    <view class="section-head">
+      <view>
+        <text class="eyebrow">Records</text>
+        <text class="section-title">积分记录</text>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{!pointsRecords.length}}">
+      <text class="records-empty">暂无记录</text>
+    </view>
+
+    <view class="records-list" wx:if="{{pointsRecords.length}}">
+      <view class="record-item" wx:for="{{pointsRecords}}" wx:key="id">
+        <view class="record-item__left">
+          <text class="record-item__title">{{item.title}}</text>
+          <text class="record-item__time">{{item.timeLabel}}</text>
+        </view>
+        <text class="record-item__change {{item.changeClass}}">{{item.changeText}}</text>
+      </view>
+    </view>
+  </view>
+</view>

@@ -4,6 +4,7 @@
     "pages/home/index",
     "pages/category/index",
     "pages/tasks/index",
+    "pages/vip/index",
     "pages/mine/index",
     "pages/workbench/index",
     "pages/service-config/index",
@@ -32,6 +33,10 @@
       {
         "pagePath": "pages/tasks/index",
         "text": "历史"
+      },
+      {
+        "pagePath": "pages/vip/index",
+        "text": "积分"
       },
       {
         "pagePath": "pages/mine/index",

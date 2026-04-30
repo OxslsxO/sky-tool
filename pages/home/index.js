@@ -1,6 +1,7 @@
 const { tools, featuredBundles, categories, getToolsByIds } = require("../../data/mock");
 const { getRecentTools, getTaskDashboard, getUserState, getRawTasks } = require("../../utils/task-store");
 const { fetchToolUsageStats } = require("../../services/tool-usage");
+const { ensureWechatLogin } = require("../../utils/page-auth");
 
 const TOOL_ICONS = {
   "photo-id": "/icons/photo-id.svg",
@@ -51,6 +52,10 @@ Page({
   },
 
   onShow() {
+    if (!ensureWechatLogin()) {
+      return;
+    }
+
     this.refreshPage();
     this.refreshToolUsageStats();
     this.updateGreeting();

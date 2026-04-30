@@ -7,10 +7,10 @@ const STORAGE_KEYS = {
 };
 
 const POINT_PACKAGES = [
-  { id: 'p-50', points: 50, price: '8', bonus: '送 5 积分', bonusPoints: 5 },
-  { id: 'p-100', points: 100, price: '15', bonus: '送 15 积分', bonusPoints: 15 },
-  { id: 'p-200', points: 200, price: '28', bonus: '送 40 积分', bonusPoints: 40 },
-  { id: 'p-500', points: 500, price: '68', bonus: '送 120 积分', bonusPoints: 120 },
+  { id: 'p-10', points: 10, price: '1', bonus: '送 1 积分', bonusPoints: 1 },
+  { id: 'p-20', points: 20, price: '2', bonus: '送 3 积分', bonusPoints: 3 },
+  { id: 'p-30', points: 30, price: '3', bonus: '送 5 积分', bonusPoints: 5 },
+  { id: 'p-50', points: 50, price: '5', bonus: '送 10 积分', bonusPoints: 10 },
 ];
 
 const POINTS_SOURCE = {

@@ -6,6 +6,7 @@ const {
   updateUserState,
   addPointsRecord,
 } = require("../../utils/task-store");
+const { ensureWechatLogin } = require("../../utils/page-auth");
 
 const REDEEM_CODES = {
   "万里第一帅": {
@@ -27,11 +28,15 @@ Page({
   },
 
   onShow() {
+    if (!ensureWechatLogin()) {
+      return;
+    }
+
     this.refreshPage();
 
     if (typeof this.getTabBar === "function" && this.getTabBar()) {
       this.getTabBar().setData({
-        selected: 2,
+        selected: 3,
       });
     }
   },

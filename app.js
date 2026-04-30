@@ -1,4 +1,5 @@
 const { seedUserState, getUserState } = require("./utils/task-store");
+const { isWechatIdentity } = require("./utils/auth-session");
 const { syncCloudState, pullCloudState } = require("./utils/sync-manager");
 
 App({
@@ -8,35 +9,23 @@ App({
 
   async onLaunch() {
     console.log("🚀 应用启动");
-    
-    // 检查登录状态
+
     const user = getUserState();
-    const isLoggedIn = user && user.openid && user.authMode === 'wechat' && user.phoneNumber;
-    
+    const isLoggedIn = isWechatIdentity(user);
+
     if (isLoggedIn) {
-      // 已登录，走正常流程（暂时禁用云端同步，避免恢复旧数据）
       console.log("✅ 已登录，准备数据");
-      
-      // 先尝试从云端拉取数据（暂时禁用）
-      // await pullCloudState().catch(err => {
-      //   console.log("从云端拉取失败，使用本地初始化:", err);
-      // });
-      
-      // 确保用户状态初始化
       seedUserState();
-      
-      // 再进行同步（如有本地修改）（暂时禁用）
-      // syncCloudState().catch(() => {});
-      
-      // 跳转到首页
       setTimeout(() => {
         wx.switchTab({
           url: '/pages/home/index',
         });
       }, 100);
     } else {
-      // 未登录，保留在登录页
-      console.log("❌ 未登录，等待用户登录");
+      console.log("❌ 未登录，跳转登录页");
+      wx.reLaunch({
+        url: '/pages/login/index',
+      });
     }
   },
 });

@@ -1,3 +1,6 @@
+const { isWechatIdentity } = require("../utils/auth-session");
+const { getUserState } = require("../utils/task-store");
+
 Component({
   data: {
     selected: 0,
@@ -13,6 +16,12 @@ Component({
         text: "历史",
         icon: "/custom-tab-bar/icons/tasks.svg",
         activeIcon: "/custom-tab-bar/icons/tasks-active.svg"
+      },
+      {
+        pagePath: "/pages/vip/index",
+        text: "积分",
+        icon: "/custom-tab-bar/icons/vip.svg",
+        activeIcon: "/custom-tab-bar/icons/vip-active.svg"
       },
       {
         pagePath: "/pages/mine/index",
@@ -43,6 +52,11 @@ Component({
     switchTab(e) {
       const data = e.currentTarget.dataset;
       const url = data.path;
+
+      if (!isWechatIdentity(getUserState())) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
 
       wx.switchTab({
         url: url

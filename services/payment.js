@@ -6,6 +6,7 @@ const {
   addOrder,
   updateOrder,
 } = require("../utils/task-store");
+const { isWechatIdentity } = require("../utils/auth-session");
 
 function normalizePaymentPayload(orderInfo) {
   const payload = orderInfo || {};
@@ -69,6 +70,10 @@ function requestPayment(orderInfo) {
 async function createOrder(type, itemId) {
   const user = getUserState();
   console.log("[payment] createOrder called:", { type, itemId, user });
+
+  if (!isWechatIdentity(user)) {
+    throw { code: "NOT_LOGGED_IN", message: "请先登录后再进行支付" };
+  }
 
   try {
     const response = await new Promise((resolve, reject) => {

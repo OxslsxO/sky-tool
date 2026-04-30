@@ -1,4 +1,4 @@
-﻿﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
@@ -1110,7 +1110,7 @@ app.get("/health", async (req, res) => {
   });
 });
 
-app.get("/files/qiniu", async (req, res, next) => {
+app.get("/output-files/qiniu", async (req, res, next) => {
   try {
     const { provider } = storage.getHealth();
     if (provider !== "qiniu") {
@@ -1157,7 +1157,7 @@ app.get("/files/qiniu", async (req, res, next) => {
   }
 });
 
-app.use("/files", express.static(config.outputDir));
+app.use("/output-files", express.static(config.outputDir));
 
 app.use("/api", requireApiToken);
 
