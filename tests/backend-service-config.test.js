@@ -37,6 +37,16 @@ test("release env hides manual service config when production backend is already
   assert.equal(backendTools.shouldAllowManualServiceConfig(), false);
 });
 
+test("release env ignores stale localhost overrides from earlier debugging", () => {
+  const backendTools = loadBackendTools("release", {
+    baseUrl: "http://127.0.0.1:3100",
+    token: "debug-token",
+  });
+
+  assert.equal(backendTools.getServiceConfig().baseUrl, "https://oxslsxo-sky-tool.hf.space");
+  assert.equal(backendTools.getServiceConfig().token, "debug-token");
+});
+
 test("develop env keeps the local backend default for debugging", () => {
   const backendTools = loadBackendTools("develop");
 

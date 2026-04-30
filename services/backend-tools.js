@@ -17,6 +17,15 @@ function getDefaultBaseUrl() {
     : "https://oxslsxo-sky-tool.hf.space";
 }
 
+function isLocalDebugUrl(baseUrl) {
+  const normalized = String(baseUrl || "").trim().toLowerCase();
+  return (
+    normalized.indexOf("127.0.0.1") > -1 ||
+    normalized.indexOf("localhost") > -1 ||
+    normalized.indexOf("0.0.0.0") > -1
+  );
+}
+
 function shouldAllowManualServiceConfig() {
   const envVersion = getMiniProgramEnvVersion();
   if (envVersion === "develop" || envVersion === "trial") {
@@ -27,11 +36,18 @@ function shouldAllowManualServiceConfig() {
 }
 
 function getServiceConfig() {
+  const envVersion = getMiniProgramEnvVersion();
   const stored = wx.getStorageSync(STORAGE_KEY) || {};
+  const sanitizedStored = { ...stored };
+
+  if (envVersion === "release" && isLocalDebugUrl(stored.baseUrl)) {
+    delete sanitizedStored.baseUrl;
+  }
+
   return {
     baseUrl: getDefaultBaseUrl(),
     token: "",
-    ...stored,
+    ...sanitizedStored,
   };
 }
 
