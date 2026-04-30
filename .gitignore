@@ -4,6 +4,7 @@ backend/storage/outputs/
 backend/storage/temp/
 backend/storage/operations.ndjson
 backend/storage/models/
+models/*.onnx
 backend/chi_sim.traineddata
 backend/eng.traineddata
 .env

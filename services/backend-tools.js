@@ -11,10 +11,7 @@ function getMiniProgramEnvVersion() {
 }
 
 function getDefaultBaseUrl() {
-  const envVersion = getMiniProgramEnvVersion();
-  return envVersion === "develop" || envVersion === "trial"
-    ? "http://127.0.0.1:3100"
-    : "https://oxslsxo-sky-tool.hf.space";
+  return "https://oxslsxo-sky-tool.hf.space";
 }
 
 function isLocalDebugUrl(baseUrl) {

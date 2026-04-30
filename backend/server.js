@@ -1,4 +1,4 @@
-﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
