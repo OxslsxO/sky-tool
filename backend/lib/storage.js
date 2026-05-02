@@ -110,31 +110,33 @@ function createStorage(config) {
     const normalizedFileName = fileName || `${Date.now()}.${extension}`;
     const contentType = options.contentType || "application/octet-stream";
 
-    if (qiniuEnabled) {
-      const key = createKey(folder, normalizedFileName);
-      await putQiniuObject({
-        key,
-        body: buffer,
-        contentType,
-      });
-
-      const filePath = path.join(config.outputDir, normalizedFileName);
-      fs.writeFileSync(filePath, buffer);
-
-      return {
-        provider: "qiniu",
-        fileName: normalizedFileName,
-        filePath,
-        key,
-        sizeBytes: buffer.length,
-        url: buildQiniuFileUrl(req, key, normalizedFileName),
-        externalUrl: buildQiniuExternalUrl(key),
-        fallbackUrl: buildLocalFileUrl(req, normalizedFileName),
-      };
-    }
-
     const filePath = path.join(config.outputDir, normalizedFileName);
     fs.writeFileSync(filePath, buffer);
+
+    if (qiniuEnabled) {
+      try {
+        const key = createKey(folder, normalizedFileName);
+        await putQiniuObject({
+          key,
+          body: buffer,
+          contentType,
+        });
+
+        return {
+          provider: "qiniu",
+          fileName: normalizedFileName,
+          filePath,
+          key,
+          sizeBytes: buffer.length,
+          url: buildQiniuFileUrl(req, key, normalizedFileName),
+          externalUrl: buildQiniuExternalUrl(key),
+          fallbackUrl: buildLocalFileUrl(req, normalizedFileName),
+        };
+      } catch (error) {
+        console.warn("[storage] qiniu upload failed, falling back to local storage", error);
+        // 七牛云上传失败，降级到本地存储
+      }
+    }
 
     return {
       provider: "local",
@@ -142,6 +144,7 @@ function createStorage(config) {
       filePath,
       sizeBytes: buffer.length,
       url: buildLocalFileUrl(req, normalizedFileName),
+      fallbackUrl: buildLocalFileUrl(req, normalizedFileName),
     };
   }
 

@@ -4027,33 +4027,37 @@ Page({
       sizeBytes: file.size || 0,
     });
 
-    console.log("压缩API返回结果:", response);
+    console.log("[压缩下载] API返回完整结果:", JSON.stringify(response).substring(0, 500));
     this.updateProcessingProgress(84, "正在取回结果...");
 
-    // 如果没有 file.url，检查是否有 externalUrl 或其他字段
-    let downloadUrl = response.file.url || response.file.externalUrl || response.file.fallbackUrl || "";
+    console.log("[压缩下载] file对象:", JSON.stringify(response.file || {}));
+    console.log("[压缩下载] url:", response.file && response.file.url);
+    console.log("[压缩下载] externalUrl:", response.file && response.file.externalUrl);
+    console.log("[压缩下载] fallbackUrl:", response.file && response.file.fallbackUrl);
 
-    console.log("尝试下载的URL:", downloadUrl);
+    let downloadUrl = response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
+
+    console.log("[压缩下载] 最终选择的下载URL:", downloadUrl);
 
     if (!downloadUrl) {
       throw new Error("下载 URL 为空，请检查后端存储配置");
     }
 
-    // 下载结果文件
     const downloadRes = await new Promise((resolve, reject) => {
       const task = wx.downloadFile({
         url: downloadUrl,
         success: (res) => {
-          console.log("下载响应:", res);
+          console.log("[压缩下载] 下载响应 statusCode:", res.statusCode, "tempFilePath:", res.tempFilePath);
           if (res.statusCode >= 200 && res.statusCode < 300) {
             resolve(res);
           } else {
-            reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+            console.error("[压缩下载] 下载失败, URL:", downloadUrl, "statusCode:", res.statusCode);
+            reject(new Error(`下载失败: HTTP ${res.statusCode}, URL: ${downloadUrl}`));
           }
         },
         fail: (err) => {
-          console.error("下载失败:", err);
-          reject(new Error(`下载失败: ${err.errMsg || err.message}`));
+          console.error("[压缩下载] 下载失败(err):", err, "URL:", downloadUrl);
+          reject(new Error(`下载失败: ${err.errMsg || err.message}, URL: ${downloadUrl}`));
         },
       });
       if (task && task.onProgressUpdate) {
