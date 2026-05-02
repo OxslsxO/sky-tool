@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
-const { createStorage } = require("./storage");
+const { createStorage, buildQiniuDownloadBaseUrls } = require("./storage");
 
 test("loading storage does not print the punycode deprecation warning", () => {
   const projectRoot = path.join(__dirname, "..", "..");
@@ -44,4 +44,21 @@ test("createStorage reports Qiniu mode when Qiniu config is present", () => {
     region: "z2",
     privateBucket: false,
   });
+});
+
+test("buildQiniuDownloadBaseUrls prefers bucket download domains over qiniucs s3 endpoints", () => {
+  const urls = buildQiniuDownloadBaseUrls(
+    "https://sky-tool.s3.cn-south-1.qiniucs.com",
+    [
+      {
+        domain: "tdmk2akje.hn-bkt.clouddn.com",
+      },
+    ]
+  );
+
+  assert.deepEqual(urls, [
+    "http://tdmk2akje.hn-bkt.clouddn.com",
+    "https://tdmk2akje.hn-bkt.clouddn.com",
+    "https://sky-tool.s3.cn-south-1.qiniucs.com",
+  ]);
 });

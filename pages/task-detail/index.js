@@ -234,10 +234,42 @@ Page({
         showMenu: true,
       });
     } catch (error) {
-      wx.showToast({
-        title: "下载或打开失败",
-        icon: "none",
-      });
+      // 检测是否是文件大小问题
+      let errorMsg = "下载或打开失败";
+      let showCopyLink = false;
+      
+      if (error && error.errMsg) {
+        if (error.errMsg.indexOf("exceed") > -1 || error.errMsg.indexOf("max") > -1) {
+          errorMsg = "文件过大，超过小程序限制";
+          showCopyLink = true;
+        }
+      }
+      
+      if (showCopyLink) {
+        wx.showModal({
+          title: "提示",
+          content: errorMsg + "\n是否复制下载链接，用浏览器打开？",
+          confirmText: "复制链接",
+          success: (res) => {
+            if (res.confirm) {
+              wx.setClipboardData({
+                data: url,
+                success: () => {
+                  wx.showToast({
+                    title: "已复制链接",
+                    icon: "none",
+                  });
+                },
+              });
+            }
+          },
+        });
+      } else {
+        wx.showToast({
+          title: errorMsg,
+          icon: "none",
+        });
+      }
     }
   },
 

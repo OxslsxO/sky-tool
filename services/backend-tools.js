@@ -1,4 +1,5 @@
 const STORAGE_KEY = "sky_tools_backend_service";
+const { resolveServiceConfig } = require("./service-config-resolver");
 function getMiniProgramEnvVersion() {
   try {
     const accountInfo = wx.getAccountInfoSync ? wx.getAccountInfoSync() : null;
@@ -15,15 +16,6 @@ function getDefaultBaseUrl() {
   return "http://127.0.0.1:3100";
 }
 
-function isLocalDebugUrl(baseUrl) {
-  const normalized = String(baseUrl || "").trim().toLowerCase();
-  return (
-    normalized.indexOf("127.0.0.1") > -1 ||
-    normalized.indexOf("localhost") > -1 ||
-    normalized.indexOf("0.0.0.0") > -1
-  );
-}
-
 function shouldAllowManualServiceConfig() {
   const envVersion = getMiniProgramEnvVersion();
   if (envVersion === "develop" || envVersion === "trial") {
@@ -34,19 +26,27 @@ function shouldAllowManualServiceConfig() {
 }
 
 function getServiceConfig() {
-  const envVersion = getMiniProgramEnvVersion();
-  const stored = wx.getStorageSync(STORAGE_KEY) || {};
-  const sanitizedStored = { ...stored };
-
-  if (envVersion === "release" && isLocalDebugUrl(stored.baseUrl)) {
-    delete sanitizedStored.baseUrl;
+  try {
+    const envVersion = getMiniProgramEnvVersion();
+    let stored = {};
+    try {
+      stored = wx.getStorageSync(STORAGE_KEY) || {};
+    } catch (e) {
+      console.warn("[backend-tools] Failed to read storage:", e);
+    }
+    
+    return resolveServiceConfig({
+      envVersion,
+      defaultBaseUrl: getDefaultBaseUrl(),
+      storedConfig: stored,
+    });
+  } catch (error) {
+    console.warn("[backend-tools] getServiceConfig failed:", error);
+    return {
+      baseUrl: null,
+      token: "",
+    };
   }
-
-  return {
-    baseUrl: getDefaultBaseUrl(),
-    token: "",
-    ...sanitizedStored,
-  };
 }
 
 function saveServiceConfig(config) {
@@ -64,13 +64,28 @@ function clearServiceConfig() {
 }
 
 function hasBackendService() {
-  const config = getServiceConfig();
-  return !!config.baseUrl;
+  try {
+    const config = getServiceConfig();
+    // 更严格的检查：必须有明确的 baseUrl 配置，且不是默认的本地地址
+    if (!config || !config.baseUrl) {
+      return false;
+    }
+    const baseUrl = config.baseUrl.toLowerCase().trim();
+    // 避免尝试连接不可用的本地地址
+    if (baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost")) {
+      console.warn("[backend-tools] Local backend address detected, treating as unavailable");
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("[backend-tools] hasBackendService check failed:", error);
+    return false;
+  }
 }
 
 function buildServiceUrl(pathname) {
   const config = getServiceConfig();
-  if (!config.baseUrl) {
+  if (!config || !config.baseUrl) {
     throw new Error("BACKEND_NOT_CONFIGURED");
   }
 

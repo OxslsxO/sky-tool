@@ -1,4 +1,4 @@
-﻿﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
@@ -19,6 +19,9 @@ const crypto = require("crypto");
 const { execSync, spawn } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const sharp = require("sharp");
+const { shouldInlineCompressedFile } = require("./lib/file-compress-response");
+const { resolvePublicBaseUrl } = require("./lib/public-base-url");
+const { parseMultipartRequest } = require("./lib/multipart");
 
 let Pay = null;
 try {
@@ -277,7 +280,7 @@ const app = express();
 
 app.set("trust proxy", true);
 app.use(cors());
-app.use(express.json({ limit: "80mb" }));
+app.use(express.json({ limit: "200mb" }));
 app.use((req, res, next) => {
   req.requestId = makeId();
   req.startedAt = Date.now();
@@ -315,7 +318,8 @@ function isTruthyEnv(value) {
 }
 
 function getPublicBaseUrl(req) {
-  return config.publicBaseUrl || `${req.protocol}://${req.get("host")}`;
+  const requestBaseUrl = req ? `${req.protocol}://${req.get("host")}` : "";
+  return resolvePublicBaseUrl(config.publicBaseUrl, requestBaseUrl);
 }
 
 function normalizeExtension(extension) {
@@ -432,7 +436,20 @@ function assertPdfFile(file) {
   }
 }
 
-function buildFileResponse(storedFile, mimeType, label) {
+function buildFileResponse(storedFile, mimeType, label, req) {
+  const baseUrl = getPublicBaseUrl(req);
+  let downloadUrl = "";
+  if (baseUrl) {
+    const params = new URLSearchParams({
+      fileName: storedFile.fileName,
+      provider: storedFile.provider,
+    });
+    if (storedFile.key) {
+      params.append("key", storedFile.key);
+    }
+    downloadUrl = `${baseUrl}/api/tools/download?${params.toString()}`;
+  }
+
   return {
     name: storedFile.fileName,
     url: storedFile.url,
@@ -443,6 +460,7 @@ function buildFileResponse(storedFile, mimeType, label) {
     key: storedFile.key || "",
     externalUrl: storedFile.externalUrl || "",
     fallbackUrl: storedFile.fallbackUrl || "",
+    downloadUrl: downloadUrl,
   };
 }
 
@@ -1177,6 +1195,52 @@ app.get("/api/tools/usage", async (req, res, next) => {
   }
 });
 
+app.get("/api/tools/download", async (req, res, next) => {
+  try {
+    const { fileName, provider, key } = req.query;
+
+    if (!fileName) {
+      sendError(res, 400, "MISSING_FILE_NAME", "缺少文件名参数");
+      return;
+    }
+
+    let fileBuffer = null;
+    let contentType = "application/octet-stream";
+
+    if (provider === "qiniu" && key) {
+      try {
+        const remoteObj = await storage.readRemoteObject(key);
+        if (remoteObj) {
+          fileBuffer = remoteObj.body;
+          contentType = remoteObj.contentType || contentType;
+        }
+      } catch (error) {
+        console.warn("[download] 七牛云读取失败，尝试本地 fallback:", error);
+      }
+    }
+
+    if (!fileBuffer) {
+      const localPath = path.join(config.outputDir, fileName);
+      if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+        fileBuffer = fs.readFileSync(localPath);
+        contentType = getFallbackContentType(fileName);
+      }
+    }
+
+    if (!fileBuffer) {
+      sendError(res, 404, "FILE_NOT_FOUND", "输出文件已不存在或已过期，请重新执行操作");
+      return;
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader("Content-Length", fileBuffer.length);
+    res.end(fileBuffer);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/photo-id", async (req, res) => {
   const { file, size, background, retouch } = req.body || {};
 
@@ -1236,7 +1300,7 @@ app.post("/api/photo-id", async (req, res) => {
       headline: "证件照已生成",
       detail: `已按 ${size || "考试报名"} 输出新底色证件照。`,
       file: {
-        ...buildFileResponse(output, "image/png", "证件照.png"),
+        ...buildFileResponse(output, "image/png", "证件照.png", req),
         inlineBase64: result.buffer.toString("base64"),
       },
       metaLines: [
@@ -1318,7 +1382,7 @@ app.post("/api/files/upload", async (req, res) => {
 
     res.json({
       ok: true,
-      file: buildFileResponse(output, mimeType),
+      file: buildFileResponse(output, mimeType, undefined, req),
       metaLines: [`存储位置 ${output.provider === "qiniu" ? "七牛云" : "本地磁盘"}`],
     });
   } catch (error) {
@@ -1931,7 +1995,7 @@ app.post("/api/pdf/merge", async (req, res) => {
       resultType: "document",
       headline: "PDF 合并已完成",
       detail: `已合并 ${files.length} 份 PDF 文档，可直接下载或继续处理。`,
-      file: buildFileResponse(output, "application/pdf"),
+      file: buildFileResponse(output, "application/pdf", undefined, req),
       metaLines: [
         `输入文件 ${files.length} 份`,
         `合并后 ${totalPages} 页`,
@@ -1994,7 +2058,8 @@ app.post("/api/pdf/split", async (req, res) => {
         buildFileResponse(
           output,
           "application/pdf",
-          `拆分 ${index + 1} - 第 ${pages.map((page) => page + 1).join(", ")} 页`
+          `拆分 ${index + 1} - 第 ${pages.map((page) => page + 1).join(", ")} 页`,
+          req
         )
       );
     }
@@ -2097,7 +2162,7 @@ app.post("/api/pdf/compress", async (req, res) => {
       resultType: "document",
       headline: "PDF 基础优化已完成",
       detail: "已完成基础压缩优化，实际体积变化会受原文档结构影响。",
-      file: buildFileResponse(output, "application/pdf"),
+      file: buildFileResponse(output, "application/pdf", undefined, req),
       metaLines: [
         `压缩模式 ${mode || "默认"}`,
         "当前为基础优化版压缩",
@@ -2131,17 +2196,8 @@ app.post("/api/pdf/compress", async (req, res) => {
   }
 });
 
-app.post("/api/file/compress", async (req, res) => {
-  const file = req.body.file;
-  const mode = req.body.mode || "";
-
-  try {
-    if (!file || !file.base64) {
-      throw new Error("需要上传文件");
-    }
-
-    let ext = normalizeExtension(file.name ? file.name.split('.').pop() : "bin");
-    let fileBytes = decodeBase64File(file);
+async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, mode }) {
+    let ext = normalizeExtension(fileName ? fileName.split('.').pop() : "bin");
 
     let outputBytes = fileBytes;
     let outputExt = ext;
@@ -2215,132 +2271,130 @@ app.post("/api/file/compress", async (req, res) => {
       outputExt = ext;
       compressionNote = "当前图片格式暂不做有损压缩，已保留原文件";
     } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "ncm"].includes(ext)) {
-      // 音频压缩 - 使用ffmpeg
       const ffmpegPath = resolveFfmpegPath();
-      if (ffmpegPath) {
-        try {
-          const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
-          const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
+      if (!ffmpegPath) {
+        const error = new Error("当前服务未检测到 FFmpeg，无法压缩音频文件。请在服务器安装 FFmpeg 或设置 FFMPEG_PATH 环境变量");
+        error.code = "FFMPEG_UNAVAILABLE";
+        throw error;
+      }
+      try {
+        const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
+        const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
 
-          fs.writeFileSync(tempInputPath, fileBytes);
+        fs.writeFileSync(tempInputPath, fileBytes);
 
-          let qualityArgs = [];
-          if (mode === "体积优先") {
-            qualityArgs = ["-b:a", "64k"];
-          } else if (mode === "均衡") {
-            qualityArgs = ["-b:a", "128k"];
-          } else if (mode === "质量优先") {
-            qualityArgs = ["-b:a", "256k"];
-          } else {
-            qualityArgs = ["-b:a", "128k"];
-          }
+        let qualityArgs = [];
+        if (mode === "体积优先") {
+          qualityArgs = ["-b:a", "64k"];
+        } else if (mode === "均衡") {
+          qualityArgs = ["-b:a", "128k"];
+        } else if (mode === "质量优先") {
+          qualityArgs = ["-b:a", "256k"];
+        } else {
+          qualityArgs = ["-b:a", "128k"];
+        }
 
-          const args = [
-            "-y", "-i", tempInputPath,
-            ...qualityArgs,
-            tempOutputPath
-          ];
+        const args = [
+          "-y", "-i", tempInputPath,
+          ...qualityArgs,
+          tempOutputPath
+        ];
 
-          const result = await new Promise((resolve, reject) => {
-            const proc = spawn(ffmpegPath, args);
-            let errorOutput = "";
+        await new Promise((resolve, reject) => {
+          const proc = spawn(ffmpegPath, args);
+          let errorOutput = "";
 
-            proc.stderr.on("data", (data) => {
-              errorOutput += data.toString();
-            });
-
-            proc.on("exit", (code) => {
-              if (code === 0) {
-                resolve(true);
-              } else {
-                reject(new Error(errorOutput));
-              }
-            });
+          proc.stderr.on("data", (data) => {
+            errorOutput += data.toString();
           });
 
-          const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
-          outputBytes = selected.bytes;
-          compressed = selected.compressed;
-          compressionNote = compressed ? "已使用 FFmpeg 重新编码视频" : "视频重新编码后没有变小，已保留原文件";
-          outputExt = ext;
+          proc.on("exit", (code) => {
+            if (code === 0) {
+              resolve(true);
+            } else {
+              reject(new Error(errorOutput));
+            }
+          });
+        });
 
-          try {
-            fs.unlinkSync(tempInputPath);
-            fs.unlinkSync(tempOutputPath);
-          } catch (cleanError) {
-            // 忽略清理错误
-          }
-        } catch (audioError) {
-          console.warn("音频压缩失败，使用原文件:", audioError);
-          outputBytes = fileBytes;
-          compressionNote = "音频压缩失败，已保留原文件";
+        const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
+        outputBytes = selected.bytes;
+        compressed = selected.compressed;
+        compressionNote = compressed ? "已使用 FFmpeg 重新编码音频" : "音频重新编码后没有变小，已保留原文件";
+        outputExt = ext;
+
+        try {
+          fs.unlinkSync(tempInputPath);
+          fs.unlinkSync(tempOutputPath);
+        } catch (cleanError) {
         }
-      } else {
-        compressionNote = "当前服务未检测到 FFmpeg，已保留原文件";
+      } catch (audioError) {
+        console.warn("音频压缩失败，使用原文件:", audioError);
+        outputBytes = fileBytes;
+        compressionNote = "音频压缩失败，已保留原文件";
       }
     } else if (["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"].includes(ext)) {
-      // 视频压缩 - 使用ffmpeg
       const ffmpegPath = resolveFfmpegPath();
-      if (ffmpegPath) {
-        try {
-          const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
-          const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
+      if (!ffmpegPath) {
+        const error = new Error("当前服务未检测到 FFmpeg，无法压缩视频文件。请在服务器安装 FFmpeg 或设置 FFMPEG_PATH 环境变量");
+        error.code = "FFMPEG_UNAVAILABLE";
+        throw error;
+      }
+      try {
+        const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
+        const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
 
-          fs.writeFileSync(tempInputPath, fileBytes);
+        fs.writeFileSync(tempInputPath, fileBytes);
 
-          let crf = "28";
-          if (mode === "体积优先") {
-            crf = "32";
-          } else if (mode === "质量优先") {
-            crf = "23";
-          }
+        let crf = "28";
+        if (mode === "体积优先") {
+          crf = "32";
+        } else if (mode === "质量优先") {
+          crf = "23";
+        }
 
-          const args = [
-            "-y", "-i", tempInputPath,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", crf,
-            "-c:a", "aac",
-            "-b:a", "128k",
-            tempOutputPath
-          ];
+        const args = [
+          "-y", "-i", tempInputPath,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", crf,
+          "-c:a", "aac",
+          "-b:a", "128k",
+          tempOutputPath
+        ];
 
-          await new Promise((resolve, reject) => {
-            const proc = spawn(ffmpegPath, args);
-            let errorOutput = "";
+        await new Promise((resolve, reject) => {
+          const proc = spawn(ffmpegPath, args);
+          let errorOutput = "";
 
-            proc.stderr.on("data", (data) => {
-              errorOutput += data.toString();
-            });
-
-            proc.on("exit", (code) => {
-              if (code === 0) {
-                resolve(true);
-              } else {
-                reject(new Error(errorOutput));
-              }
-            });
+          proc.stderr.on("data", (data) => {
+            errorOutput += data.toString();
           });
 
-          const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
-          outputBytes = selected.bytes;
-          compressed = selected.compressed;
-          compressionNote = compressed ? "已使用 FFmpeg 重新编码音频" : "音频重新编码后没有变小，已保留原文件";
-          outputExt = ext;
+          proc.on("exit", (code) => {
+            if (code === 0) {
+              resolve(true);
+            } else {
+              reject(new Error(errorOutput));
+            }
+          });
+        });
 
-          try {
-            fs.unlinkSync(tempInputPath);
-            fs.unlinkSync(tempOutputPath);
-          } catch (cleanError) {
-            // 忽略清理错误
-          }
-        } catch (videoError) {
-          console.warn("视频压缩失败，使用原文件:", videoError);
-          outputBytes = fileBytes;
-          compressionNote = "视频压缩失败，已保留原文件";
+        const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
+        outputBytes = selected.bytes;
+        compressed = selected.compressed;
+        compressionNote = compressed ? "已使用 FFmpeg 重新编码视频" : "视频重新编码后没有变小，已保留原文件";
+        outputExt = ext;
+
+        try {
+          fs.unlinkSync(tempInputPath);
+          fs.unlinkSync(tempOutputPath);
+        } catch (cleanError) {
         }
-      } else {
-        compressionNote = "当前服务未检测到 FFmpeg，已保留原文件";
+      } catch (videoError) {
+        console.warn("视频压缩失败，使用原文件:", videoError);
+        outputBytes = fileBytes;
+        compressionNote = "视频压缩失败，已保留原文件";
       }
     } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z"].includes(ext)) {
       // Office 文档或压缩包 - 原样返回
@@ -2361,36 +2415,18 @@ app.post("/api/file/compress", async (req, res) => {
       baseName: "compressed",
     });
 
-    await recordOperation(req, {
-      toolId: "file-compress",
-      status: "success",
-      inputFiles: [
-        {
-          name: file.name || "",
-          sizeBytes: file.sizeBytes || 0,
-        },
-      ],
-      outputFiles: [
-        {
-          name: output.fileName,
-          provider: output.provider,
-          sizeBytes: output.sizeBytes,
-        },
-      ],
-      meta: {
-        mode,
-        extension: ext,
-        compressed,
-        savedBytes,
-        savedPercent,
-      },
-    });
+    const responseFile = buildFileResponse(output, "application/octet-stream", undefined, req);
+    if (shouldInlineCompressedFile({
+      fileName: output.fileName,
+      mimeType: outputExt ? getFallbackContentType(`result.${outputExt}`) : "",
+      fileBytes: outputBytes,
+    })) {
+      responseFile.inlineBase64 = outputBytes.toString("base64");
+    }
+    responseFile.name = fileName || responseFile.name;
+    responseFile.label = fileName || responseFile.label;
 
-    const responseFile = buildFileResponse(output, "application/octet-stream");
-    responseFile.name = file.name || responseFile.name;
-    responseFile.label = file.name || responseFile.label;
-
-    res.json({
+    return {
       ok: true,
       resultType: "document",
       headline: compressed ? "文件压缩完成" : "文件体积未变小",
@@ -2407,7 +2443,52 @@ app.post("/api/file/compress", async (req, res) => {
         `文件类型 ${ext}`,
         compressed ? `节省 ${savedPercent}%` : "未产生体积收益",
       ],
+    };
+}
+
+app.post("/api/file/compress", async (req, res) => {
+  const file = req.body.file;
+  const mode = req.body.mode || "";
+
+  try {
+    if (!file || !file.base64) {
+      throw new Error("需要上传文件");
+    }
+
+    const fileBytes = decodeBase64File(file);
+    const response = await buildFileCompressResponse(req, {
+      fileName: file.name || "",
+      sizeBytes: file.sizeBytes || fileBytes.length,
+      fileBytes,
+      mode,
     });
+
+    await recordOperation(req, {
+      toolId: "file-compress",
+      status: "success",
+      inputFiles: [
+        {
+          name: file.name || "",
+          sizeBytes: file.sizeBytes || fileBytes.length,
+        },
+      ],
+      outputFiles: [
+        {
+          name: response.file.name,
+          provider: response.file.provider,
+          sizeBytes: response.file.sizeBytes,
+        },
+      ],
+      meta: {
+        mode,
+        extension: normalizeExtension(file.name ? file.name.split('.').pop() : "bin"),
+        compressed: response.compressed,
+        savedBytes: response.savedBytes,
+        savedPercent: response.savedPercent,
+      },
+    });
+
+    res.json(response);
   } catch (error) {
     await recordOperation(req, {
       toolId: "file-compress",
@@ -2424,6 +2505,84 @@ app.post("/api/file/compress", async (req, res) => {
       errorMessage: error.message || "文件压缩失败",
       meta: {
         mode,
+      },
+    });
+
+    sendError(
+      res,
+      500,
+      error.code || "FILE_COMPRESS_FAILED",
+      error.message || "文件压缩失败"
+    );
+  }
+});
+
+app.post("/api/file/compress-upload", async (req, res) => {
+  let uploadFile = null;
+  let mode = "";
+
+  try {
+    const { fields, files } = await parseMultipartRequest(req, 2 * 1024 * 1024 * 1024);
+    uploadFile = files.file || null;
+    mode = fields.mode || "";
+
+    if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+      const error = new Error("需要上传文件");
+      error.code = "MISSING_FILE_CONTENT";
+      throw error;
+    }
+
+    const response = await buildFileCompressResponse(req, {
+      fileName: uploadFile.fileName || "",
+      sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      fileBytes: uploadFile.buffer,
+      mode,
+    });
+
+    await recordOperation(req, {
+      toolId: "file-compress",
+      status: "success",
+      inputFiles: [
+        {
+          name: uploadFile.fileName || "",
+          sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+        },
+      ],
+      outputFiles: [
+        {
+          name: response.file.name,
+          provider: response.file.provider,
+          sizeBytes: response.file.sizeBytes,
+        },
+      ],
+      meta: {
+        mode,
+        extension: normalizeExtension(uploadFile.fileName ? uploadFile.fileName.split('.').pop() : "bin"),
+        compressed: response.compressed,
+        savedBytes: response.savedBytes,
+        savedPercent: response.savedPercent,
+        uploadMode: "multipart",
+      },
+    });
+
+    res.json(response);
+  } catch (error) {
+    await recordOperation(req, {
+      toolId: "file-compress",
+      status: "failed",
+      inputFiles: uploadFile
+        ? [
+          {
+            name: uploadFile.fileName || "",
+            sizeBytes: uploadFile.sizeBytes || 0,
+          },
+        ]
+        : [],
+      errorCode: error.code || "FILE_COMPRESS_FAILED",
+      errorMessage: error.message || "文件压缩失败",
+      meta: {
+        mode,
+        uploadMode: "multipart",
       },
     });
 
@@ -2777,7 +2936,7 @@ app.post("/api/audio/convert", async (req, res) => {
       resultType: "document",
       headline: "音视频格式转换已完成",
       detail: `已转换为 ${target} 格式，可直接下载使用。`,
-      file: buildFileResponse(output, contentType),
+      file: buildFileResponse(output, contentType, undefined, req),
       metaLines: [
         `原文件 ${originalInputName}`,
         `目标格式 ${target}`,
@@ -2983,7 +3142,7 @@ app.post("/api/office/to-pdf", async (req, res) => {
       resultType: "document",
       headline: "Office 转 PDF 已完成",
       detail: "文档已导出为 PDF，可直接打开或继续压缩、合并。",
-      file: buildFileResponse(output, "application/pdf"),
+      file: buildFileResponse(output, "application/pdf", undefined, req),
       metaLines: [
         `原文件 ${file.name || inputName}`,
         quality ? `清晰度 ${quality}` : "",
@@ -3317,7 +3476,7 @@ app.post("/api/pdf/to-word", async (req, res) => {
       resultType: "document",
       headline: "PDF 转 Word 已完成",
       detail: "已通过 Adobe PDF Services API 生成可编辑 Word 文档，尽量保留原 PDF 版式。",
-      file: buildFileResponse(output, conversion.contentType),
+      file: buildFileResponse(output, conversion.contentType, undefined, req),
       metaLines: [
         `原文件 ${file.name || inputName}`,
         conversion.pages ? `共 ${conversion.pages} 页` : "",
@@ -3383,6 +3542,10 @@ app.use(async (error, req, res, next) => {
 });
 
 const server = http.createServer(app);
+server.timeout = 0;
+server.requestTimeout = 0;
+server.headersTimeout = 0;
+server.keepAliveTimeout = 65000;
 
 let shuttingDown = false;
 

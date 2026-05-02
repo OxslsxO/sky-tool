@@ -1,6 +1,38 @@
 const fs = require("fs");
 const path = require("path");
 const qiniu = require("qiniu");
+const { resolvePublicBaseUrl } = require("./public-base-url");
+
+function buildQiniuDownloadBaseUrls(publicBaseUrl, bucketDomains) {
+  const urls = [];
+  const seen = new Set();
+
+  function push(url) {
+    const normalized = String(url || "").trim().replace(/\/$/, "");
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    urls.push(normalized);
+  }
+
+  const normalizedPublicBaseUrl = String(publicBaseUrl || "").trim().replace(/\/$/, "");
+  const usesQiniuS3Endpoint = /(^https?:\/\/)?[^/]+\.qiniucs\.com$/i.test(normalizedPublicBaseUrl);
+
+  if (usesQiniuS3Endpoint) {
+    (bucketDomains || []).forEach((item) => {
+      const domain = String(item && item.domain ? item.domain : "").trim().replace(/^https?:\/\//i, "");
+      if (!domain) {
+        return;
+      }
+      push(`http://${domain}`);
+      push(`https://${domain}`);
+    });
+  }
+
+  push(normalizedPublicBaseUrl);
+  return urls;
+}
 
 function createStorage(config) {
   const qiniuOptions = config.qiniu || {};
@@ -17,9 +49,11 @@ function createStorage(config) {
   const qiniuConfig = qiniuEnabled ? createQiniuConfig(qiniuOptions) : null;
   const qiniuUploader = qiniuEnabled ? new qiniu.form_up.FormUploader(qiniuConfig) : null;
   const qiniuBucketManager = qiniuEnabled ? new qiniu.rs.BucketManager(qiniuMac, qiniuConfig) : null;
+  let cachedBucketDomains = null;
 
   function getPublicBaseUrl(req) {
-    return config.publicBaseUrl || `${req.protocol}://${req.get("host")}`;
+    const requestBaseUrl = req ? `${req.protocol}://${req.get("host")}` : "";
+    return resolvePublicBaseUrl(config.publicBaseUrl, requestBaseUrl);
   }
 
   function buildLocalFileUrl(req, fileName) {
@@ -55,17 +89,41 @@ function createStorage(config) {
     return sdkConfig;
   }
 
-  function getQiniuDownloadUrl(key) {
+  function getQiniuSignedDownloadUrl(baseUrl, key) {
     const expiresSeconds = Number.isFinite(qiniuOptions.downloadExpiresSeconds)
       ? qiniuOptions.downloadExpiresSeconds
       : 3600;
     const deadline = Math.floor(Date.now() / 1000) + expiresSeconds;
     try {
-      return qiniuBucketManager.privateDownloadUrl(qiniuOptions.publicBaseUrl, key, deadline);
+      return qiniuBucketManager.privateDownloadUrl(baseUrl, key, deadline);
     } catch (error) {
       console.warn("[storage] failed to build qiniu download url", error);
       return "";
     }
+  }
+
+  async function listQiniuBucketDomains() {
+    if (!qiniuEnabled) {
+      return [];
+    }
+    if (cachedBucketDomains) {
+      return cachedBucketDomains;
+    }
+
+    cachedBucketDomains = await new Promise((resolve) => {
+      qiniuBucketManager.listBucketDomains(qiniuOptions.bucket, (error, body) => {
+        if (error || !Array.isArray(body)) {
+          if (error) {
+            console.warn("[storage] failed to list qiniu bucket domains", error);
+          }
+          resolve([]);
+          return;
+        }
+        resolve(body);
+      });
+    });
+
+    return cachedBucketDomains;
   }
 
   async function putQiniuObject({ key, body, contentType }) {
@@ -79,28 +137,38 @@ function createStorage(config) {
   }
 
   async function getQiniuObject(key) {
-    const downloadUrl = getQiniuDownloadUrl(key);
-    if (!downloadUrl) {
-      return null;
+    const bucketDomains = await listQiniuBucketDomains();
+    const baseUrls = buildQiniuDownloadBaseUrls(qiniuOptions.publicBaseUrl, bucketDomains);
+
+    for (const baseUrl of baseUrls) {
+      const downloadUrl = getQiniuSignedDownloadUrl(baseUrl, key);
+      if (!downloadUrl) {
+        continue;
+      }
+
+      let response;
+      try {
+        response = await fetch(downloadUrl);
+      } catch (error) {
+        console.warn("[storage] qiniu download failed, trying next candidate", {
+          baseUrl,
+          message: error && error.message ? error.message : String(error),
+        });
+        continue;
+      }
+
+      if (!response.ok) {
+        continue;
+      }
+
+      return {
+        body: Buffer.from(await response.arrayBuffer()),
+        contentType: response.headers.get("content-type") || "",
+        contentLength: response.headers.get("content-length") || "",
+      };
     }
 
-    let response;
-    try {
-      response = await fetch(downloadUrl);
-    } catch (error) {
-      console.warn("[storage] qiniu download failed, will try local fallback", error);
-      return null;
-    }
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return {
-      body: Buffer.from(await response.arrayBuffer()),
-      contentType: response.headers.get("content-type") || "",
-      contentLength: response.headers.get("content-length") || "",
-    };
+    return null;
   }
 
   async function saveBuffer(req, buffer, options) {
@@ -202,4 +270,5 @@ function createStorage(config) {
 
 module.exports = {
   createStorage,
+  buildQiniuDownloadBaseUrls,
 };

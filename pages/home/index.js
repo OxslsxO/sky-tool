@@ -57,8 +57,12 @@ Page({
     }
 
     this.refreshPage();
-    this.refreshToolUsageStats();
     this.updateGreeting();
+    
+    // 完全禁用工具使用统计网络请求，避免启动时的问题
+    // setTimeout(() => {
+    //   this.refreshToolUsageStats();
+    // }, 1000);
     
     if (typeof this.getTabBar === 'function' && this.getTabBar()) {
       this.getTabBar().setData({
@@ -171,9 +175,7 @@ Page({
       });
     } catch (error) {
       console.warn("[home] failed to fetch tool usage stats", error);
-      this.setData({
-        displayTools: this.filterTools(this.data.keyword),
-      });
+      // 静默失败，不影响页面显示
     }
   },
 

@@ -184,16 +184,12 @@ function setRecentToolIds(toolIds, options = {}) {
 }
 
 function triggerBackgroundSync() {
+  // 完全禁用后台同步，避免启动时的网络请求
+  // 后续如果需要，可以改为手动触发同步
   try {
-    setTimeout(() => {
-      try {
-        require("./sync-manager").syncCloudState().catch(() => {});
-      } catch (error) {
-        // Ignore sync bootstrap failures from local-only usage.
-      }
-    }, 0);
+    console.log("[task-store] Background sync disabled for stability");
   } catch (error) {
-    // Ignore environments without timers.
+    // Ignore errors
   }
 }
 

@@ -19,9 +19,20 @@ function requestService(method, pathname, data) {
           return;
         }
 
-        reject(response.data || new Error("SERVICE_REQUEST_FAILED"));
+        const error = new Error(
+          (response.data && (response.data.message || response.data.error)) ||
+          `SERVICE_REQUEST_FAILED:${response.statusCode}`
+        );
+        error.statusCode = response.statusCode;
+        reject(error);
       },
-      fail: reject,
+      fail: (err) => {
+        const error = new Error(
+          (err && err.errMsg) || "网络请求失败，请检查后端服务是否启动"
+        );
+        error.code = "NETWORK_ERROR";
+        reject(error);
+      },
     });
   });
 }

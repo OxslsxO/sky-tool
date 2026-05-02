@@ -1,28 +1,35 @@
 const { seedUserState, getUserState } = require("./utils/task-store");
 const { isWechatIdentity } = require("./utils/auth-session");
-const { syncCloudState, pullCloudState } = require("./utils/sync-manager");
 
 App({
   globalData: {
     brandName: "万里工具箱",
   },
 
-  async onLaunch() {
+  onLaunch() {
     console.log("🚀 应用启动");
 
-    const user = getUserState();
-    const isLoggedIn = isWechatIdentity(user);
+    try {
+      const user = getUserState();
+      const isLoggedIn = isWechatIdentity(user);
 
-    if (isLoggedIn) {
-      console.log("✅ 已登录，准备数据");
-      seedUserState();
-      setTimeout(() => {
-        wx.switchTab({
-          url: '/pages/home/index',
+      if (isLoggedIn) {
+        console.log("✅ 已登录，准备数据");
+        seedUserState();
+        setTimeout(() => {
+          wx.switchTab({
+            url: '/pages/home/index',
+          });
+        }, 100);
+      } else {
+        console.log("❌ 未登录，跳转登录页");
+        wx.reLaunch({
+          url: '/pages/login/index',
         });
-      }, 100);
-    } else {
-      console.log("❌ 未登录，跳转登录页");
+      }
+    } catch (error) {
+      console.error("❌ 应用启动异常:", error);
+      // 出现异常时也跳转到登录页，确保用户能正常使用
       wx.reLaunch({
         url: '/pages/login/index',
       });

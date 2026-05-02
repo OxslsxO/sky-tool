@@ -13,7 +13,7 @@ function fetchToolUsageStats() {
     });
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     wx.request({
       url: buildServiceUrl("/api/tools/usage"),
       method: "GET",
@@ -24,9 +24,11 @@ function fetchToolUsageStats() {
           return;
         }
 
-        reject(response.data || new Error("TOOL_USAGE_STATS_FAILED"));
+        resolve({ ok: false, stats: [] });
       },
-      fail: reject,
+      fail: () => {
+        resolve({ ok: false, stats: [] });
+      },
     });
   });
 }

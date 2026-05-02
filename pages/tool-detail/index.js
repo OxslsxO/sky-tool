@@ -36,6 +36,7 @@ const {
 const { isClientTool } = require("../../utils/tool-engine");
 const { getGroupUnits, convertValue } = require("../../utils/unit-converter");
 const { formatFileSize } = require("../../utils/format");
+const { getPreferredRemoteFileUrl } = require("../../utils/remote-file");
 const { hasBackendService } = require("../../services/backend-tools");
 const { ensureWechatLogin } = require("../../utils/page-auth");
 const logger = require("../../utils/logger");
@@ -44,6 +45,7 @@ const {
   packLocalFile,
   downloadRemoteFile,
   uploadLocalFile,
+  uploadFileForJson,
 } = require("../../services/remote-executor");
 const payment = require("../../services/payment");
 
@@ -951,7 +953,7 @@ Page({
   // 万能压缩选择文件
   async chooseUniversalCompressFile() {
     wx.showActionSheet({
-      itemList: ['选择图片', '选择文件(PDF/Office)'],
+      itemList: ['选择图片', '选择文件(PDF/Office/音视频)'],
       success: async (res) => {
         try {
           this.ignoreOnShowRefreshUntil = Date.now() + 3000;
@@ -984,7 +986,7 @@ Page({
             });
           } else {
             // 选择文件
-            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
+            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "wav", "flac", "m4a", "aac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "ncm"]);
             Object.assign(nextState, {
               imageInput: null,
               imageInputs: [],
@@ -2012,49 +2014,138 @@ Page({
   },
 
   async saveUniversalCompressResult() {
-    let filePath = this.data.universalCompressResultPath;
+    const filePath = this.data.universalCompressResultPath;
+    const fileType = this.data.universalCompressFileType;
+    const remoteUrl = this.data.universalCompressResultRemoteUrl;
 
     try {
-      if (!filePath && this.data.universalCompressResultRemoteUrl) {
-        const download = await downloadRemoteFile(this.data.universalCompressResultRemoteUrl);
-        if (download.statusCode >= 200 && download.statusCode < 300) {
-          filePath = download.tempFilePath || "";
-        }
-      }
-
-      if (!filePath) {
-        throw new Error("UNIVERSAL_COMPRESS_FILE_MISSING");
-      }
-
-      // 如果是图片，保存到相册
-      if (this.data.universalCompressFileType === "image") {
-        await new Promise((resolve, reject) => {
-          wx.saveImageToPhotosAlbum({
-            filePath,
-            success: resolve,
-            fail: reject,
+      if (filePath) {
+        // 如果是图片，保存到相册
+        if (fileType === "image") {
+          await new Promise((resolve, reject) => {
+            wx.saveImageToPhotosAlbum({
+              filePath,
+              success: resolve,
+              fail: reject,
+            });
           });
-        });
-        wx.showToast({
-          title: "已保存到相册",
-          icon: "none",
+          wx.showToast({
+            title: "已保存到相册",
+            icon: "none",
+          });
+        } else {
+          // 其他文件通过文档方式打开，让用户自己保存
+          await new Promise((resolve, reject) => {
+            wx.openDocument({
+              filePath,
+              showMenu: true,
+              success: resolve,
+              fail: reject,
+            });
+          });
+        }
+      } else if (remoteUrl) {
+        // 如果有远程链接，提供复制链接选项
+        wx.showModal({
+          title: "文件较大",
+          content: "文件较大，建议复制链接后在浏览器中下载保存。",
+          confirmText: "复制链接",
+          cancelText: "直接下载",
+          success: async (res) => {
+            if (res.confirm) {
+              wx.setClipboardData({
+                data: remoteUrl,
+                success: () => {
+                  wx.showToast({
+                    title: "已复制链接",
+                    icon: "none",
+                  });
+                },
+              });
+            } else {
+              try {
+                const download = await downloadRemoteFile(remoteUrl);
+                if (download.statusCode >= 200 && download.statusCode < 300) {
+                  if (fileType === "image") {
+                    await new Promise((resolve, reject) => {
+                      wx.saveImageToPhotosAlbum({
+                        filePath: download.tempFilePath,
+                        success: resolve,
+                        fail: reject,
+                      });
+                    });
+                    wx.showToast({
+                      title: "已保存到相册",
+                      icon: "none",
+                    });
+                  } else {
+                    await new Promise((resolve, reject) => {
+                      wx.openDocument({
+                        filePath: download.tempFilePath,
+                        showMenu: true,
+                        success: resolve,
+                        fail: reject,
+                      });
+                    });
+                  }
+                }
+              } catch (downloadError) {
+                console.error("下载失败:", downloadError);
+                wx.showModal({
+                  title: "下载失败",
+                  content: "文件过大，建议复制链接在浏览器中下载。",
+                  confirmText: "复制链接",
+                  success: (copyRes) => {
+                    if (copyRes.confirm) {
+                      wx.setClipboardData({
+                        data: remoteUrl,
+                        success: () => {
+                          wx.showToast({
+                            title: "已复制链接",
+                            icon: "none",
+                          });
+                        },
+                      });
+                    }
+                  },
+                });
+              }
+            }
+          },
         });
       } else {
-        // 其他文件通过文档方式打开，让用户自己保存
-        await new Promise((resolve, reject) => {
-          wx.openDocument({
-            filePath,
-            showMenu: true,
-            success: resolve,
-            fail: reject,
-          });
+        wx.showToast({
+          title: "文件暂不可用",
+          icon: "none",
         });
       }
     } catch (error) {
-      wx.showToast({
-        title: "保存失败，请重试",
-        icon: "none",
-      });
+      console.error("保存失败:", error);
+      if (remoteUrl) {
+        wx.showModal({
+          title: "保存失败",
+          content: "建议复制链接后在浏览器中下载保存。",
+          confirmText: "复制链接",
+          success: (res) => {
+            if (res.confirm) {
+              wx.setClipboardData({
+                data: remoteUrl,
+                success: () => {
+                  wx.showToast({
+                    title: "已复制链接",
+                    icon: "none",
+                  });
+                },
+              });
+            }
+          },
+        });
+      } else {
+        wx.showToast({
+          title: "保存失败，请重试",
+          icon: "none",
+        });
+      }
     }
   },
 
@@ -2646,6 +2737,7 @@ Page({
   async createRemoteDocumentTask(tool, selections, response, inputName, beforeBytes) {
     this.updateProcessingProgress(88, "正在保存结果...");
     const file = response.file || {};
+    const remoteUrl = getPreferredRemoteFileUrl(file);
     const result = createTask(tool, selections, {
       instant: true,
       skipUsage: true,
@@ -2656,13 +2748,14 @@ Page({
       afterBytes: file.sizeBytes || null,
       resultHeadline: response.headline,
       resultDetail: response.detail,
-      remoteUrl: file.url || "",
-      copyText: file.url || "",
+      outputPath: response.outputPath || "",
+      remoteUrl,
+      copyText: remoteUrl,
       metaLines: response.metaLines || [],
       attachments: (response.files || []).map((item) => ({
         name: item.name,
         label: item.label,
-        url: item.url,
+        url: getPreferredRemoteFileUrl(item),
         sizeBytes: item.sizeBytes,
       })),
     });
@@ -3229,7 +3322,7 @@ Page({
       await this.createRemoteDocumentTask(tool, selections, response, `${backendFiles.length} 份 PDF`, beforeBytes);
 
       const fileResponse = response.file || {};
-      const remoteUrl = fileResponse.url || "";
+      const remoteUrl = fileResponse.downloadUrl || fileResponse.url || fileResponse.fallbackUrl || fileResponse.externalUrl || "";
       let localPath = "";
 
       // 如果有远程URL，先下载到本地
@@ -3382,7 +3475,7 @@ Page({
       const taskResult = await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
 
       const fileResponse = response.file || {};
-      const remoteUrl = fileResponse.url || "";
+      const remoteUrl = fileResponse.downloadUrl || fileResponse.url || fileResponse.fallbackUrl || fileResponse.externalUrl || "";
       let localPath = "";
 
       // 如果有远程URL，先下载到本地
@@ -3502,7 +3595,7 @@ Page({
     this.updateProcessingProgress(88, "正在保存结果...");
     const fileResponse = response.file || {};
     const outputName = fileResponse.name || `${fileName.replace(/\.[^.]+$/, "")}.${target.toLowerCase()}`;
-    const remoteUrl = fileResponse.url || "";
+    const remoteUrl = fileResponse.downloadUrl || fileResponse.url || fileResponse.fallbackUrl || fileResponse.externalUrl || "";
     const resultKind = getAudioConvertResultKind(outputName, target);
     const finalSelections = {
       ...selections,
@@ -3898,7 +3991,7 @@ Page({
         fileType = "pdf";
       } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) {
         fileType = "office";
-      } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "ncm"].includes(ext)) {
+      } else if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) {
         fileType = "audio";
       } else if (["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"].includes(ext)) {
         fileType = "video";
@@ -3922,46 +4015,13 @@ Page({
       let resultRemoteUrl = "";
       let useResult = false;
 
-      // 优先尝试使用通用文件压缩API
-      try {
-        response = await this.processFileCompress(inputFile, selections, fileType);
-        resultPath = response.path;
-        resultRemoteUrl = response.remoteUrl || "";
-        useResult = true;
-        this.updateProcessingProgress(96, "正在生成对比...");
-      } catch (error) {
-        console.error("文件压缩失败:", error);
-        useResult = false;
-        response = {
-          path: inputFile.path,
-          remoteUrl: "",
-          name: inputFile.name || "压缩结果",
-          afterBytes: inputFile.size || 0,
-        };
-        resultPath = inputFile.path;
-
-        // 更友好的错误提示
-        const errorMsg = error.message || error.errMsg || "";
-        if (errorMsg.includes("配置") || errorMsg.includes("BACKEND_NOT_CONFIGURED")) {
-          wx.showModal({
-            title: "需要配置后端服务",
-            content: "压缩功能需要后端服务支持，请先在设置中配置后端服务地址。",
-            showCancel: false,
-          });
-        } else if (errorMsg.includes("下载")) {
-          wx.showModal({
-            title: "下载失败",
-            content: `文件下载失败，请检查网络连接或后端服务。\n错误信息: ${errorMsg}`,
-            showCancel: false,
-          });
-        } else {
-          wx.showModal({
-            title: "压缩失败",
-            content: `处理过程中出错，请重试或检查后端服务。\n错误信息: ${errorMsg}`,
-            showCancel: false,
-          });
-        }
-      }
+      // 调用后端处理
+      this.updateProcessingProgress(18, "正在上传文件...");
+      response = await this.processFileCompress(inputFile, selections, fileType);
+      resultPath = response.path;
+      resultRemoteUrl = response.remoteUrl || "";
+      useResult = true;
+      this.updateProcessingProgress(92, "正在生成对比...");
 
       // 计算压缩比例
       const afterBytes = response.afterBytes || 0;
@@ -3984,7 +4044,7 @@ Page({
         universalCompressFileType: fileType,
       });
 
-      if (useResult) {
+      if (useResult && fileType === "image") {
         await this.createImageTask({
           inputName: fileName,
           outputName: response.name || "压缩结果",
@@ -3996,46 +4056,146 @@ Page({
           resultHeadline: hasSavings ? "压缩成功" : "文件体积未变小",
           resultDetail: hasSavings ? "已按照「" + selections.mode + "」策略完成压缩。" : (response.note || "当前文件未发现可进一步压缩的空间。"),
           metaLines: [],
-        }, { skipToast: true });
+        }, { skipToast: true, skipUpload: true });
+      } else if (useResult) {
+        const taskResult = createTask(tool, selections, {
+          instant: true,
+          skipUsage: true,
+          resultType: "document",
+          inputName: fileName,
+          outputName: response.name || "压缩结果",
+          beforeBytes,
+          afterBytes,
+          outputPath: resultPath,
+          remoteUrl: resultRemoteUrl,
+          copyText: resultRemoteUrl,
+          resultHeadline: hasSavings ? "压缩成功" : "文件体积未变小",
+          resultDetail: hasSavings ? `已按照「${selections.mode}」策略完成压缩。` : (response.note || "当前文件未发现可进一步压缩的空间。"),
+          metaLines: [],
+        });
+        if (taskResult && taskResult.task) {
+          this.navigateWithCreatedTask(taskResult);
+        }
       }
-
-      this.updateProcessingProgress(100, "处理完成");
     } catch (error) {
       console.error("万能压缩失败:", error);
       this.setData({
         isWorking: false,
         showProcessingOverlay: false,
       });
-      wx.showToast({
-        title: "压缩失败，请重试",
-        icon: "none",
-      });
+      const errorMessage = (error && error.message) || "";
+      if (error && error.code === "FILE_TOO_LARGE") {
+        wx.showModal({
+          title: "文件过大",
+          content: errorMessage || "文件超过微信小程序上传限制（100MB），请选择更小的文件",
+          showCancel: false,
+        });
+      } else if (error && error.code === "UPLOAD_TIMEOUT") {
+        wx.showModal({
+          title: "上传超时",
+          content: errorMessage || "文件上传超时，请检查网络后重试",
+          showCancel: false,
+        });
+      } else if (error && error.code === "FFMPEG_UNAVAILABLE") {
+        wx.showModal({
+          title: "暂不支持",
+          content: errorMessage || "当前服务未安装 FFmpeg，无法压缩音视频文件。请联系管理员安装 FFmpeg，或选择其他类型的文件",
+          showCancel: false,
+        });
+      } else {
+        wx.showToast({
+          title: errorMessage || "压缩失败，请重试",
+          icon: "none",
+          duration: 3000,
+        });
+      }
     }
   },
 
   // 处理通用文件压缩
   async processFileCompress(file, selections, fileType) {
-    this.updateProcessingProgress(12, "正在读取文件...");
-    const packedFile = await packLocalFile(file);
-    packedFile.name = packedFile.name || getFileName(file.path) || "压缩结果";
-    const response = await this.requestJsonWithProgress("/api/file/compress", {
-      file: packedFile,
-      mode: selections.mode,
-    }, {
-      target: 82,
-      status: "正在压缩文件...",
-      sizeBytes: file.size || 0,
-    });
+    const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
+    const fileSize = file.size || 0;
+
+    if (fileSize > MAX_UPLOAD_SIZE) {
+      throw {
+        message: `文件过大（${formatFileSize(fileSize)}），微信小程序上传限制为 100MB，请选择更小的文件`,
+        code: "FILE_TOO_LARGE",
+      };
+    }
+
+    this.updateProcessingProgress(8, "正在上传文件...");
+
+    const uploadFileName = file.name || getFileName(file.path) || "压缩结果";
+
+    let response;
+    try {
+      response = await uploadFileForJson(
+        "/api/file/compress-upload",
+        { path: file.path, name: uploadFileName, size: fileSize },
+        { mode: selections.mode },
+        {
+          timeout: 600000,
+          onProgressUpdate: (progress) => {
+            const percent = Number(progress.progress || 0);
+            this.updateProcessingDisplayProgress(8 + Math.round(percent * 0.72), "正在上传文件...");
+          },
+        }
+      );
+    } catch (uploadError) {
+      const errCode = (uploadError && uploadError.code) || "";
+      const errMsg = (uploadError && uploadError.errMsg) || (uploadError && uploadError.message) || "";
+
+      if (errCode === "FFMPEG_UNAVAILABLE") {
+        throw {
+          message: errMsg || "当前服务未安装 FFmpeg，无法压缩音视频文件",
+          code: "FFMPEG_UNAVAILABLE",
+        };
+      }
+      if (errMsg.indexOf("exceed") > -1 || errMsg.indexOf("too large") > -1 || errMsg.indexOf("文件过大") > -1) {
+        throw {
+          message: `文件过大（${formatFileSize(fileSize)}），上传失败，请选择更小的文件`,
+          code: "FILE_TOO_LARGE",
+        };
+      }
+      if (errMsg.indexOf("timeout") > -1 || errMsg.indexOf("超时") > -1) {
+        throw {
+          message: `上传超时，文件较大（${formatFileSize(fileSize)}），请检查网络后重试`,
+          code: "UPLOAD_TIMEOUT",
+        };
+      }
+      throw uploadError;
+    }
 
     console.log("[压缩下载] API返回完整结果:", JSON.stringify(response).substring(0, 500));
-    this.updateProcessingProgress(84, "正在取回结果...");
+    this.updateProcessingProgress(82, "正在压缩文件...");
 
     console.log("[压缩下载] file对象:", JSON.stringify(response.file || {}));
     console.log("[压缩下载] url:", response.file && response.file.url);
     console.log("[压缩下载] externalUrl:", response.file && response.file.externalUrl);
     console.log("[压缩下载] fallbackUrl:", response.file && response.file.fallbackUrl);
 
-    let downloadUrl = response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
+    if (response.file && response.file.inlineBase64) {
+      const inlineFileName = response.file.name || uploadFileName || "compressed-result";
+      const inlineOutputPath = await writeBase64File(
+        `${wx.env.USER_DATA_PATH}/compressed-${Date.now()}-${inlineFileName}`,
+        response.file.inlineBase64
+      );
+      this.updateProcessingProgress(92, "正在整理结果...");
+
+      return {
+        path: inlineOutputPath,
+        remoteUrl: response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "",
+        name: inlineFileName,
+        afterBytes: response.file.sizeBytes || null,
+        compressed: !!response.compressed,
+        savedBytes: response.savedBytes || 0,
+        savedPercent: response.savedPercent || 0,
+        note: response.note || response.detail || "",
+      };
+    }
+
+    let downloadUrl = response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
 
     console.log("[压缩下载] 最终选择的下载URL:", downloadUrl);
 
