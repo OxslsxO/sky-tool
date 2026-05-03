@@ -4,30 +4,63 @@ const MAX_BASE64_FILE_SIZE = 200 * 1024 * 1024;
 
 function readFileBase64(filePath) {
   return new Promise((resolve, reject) => {
-    const fsm = wx.getFileSystemManager();
-    fsm.getFileInfo({
-      filePath,
-      success: (info) => {
-        if (info.size > MAX_BASE64_FILE_SIZE) {
-          reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
-          return;
+    try {
+      const fsm = wx.getFileSystemManager();
+      
+      const readFileDirectly = () => {
+        fsm.readFile({
+          filePath,
+          encoding: "base64",
+          success: (result) => {
+            if (!result || !result.data) {
+              reject(new Error("读取结果为空，请重试"));
+              return;
+            }
+            resolve(result.data);
+          },
+          fail: (readErr) => {
+            const errMsg = (readErr && readErr.errMsg) || "读取文件失败";
+            reject(new Error(`读取文件失败：${errMsg} (文件路径: ${filePath})`));
+          },
+        });
+      };
+
+      try {
+        fsm.getFileInfo({
+          filePath,
+          success: (info) => {
+            if (info.size > MAX_BASE64_FILE_SIZE) {
+              reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
+              return;
+            }
+            readFileDirectly();
+          },
+          fail: () => {
+            readFileDirectly();
+          },
+        });
+      } catch (apiErr) {
+        try {
+          wx.getFileInfo({
+            filePath,
+            success: (info) => {
+              if (info.size > MAX_BASE64_FILE_SIZE) {
+                reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
+                return;
+              }
+              readFileDirectly();
+            },
+            fail: () => {
+              readFileDirectly();
+            },
+          });
+        } catch (fallbackErr) {
+          readFileDirectly();
         }
-        fsm.readFile({
-          filePath,
-          encoding: "base64",
-          success: (result) => resolve(result.data),
-          fail: reject,
-        });
-      },
-      fail: () => {
-        fsm.readFile({
-          filePath,
-          encoding: "base64",
-          success: (result) => resolve(result.data),
-          fail: reject,
-        });
-      },
-    });
+      }
+    } catch (fatalErr) {
+      reject(new Error(`文件处理失败：${(fatalErr && fatalErr.message) || "未知错误"}`));
+    }
   });
 }
 
