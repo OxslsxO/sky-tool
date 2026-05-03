@@ -1,6 +1,6 @@
 const { seedUserState, getUserState } = require("./utils/task-store");
 const { isWechatIdentity } = require("./utils/auth-session");
-const { clearServiceConfig } = require("./services/backend-tools");
+const { clearServiceConfig, hasBackendService } = require("./services/backend-tools");
 
 App({
   globalData: {
@@ -11,7 +11,6 @@ App({
     console.log("🚀 应用启动");
 
     try {
-      // 清除旧的后端配置缓存，确保使用新的远程地址
       clearServiceConfig();
 
       const user = getUserState();
@@ -20,6 +19,11 @@ App({
       if (isLoggedIn) {
         console.log("✅ 已登录，准备数据");
         seedUserState();
+
+        if (hasBackendService() && user.userId) {
+          this._tryCloudRestore(user);
+        }
+
         setTimeout(() => {
           wx.switchTab({
             url: '/pages/home/index',
@@ -33,10 +37,25 @@ App({
       }
     } catch (error) {
       console.error("❌ 应用启动异常:", error);
-      // 出现异常时也跳转到登录页，确保用户能正常使用
       wx.reLaunch({
         url: '/pages/login/index',
       });
     }
+  },
+
+  _tryCloudRestore(user) {
+    const { fetchClientState } = require("./services/state-sync");
+    const { applyRemoteState } = require("./utils/task-store");
+
+    fetchClientState({ userId: user.userId })
+      .then((stateResult) => {
+        if (stateResult && stateResult.ok && stateResult.state) {
+          console.log("✅ 启动时从云端恢复数据，积分:", stateResult.state.user?.points);
+          applyRemoteState(stateResult.state, { cloudFirst: true });
+        }
+      })
+      .catch((err) => {
+        console.warn("⚠️ 启动时云端恢复失败:", err);
+      });
   },
 });

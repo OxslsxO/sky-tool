@@ -183,14 +183,27 @@ function setRecentToolIds(toolIds, options = {}) {
   return next;
 }
 
+let _syncTimer = null;
+
 function triggerBackgroundSync() {
-  // 完全禁用后台同步，避免启动时的网络请求
-  // 后续如果需要，可以改为手动触发同步
-  try {
-    console.log("[task-store] Background sync disabled for stability");
-  } catch (error) {
-    // Ignore errors
+  if (_syncTimer) {
+    clearTimeout(_syncTimer);
   }
+
+  _syncTimer = setTimeout(() => {
+    _syncTimer = null;
+    try {
+      const { syncCloudState } = require("./sync-manager");
+      const { hasBackendService } = require("../services/backend-tools");
+      const user = getUserState();
+      if (!hasBackendService() || !user || !user.userId) {
+        return;
+      }
+      syncCloudState({ force: true }).catch(() => {});
+    } catch {
+      // sync-manager may not be available
+    }
+  }, 3000);
 }
 
 function seedUserState() {
@@ -1039,16 +1052,16 @@ function consumePoints(tool) {
   return { success: false, billing };
 }
 
-function applyRemoteState(state) {
-  console.log("🔄 应用云端状态，智能合并（本地用户数据优先）");
+function applyRemoteState(state, options = {}) {
+  const cloudFirst = !!options.cloudFirst;
+  console.log(cloudFirst ? "🔄 应用云端状态，云端数据优先" : "🔄 应用云端状态，本地数据优先");
   
   const snapshot = state || {};
   const currentUser = readStorage(STORAGE_KEYS.user, null);
+  const localHasRealData = currentUser && (currentUser.points > 0 || currentUser.authMode === 'wechat');
   
-  // 智能合并用户数据：优先本地，缺失字段从云端补充
   if (snapshot.user) {
-    if (currentUser) {
-      // 都存在时：本地优先，但比较更新时间
+    if (currentUser && localHasRealData && !cloudFirst) {
       const localTime = new Date(currentUser.updatedAt || 0).getTime();
       const remoteTime = new Date(snapshot.user.updatedAt || 0).getTime();
       
@@ -1059,15 +1072,24 @@ function applyRemoteState(state) {
         updatedAt: new Date(Math.max(localTime, remoteTime)).toISOString()
       };
       writeStorage(STORAGE_KEYS.user, mergedUser);
-      console.log("✅ 用户数据已合并（本地优先）");
+      console.log("✅ 用户数据已合并（本地优先，积分取最大值）");
     } else {
-      // 本地没有，用云端
-      writeStorage(STORAGE_KEYS.user, snapshot.user);
-      console.log("✅ 首次从云端获取用户数据");
+      const mergedUser = cloudFirst && currentUser
+        ? {
+            ...currentUser,
+            ...snapshot.user,
+            points: Math.max(currentUser.points || 0, snapshot.user.points || 0),
+            updatedAt: new Date(Math.max(
+              new Date(currentUser.updatedAt || 0).getTime(),
+              new Date(snapshot.user.updatedAt || 0).getTime()
+            )).toISOString()
+          }
+        : snapshot.user;
+      writeStorage(STORAGE_KEYS.user, mergedUser);
+      console.log(cloudFirst ? "✅ 用户数据已合并（云端优先，积分取最大值）" : "✅ 首次从云端获取用户数据");
     }
   }
   
-  // 其他数据正常同步（只有当云端有数据时才会更新，否则保留本地数据）
   if (Array.isArray(snapshot.tasks) && snapshot.tasks.length > 0) {
     saveTasks(mergeTaskLists(getRawTasks(), snapshot.tasks), { silent: true });
   }
@@ -1081,14 +1103,12 @@ function applyRemoteState(state) {
   }
 
   if (Array.isArray(snapshot.pointsRecords) && snapshot.pointsRecords.length > 0) {
-    // 合并积分记录，去重
     const localRecords = readStorage(STORAGE_KEYS.pointsRecords, []);
     const mergedRecords = normalizeRecords([...localRecords, ...snapshot.pointsRecords], 200);
     writeStorage(STORAGE_KEYS.pointsRecords, mergedRecords);
   }
 
   if (Array.isArray(snapshot.orders) && snapshot.orders.length > 0) {
-    // 合并订单记录
     const localOrders = readStorage(STORAGE_KEYS.orders, []);
     const mergedOrders = normalizeRecords([...localOrders, ...snapshot.orders], 100);
     writeStorage(STORAGE_KEYS.orders, mergedOrders);

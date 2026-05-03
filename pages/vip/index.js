@@ -87,11 +87,21 @@ Page({
   },
 
   simulatePurchasePoints(pkg) {
-    const { getUserState, updateUserState, addPointsRecord } = require("../../utils/task-store");
+    const { getUserState, updateUserState, addPointsRecord, addOrder } = require("../../utils/task-store");
     const bonusMatch = pkg.bonus.match(/(\d+)/);
     const bonusPoints = bonusMatch ? parseInt(bonusMatch[1], 10) : 0;
     const totalPoints = pkg.points + bonusPoints;
     const user = getUserState();
+
+    addOrder({
+      type: "points",
+      itemId: pkg.id,
+      provider: "simulate",
+      status: "paid",
+      title: `${pkg.points}积分`,
+      amount: pkg.price,
+      paidAt: Date.now(),
+    });
 
     updateUserState({
       points: user.points + totalPoints,

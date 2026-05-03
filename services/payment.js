@@ -162,6 +162,16 @@ function addPointsDirectly(packageItem) {
   const totalPoints = packageItem.points + (packageItem.bonusPoints || 0);
 
   try {
+    addOrder({
+      type: "points",
+      itemId: packageItem.id,
+      provider: "wechat",
+      status: "paid",
+      title: `${packageItem.points}积分`,
+      amount: packageItem.price,
+      paidAt: Date.now(),
+    });
+
     const currentUser = getUserState();
     const updatedUser = updateUserState({
       points: (currentUser.points || 0) + totalPoints,

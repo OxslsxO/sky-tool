@@ -1458,6 +1458,98 @@ function savePendingOrdersToDisk(orderMap) {
   }
 }
 
+async function persistPaidOrderToDatabase(orderId, order) {
+  try {
+    const collections = await clientStateRepository.getCollections();
+    if (!collections) {
+      console.warn("[payment] MongoDB not available, skipping database persistence for order:", orderId);
+      return;
+    }
+
+    const userId = order.userId;
+    if (!userId) {
+      console.error("[payment] order has no userId, cannot persist:", orderId);
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    const orderRecord = {
+      id: orderId,
+      type: order.type,
+      itemId: order.itemId,
+      provider: "wechat",
+      status: "paid",
+      amount: order.amount,
+      productName: order.productName,
+      transactionId: order.transactionId || "",
+      paidAt: order.paidAt || Date.now(),
+      createdAt: order.createdAt || Date.now(),
+      updatedAt: now,
+    };
+
+    await collections.orders.updateOne(
+      { userId, id: orderId },
+      { $set: { ...orderRecord, userId } },
+      { upsert: true }
+    );
+    console.log(`✅ 订单 ${orderId} 已写入 orders 集合`);
+
+    const product = PRODUCTS[order.type]?.[order.itemId];
+    if (product) {
+      const pointsToAdd = (product.points || 0) + (product.bonusPoints || 0);
+
+      if (order.type === "points" && pointsToAdd > 0) {
+        const pointsRecord = {
+          id: `pr_pay_${orderId}`,
+          type: "recharge",
+          title: `充值${product.points}积分`,
+          change: pointsToAdd,
+          packageId: order.itemId,
+          price: order.amount,
+          createdAt: Date.now(),
+          updatedAt: now,
+        };
+
+        await collections.pointsRecords.updateOne(
+          { userId, id: pointsRecord.id },
+          { $set: { ...pointsRecord, userId } },
+          { upsert: true }
+        );
+        console.log(`✅ 积分记录已写入 pointsRecords 集合, +${pointsToAdd}积分`);
+
+        const updateResult = await collections.users.updateOne(
+          { userId },
+          { $inc: { points: pointsToAdd }, $set: { updatedAt: now } }
+        );
+        console.log(`✅ 用户 ${userId} 积分已增加 ${pointsToAdd}, matched: ${updateResult.matchedCount}, modified: ${updateResult.modifiedCount}`);
+      }
+
+      if (order.type === "tool") {
+        const pointsRecord = {
+          id: `pr_pay_${orderId}`,
+          type: "purchase",
+          title: `购买工具: ${product.name}`,
+          change: 0,
+          packageId: order.itemId,
+          price: order.amount,
+          createdAt: Date.now(),
+          updatedAt: now,
+        };
+
+        await collections.pointsRecords.updateOne(
+          { userId, id: pointsRecord.id },
+          { $set: { ...pointsRecord, userId } },
+          { upsert: true }
+        );
+        console.log(`✅ 工具购买记录已写入 pointsRecords 集合`);
+      }
+    }
+  } catch (error) {
+    console.error("[payment] failed to persist paid order to database:", error && error.message ? error.message : error);
+  }
+}
+
 const pendingOrders = loadPendingOrdersFromDisk();
 
 // 积分套餐配置和单次工具使用配置
@@ -1610,6 +1702,7 @@ app.post("/api/pay/verify", async (req, res) => {
         pendingOrders.set(orderId, order);
         savePendingOrdersToDisk(pendingOrders);
         console.log(`✅ 订单 ${orderId} 支付成功`);
+        await persistPaidOrderToDatabase(orderId, order);
       } else {
         order.updatedAt = Date.now();
         pendingOrders.set(orderId, order);
@@ -1655,6 +1748,7 @@ app.post("/api/pay/notify", express.raw({ type: "*/*" }), async (req, res) => {
         pendingOrders.set(orderId, order);
         savePendingOrdersToDisk(pendingOrders);
         console.log(`✅ 订单 ${orderId} 支付成功 (transaction_id: ${result.transaction_id})`);
+        await persistPaidOrderToDatabase(orderId, order);
       } else {
         console.warn(`[支付] 收到通知但未找到订单: ${orderId}`);
       }
