@@ -198,11 +198,39 @@ function uploadFileForJson(pathname, file, formData = {}, options = {}) {
   });
 }
 
+function downloadFileToTemp(url) {
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res.tempFilePath);
+          return;
+        }
+        reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+      },
+      fail: (err) => {
+        reject(new Error((err && err.errMsg) || "文件下载失败"));
+      },
+    });
+  });
+}
+
 async function packLocalFile(file) {
+  let filePath = file.path;
+  
+  if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
+    try {
+      filePath = await downloadFileToTemp(filePath);
+    } catch (downloadErr) {
+      throw new Error(`下载图片失败：${downloadErr.message}`);
+    }
+  }
+
   return {
     name: file.name,
     sizeBytes: file.size || 0,
-    base64: await readFileBase64(file.path),
+    base64: await readFileBase64(filePath),
   };
 }
 
