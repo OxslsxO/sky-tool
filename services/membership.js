@@ -116,6 +116,11 @@ function consumePoints(points, reason = '工具使用') {
 }
 
 function getUsagePriority(tool) {
+  // 积分要求为 0 的工具直接免费，不限次数
+  if (tool.points === 0) {
+    return { priority: 'free', text: '免费使用', usable: true };
+  }
+
   const hasFreeQuota = canUseFreeQuota(tool.id);
 
   if (hasFreeQuota) {

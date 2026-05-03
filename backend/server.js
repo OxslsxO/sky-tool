@@ -2410,21 +2410,48 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
     const savedBytes = Math.max(fileBytes.length - outputBytes.length, 0);
     const savedPercent = fileBytes.length > 0 ? Math.round((savedBytes / fileBytes.length) * 100) : 0;
 
+    // 保持原始文件名，只替换扩展名（如果需要的话）
+    let baseFileName = fileName;
+    if (fileName.includes('.')) {
+      baseFileName = fileName.substring(0, fileName.lastIndexOf('.'));
+    }
+    // 避免文件名过长或特殊字符问题
+    baseFileName = baseFileName.replace(/[^\w\u4e00-\u9fa5]/g, '_');
+    // 如果是空文件名，使用默认名称
+    if (!baseFileName || baseFileName.length === 0) {
+      baseFileName = "compressed";
+    }
+    
     const output = await saveOutputFile(req, outputBytes, {
       extension: outputExt,
-      baseName: "compressed",
+      baseName: baseFileName,
     });
 
     const responseFile = buildFileResponse(output, "application/octet-stream", undefined, req);
-    if (shouldInlineCompressedFile({
-      fileName: output.fileName,
-      mimeType: outputExt ? getFallbackContentType(`result.${outputExt}`) : "",
-      fileBytes: outputBytes,
-    })) {
-      responseFile.inlineBase64 = outputBytes.toString("base64");
+    
+    // 检测是否是图片文件（通过扩展名或 outputExt）
+    const imageExts = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+    const isImageFile = imageExts.includes(ext.toLowerCase()) || 
+                        imageExts.includes(outputExt.toLowerCase());
+    console.log(`[compress] ext: ${ext}, outputExt: ${outputExt}, isImageFile: ${isImageFile}`);
+    
+    // 对于所有文件都强制使用 inlineBase64，避免小程序网络请求失败
+    responseFile.inlineBase64 = outputBytes.toString("base64");
+    console.log(`[compress] set inlineBase64, length: ${responseFile.inlineBase64.length}`);
+    
+    // 保持原文件名，只替换扩展名
+    let finalFileName = fileName;
+    if (fileName && fileName.includes('.')) {
+      const namePart = fileName.substring(0, fileName.lastIndexOf('.'));
+      finalFileName = `${namePart}.${outputExt}`;
+    } else if (fileName) {
+      finalFileName = `${fileName}.${outputExt}`;
+    } else {
+      finalFileName = `compressed.${outputExt}`;
     }
-    responseFile.name = fileName || responseFile.name;
-    responseFile.label = fileName || responseFile.label;
+    
+    responseFile.name = finalFileName;
+    responseFile.label = finalFileName;
 
     return {
       ok: true,

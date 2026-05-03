@@ -350,6 +350,16 @@ function refreshStoredTasks() {
 }
 
 function getBillingPreview(tool) {
+  // 积分要求为 0 的工具直接免费
+  if (tool.points === 0) {
+    return {
+      usable: true,
+      mode: 'free',
+      text: '免费使用',
+      costText: '免费',
+    };
+  }
+
   try {
     const membership = require('../services/membership');
     const priority = membership.getUsagePriority(tool);
@@ -381,6 +391,16 @@ function getBillingPreview(tool) {
       needUpgrade: true,
     };
   } catch {
+    // 积分要求为 0 的工具直接免费
+    if (tool.points === 0) {
+      return {
+        usable: true,
+        mode: 'free',
+        text: '免费使用',
+        costText: '免费',
+      };
+    }
+
     const user = getUserState();
     if (user.points >= tool.points) {
       return {
@@ -788,7 +808,7 @@ function seedMockTasks() {
       toolId: "pdf-compress",
       selections: { mode: "均衡" },
       createdAt: now - 2 * 60 * 60 * 1000,
-      status: "processing",
+      status: "success",
       duration: 6000,
       inputName: "项目资料.pdf",
       outputName: "项目资料_压缩版.pdf",
@@ -830,14 +850,14 @@ function seedMockTasks() {
       toolId: "photo-id",
       selections: { size: "考试报名", background: "蓝底", retouch: "自然" },
       createdAt: now - 4 * 60 * 60 * 1000,
-      status: "failed",
+      status: "success",
       duration: 5200,
       inputName: "自拍照片.jpg",
       outputName: "报名照.png",
       beforeSize: 3.9,
       afterSize: 1.1,
-      resultHeadline: "人像识别失败",
-      resultDetail: "检测到多人入镜，请上传单人正面半身照后重试。",
+      resultHeadline: "证件照生成完成",
+      resultDetail: "标准蓝底照片已生成，可直接下载使用。",
       resultType: "async",
       outputPath: "",
       remoteUrl: "",
@@ -851,6 +871,33 @@ function seedMockTasks() {
   saveTasks(seedTasks);
   writeStorage(STORAGE_KEYS.recent, ["photo-id", "universal-compress", "ocr-text"]);
   writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "universal-compress"]);
+  
+  // 初始化一些积分记录
+  const initialPointsRecords = [
+    {
+      id: "points_initial_1",
+      type: "recharge",
+      title: "新用户注册奖励",
+      change: 50,
+      createdAt: now - 7 * 24 * 60 * 60 * 1000,
+    },
+    {
+      id: "points_initial_2",
+      type: "consume",
+      title: "PDF压缩",
+      change: -10,
+      createdAt: now - 2 * 60 * 60 * 1000,
+    },
+  ];
+  writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
+  
+  // 确保用户有初始积分
+  const currentUser = getUserState();
+  if (currentUser && !currentUser.points) {
+    updateUserState({
+      points: 40,
+    }, { silent: true });
+  }
 }
 
 function getTaskDashboard() {
@@ -1006,11 +1053,9 @@ function applyRemoteState(state) {
       const remoteTime = new Date(snapshot.user.updatedAt || 0).getTime();
       
       const mergedUser = {
-        ...snapshot.user,           // 基础信息从云端
-        ...currentUser,             // 本地覆盖
-        // 积分、会员状态永远优先本地（本地更新触发同步）
-        points: currentUser.points ?? snapshot.user.points,
-        // 更新时间取最新的
+        ...snapshot.user,
+        ...currentUser,
+        points: Math.max(currentUser.points || 0, snapshot.user.points || 0),
         updatedAt: new Date(Math.max(localTime, remoteTime)).toISOString()
       };
       writeStorage(STORAGE_KEYS.user, mergedUser);
@@ -1022,27 +1067,27 @@ function applyRemoteState(state) {
     }
   }
   
-  // 其他数据正常同步
-  if (Array.isArray(snapshot.tasks)) {
+  // 其他数据正常同步（只有当云端有数据时才会更新，否则保留本地数据）
+  if (Array.isArray(snapshot.tasks) && snapshot.tasks.length > 0) {
     saveTasks(mergeTaskLists(getRawTasks(), snapshot.tasks), { silent: true });
   }
 
-  if (Array.isArray(snapshot.favorites)) {
+  if (Array.isArray(snapshot.favorites) && snapshot.favorites.length > 0) {
     setFavorites(snapshot.favorites, { silent: true });
   }
 
-  if (Array.isArray(snapshot.recentToolIds)) {
+  if (Array.isArray(snapshot.recentToolIds) && snapshot.recentToolIds.length > 0) {
     setRecentToolIds(snapshot.recentToolIds, { silent: true });
   }
 
-  if (Array.isArray(snapshot.pointsRecords)) {
+  if (Array.isArray(snapshot.pointsRecords) && snapshot.pointsRecords.length > 0) {
     // 合并积分记录，去重
     const localRecords = readStorage(STORAGE_KEYS.pointsRecords, []);
     const mergedRecords = normalizeRecords([...localRecords, ...snapshot.pointsRecords], 200);
     writeStorage(STORAGE_KEYS.pointsRecords, mergedRecords);
   }
 
-  if (Array.isArray(snapshot.orders)) {
+  if (Array.isArray(snapshot.orders) && snapshot.orders.length > 0) {
     // 合并订单记录
     const localOrders = readStorage(STORAGE_KEYS.orders, []);
     const mergedOrders = normalizeRecords([...localOrders, ...snapshot.orders], 100);
@@ -1067,8 +1112,12 @@ module.exports = {
   toggleFavorite,
   isFavoriteTool,
   listFavoriteTools,
+  getFavorites,
+  setFavorites,
   touchRecentTool,
   getRecentTools,
+  getRecentToolIds,
+  setRecentToolIds,
   getRawTasks,
   hasDirtySyncState,
   getSyncDirtyStamp,

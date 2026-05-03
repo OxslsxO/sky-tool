@@ -2,12 +2,23 @@ const {
   getUserState,
   updateUserState,
   seedUserState,
+  seedMockTasks,
+  saveTasks,
+  setFavorites,
+  setRecentToolIds,
+  getSyncSnapshot,
+  applyRemoteState,
+  getRawTasks,
 } = require("../../utils/task-store");
 const {
   buildServiceUrl,
   getServiceHeaders,
   hasBackendService,
 } = require("../../services/backend-tools");
+const {
+  fetchClientState,
+  syncClientState,
+} = require("../../services/state-sync");
 
 Page({
   data: {
@@ -43,13 +54,7 @@ Page({
   async loginWechat(avatarUrl) {
     console.log('🔄 开始微信登录...');
 
-    const localUser = getUserState();
-    const localPoints = localUser.points || 0;
-    const localTasks = require("../../utils/task-store").getRawTasks();
-    const localFavorites = require("../../utils/task-store").getFavorites();
-    const localRecentToolIds = require("../../utils/task-store").getRecentToolIds();
-    const localPointsRecords = require("../../utils/task-store").getPointsRecords();
-    const localOrders = require("../../utils/task-store").getOrders();
+    const localSnapshot = getSyncSnapshot();
 
     try {
       const loginRes = await new Promise((resolve, reject) => {
@@ -95,9 +100,6 @@ Page({
         console.log('✅ 登录成功！用户信息:', user);
         console.log('🔑 真实 openid:', user.openid);
 
-        const remotePoints = user.points || 0;
-        const mergedPoints = Math.max(localPoints, remotePoints);
-
         updateUserState({
           userId: user.userId || user.openid,
           openid: user.openid,
@@ -106,28 +108,52 @@ Page({
           avatar: user.avatar || user.avatarUrl || avatarUrl,
           phoneNumber: user.phoneNumber || '',
           authMode: 'wechat',
-          points: mergedPoints,
           lastLoginAt: new Date().toISOString(),
         });
 
-        if (localTasks.length > 0) {
-          const { saveTasks } = require("../../utils/task-store");
-          saveTasks(localTasks, { silent: true });
+        let remoteStateApplied = false;
+
+        try {
+          console.log('📡 尝试从后端拉取用户状态...');
+          const stateResult = await fetchClientState({
+            userId: user.userId || user.openid,
+          });
+
+          if (stateResult && stateResult.ok && stateResult.state) {
+            console.log('✅ 从后端拉取到用户状态:', stateResult.state);
+            applyRemoteState(stateResult.state);
+            remoteStateApplied = true;
+            console.log('✅ 本地状态已更新为云端数据');
+          }
+        } catch (fetchErr) {
+          console.warn('⚠️ 拉取云端状态失败:', fetchErr);
         }
-        if (localFavorites.length > 0) {
-          const { setFavorites } = require("../../utils/task-store");
-          setFavorites(localFavorites, { silent: true });
+
+        try {
+          if (localSnapshot.tasks.length > 0 || 
+              localSnapshot.favorites.length > 0 || 
+              localSnapshot.pointsRecords.length > 0 || 
+              localSnapshot.orders.length > 0) {
+            console.log('📤 同步本地数据到云端...');
+            const syncResult = await syncClientState({
+              ...localSnapshot,
+              userId: user.userId || user.openid,
+              preferRemote: true,
+            });
+
+            if (!remoteStateApplied && syncResult && syncResult.ok && syncResult.state) {
+              console.log('✅ 从同步响应中恢复云端数据');
+              applyRemoteState(syncResult.state);
+            }
+          }
+        } catch (syncErr) {
+          console.warn('⚠️ 同步本地数据到云端失败:', syncErr);
         }
-        if (localRecentToolIds.length > 0) {
-          const { setRecentToolIds } = require("../../utils/task-store");
-          setRecentToolIds(localRecentToolIds, { silent: true });
-        }
-        if (localPointsRecords.length > 0) {
-          const { addPointsRecord } = require("../../utils/task-store");
-          wx.setStorageSync("sky_tools_points_records", localPointsRecords);
-        }
-        if (localOrders.length > 0) {
-          wx.setStorageSync("sky_tools_orders", localOrders);
+
+        const currentTasks = getRawTasks();
+        if (currentTasks.length === 0) {
+          console.log('📝 本地没有任务数据，初始化演示数据...');
+          seedMockTasks();
         }
 
         wx.showToast({

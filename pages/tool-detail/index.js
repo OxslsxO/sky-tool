@@ -704,7 +704,7 @@ Page({
     const unitOptions = tool.id === "unit-convert"
       ? getGroupUnits(selections.group)
       : [];
-    const customSizeValue = getToolOption(tool, "size", 3);
+    const customSizeValue = getToolOption(tool, "size", 7);
     const pageRangeValue = getToolOption(tool, "splitMode", 0);
     const backendConfigured = hasBackendService();
     const clientTool = isClientTool(tool.id);
@@ -3433,19 +3433,40 @@ Page({
       return;
     }
 
-    this.updateProcessingProgress(24, "正在读取文档...");
-    const file = await packLocalFile(backendFiles[0]);
-    const response = await this.requestJsonWithProgress("/api/office/to-pdf", {
-      file,
-      quality: selections.quality,
-      pageMode: selections.pageMode,
-    }, {
-      target: 84,
-      status: "正在转换 PDF...",
-      sizeBytes: backendFiles[0].size,
-    });
+    try {
+      this.updateProcessingProgress(24, "正在读取文档...");
+      const file = await packLocalFile(backendFiles[0]);
+      const response = await this.requestJsonWithProgress("/api/office/to-pdf", {
+        file,
+        quality: selections.quality,
+        pageMode: selections.pageMode,
+      }, {
+        target: 84,
+        status: "正在转换 PDF...",
+        sizeBytes: backendFiles[0].size,
+      });
 
-    await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+      await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+    } catch (error) {
+      console.error("[Office转PDF] 失败:", error);
+      this.setData({
+        isWorking: false,
+        showProcessingOverlay: false,
+      });
+
+      let errorMsg = "转换失败，请重试";
+      if (error && error.message) {
+        if (error.message.includes("OFFICE_CONVERTER_UNAVAILABLE") || error.message.includes("LibreOffice")) {
+          errorMsg = "当前服务暂不支持 Office 转 PDF，请联系管理员";
+        }
+      }
+
+      wx.showToast({
+        title: errorMsg,
+        icon: "none",
+        duration: 2500,
+      });
+    }
   },
 
   async runRemotePdfToWord() {
@@ -4167,24 +4188,49 @@ Page({
       throw uploadError;
     }
 
-    console.log("[压缩下载] API返回完整结果:", JSON.stringify(response).substring(0, 500));
+    console.log("[压缩下载] API返回完整结果:", JSON.stringify(response).substring(0, 1000));
     this.updateProcessingProgress(82, "正在压缩文件...");
 
     console.log("[压缩下载] file对象:", JSON.stringify(response.file || {}));
+    console.log("[压缩下载] has inlineBase64:", !!(response.file && response.file.inlineBase64));
     console.log("[压缩下载] url:", response.file && response.file.url);
     console.log("[压缩下载] externalUrl:", response.file && response.file.externalUrl);
     console.log("[压缩下载] fallbackUrl:", response.file && response.file.fallbackUrl);
+    console.log("[压缩下载] fileType:", fileType);
 
     if (response.file && response.file.inlineBase64) {
+      console.log("[压缩下载] 使用 inlineBase64 处理...");
       const inlineFileName = response.file.name || uploadFileName || "compressed-result";
-      const inlineOutputPath = await writeBase64File(
-        `${wx.env.USER_DATA_PATH}/compressed-${Date.now()}-${inlineFileName}`,
-        response.file.inlineBase64
-      );
+      
+      // 对于图片，直接构建 base64 URL，不写入文件（避免模拟器访问问题）
+      let resultPath = null;
+      if (fileType === "image") {
+        // 检测图片类型，构建正确的 data URL
+        const mimeMap = {
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          png: "image/png",
+          webp: "image/webp",
+          gif: "image/gif",
+          bmp: "image/bmp"
+        };
+        const ext = (inlineFileName.split('.').pop() || 'jpg').toLowerCase();
+        const mimeType = mimeMap[ext] || 'image/jpeg';
+        resultPath = `data:${mimeType};base64,${response.file.inlineBase64}`;
+        console.log("[压缩下载] 构建 base64 图片 URL:", resultPath.substring(0, 100) + "...");
+      } else {
+        // 其他文件仍然写入文件系统
+        resultPath = await writeBase64File(
+          `${wx.env.USER_DATA_PATH}/compressed-${Date.now()}-${inlineFileName}`,
+          response.file.inlineBase64
+        );
+        console.log("[压缩下载] 写入文件成功:", resultPath);
+      }
+      
       this.updateProcessingProgress(92, "正在整理结果...");
 
       return {
-        path: inlineOutputPath,
+        path: resultPath,
         remoteUrl: response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "",
         name: inlineFileName,
         afterBytes: response.file.sizeBytes || null,
@@ -4193,6 +4239,11 @@ Page({
         savedPercent: response.savedPercent || 0,
         note: response.note || response.detail || "",
       };
+    }
+    
+    // 如果是图片类型但没有 inlineBase64，记录警告但仍然尝试
+    if (fileType === "image") {
+      console.warn("[压缩下载] 图片类型但没有 inlineBase64，可能会失败");
     }
 
     let downloadUrl = response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";

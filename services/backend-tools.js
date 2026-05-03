@@ -12,8 +12,8 @@ function getMiniProgramEnvVersion() {
 }
 
 function getDefaultBaseUrl() {
-  //return "https://oxslsxo-sky-tool.hf.space";
-  return "http://127.0.0.1:3100";
+  return "https://oxslsxo-sky-tool.hf.space";
+  //return "http://127.0.0.1:3100";
 }
 
 function shouldAllowManualServiceConfig() {
@@ -66,14 +66,20 @@ function clearServiceConfig() {
 function hasBackendService() {
   try {
     const config = getServiceConfig();
-    // 更严格的检查：必须有明确的 baseUrl 配置，且不是默认的本地地址
     if (!config || !config.baseUrl) {
       return false;
     }
     const baseUrl = config.baseUrl.toLowerCase().trim();
-    // 避免尝试连接不可用的本地地址
+    const envVersion = getMiniProgramEnvVersion();
+    
+    // 开发模式下允许本地地址
+    if (envVersion === "develop" || envVersion === "trial") {
+      return true;
+    }
+    
+    // 生产模式下禁止本地地址
     if (baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost")) {
-      console.warn("[backend-tools] Local backend address detected, treating as unavailable");
+      console.warn("[backend-tools] Local backend address detected, treating as unavailable in release");
       return false;
     }
     return true;

@@ -13,7 +13,7 @@ Component({
       },
       {
         pagePath: "/pages/tasks/index",
-        text: "历史",
+        text: "任务",
         icon: "/custom-tab-bar/icons/tasks.svg",
         activeIcon: "/custom-tab-bar/icons/tasks-active.svg"
       },

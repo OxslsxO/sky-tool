@@ -3,7 +3,7 @@
     <view class="tool-card__badge-row">
       <text class="tool-card__badge" wx:if="{{tool.badge}}">{{tool.badge}}</text>
     </view>
-    <text class="tool-card__points">{{tool.points}} 积分</text>
+    <text class="tool-card__points">{{tool.points === 0 ? '免费' : tool.points + ' 积分'}}</text>
   </view>
 
   <text class="tool-card__name">{{tool.name}}</text>

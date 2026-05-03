@@ -90,7 +90,7 @@
           <text class="tool-grid-desc">{{item.shortDescription}}</text>
           <text class="tool-grid-usage" wx:if="{{item.usageText}}">{{item.usageText}}</text>
           <view class="tool-grid-footer">
-            <text class="tool-grid-points">{{item.points}} 积分</text>
+            <text class="tool-grid-points">{{item.points === 0 ? '免费' : item.points + ' 积分'}}</text>
             <text class="tool-grid-arrow">→</text>
           </view>
         </view>
@@ -118,7 +118,7 @@
             <view class="tool-list-meta">
               <text class="tool-list-format">{{item.formatText}}</text>
               <text class="tool-list-usage" wx:if="{{item.usageText}}">{{item.usageText}}</text>
-              <text class="tool-list-points">{{item.points}} 积分</text>
+              <text class="tool-list-points">{{item.points === 0 ? '免费' : item.points + ' 积分'}}</text>
             </view>
           </view>
           <view class="tool-list-action">

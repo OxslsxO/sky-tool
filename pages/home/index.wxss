@@ -631,6 +631,7 @@
 
 .member-card {
   background: linear-gradient(145deg, #e8efe9 0%, #f7faf8 62%, #ffffff 100%);
+  margin-bottom: 30rpx;
 }
 
 .member-header {

@@ -1,5 +1,6 @@
 const { seedUserState, getUserState } = require("./utils/task-store");
 const { isWechatIdentity } = require("./utils/auth-session");
+const { clearServiceConfig } = require("./services/backend-tools");
 
 App({
   globalData: {
@@ -10,6 +11,9 @@ App({
     console.log("🚀 应用启动");
 
     try {
+      // 清除旧的后端配置缓存，确保使用新的远程地址
+      clearServiceConfig();
+
       const user = getUserState();
       const isLoggedIn = isWechatIdentity(user);
 
