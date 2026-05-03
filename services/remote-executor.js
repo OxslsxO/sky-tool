@@ -4,14 +4,15 @@ const MAX_BASE64_FILE_SIZE = 200 * 1024 * 1024;
 
 function readFileBase64(filePath) {
   return new Promise((resolve, reject) => {
-    wx.getFileInfo({
+    const fsm = wx.getFileSystemManager();
+    fsm.getFileInfo({
       filePath,
       success: (info) => {
         if (info.size > MAX_BASE64_FILE_SIZE) {
           reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
           return;
         }
-        wx.getFileSystemManager().readFile({
+        fsm.readFile({
           filePath,
           encoding: "base64",
           success: (result) => resolve(result.data),
@@ -19,7 +20,7 @@ function readFileBase64(filePath) {
         });
       },
       fail: () => {
-        wx.getFileSystemManager().readFile({
+        fsm.readFile({
           filePath,
           encoding: "base64",
           success: (result) => resolve(result.data),

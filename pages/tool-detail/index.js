@@ -2998,32 +2998,48 @@ Page({
 
       this.updateProcessingProgress(15, "正在上传图片...");
       logger.log("[照片转证件照] 开始打包文件");
-      const packedFile = await packLocalFile({
-        path: imageInput.path,
-        name: getFileName(imageInput.path),
-        size: imageInput.size,
-      });
-      logger.log("[照片转证件照] 文件打包完成");
+      
+      let packedFile;
+      try {
+        packedFile = await packLocalFile({
+          path: imageInput.path,
+          name: getFileName(imageInput.path),
+          size: imageInput.size,
+        });
+        logger.log("[照片转证件照] 文件打包完成，base64 长度:", packedFile.base64?.length || 0);
+      } catch (packError) {
+        logger.error("[照片转证件照] 文件打包失败:", packError.message, packError);
+        throw new Error(`文件打包失败：${packError.message}`);
+      }
       
       if (isTimeout) {
+        logger.log("[照片转证件照] 已超时，中断处理");
         return;
       }
 
       logger.log("[照片转证件照] 发送请求到 /api/photo-id");
-      const remoteResponse = await this.requestJsonWithProgress("/api/photo-id", {
-        file: packedFile,
-        size: selections.size,
-        background: selections.background,
-        retouch: selections.retouch,
-      }, {
-        target: 74,
-        status: "正在智能抠图...",
-        sizeBytes: imageInput.size,
-        requestOptions: {
-          timeout: 120000, // 减少到 2 分钟
-          includeMeta: true,
-        },
-      });
+      let remoteResponse;
+      try {
+        remoteResponse = await this.requestJsonWithProgress("/api/photo-id", {
+          file: packedFile,
+          size: selections.size,
+          background: selections.background,
+          retouch: selections.retouch,
+        }, {
+          target: 74,
+          status: "正在智能抠图...",
+          sizeBytes: imageInput.size,
+          requestOptions: {
+            timeout: 120000, // 减少到 2 分钟
+            includeMeta: true,
+          },
+        });
+        logger.log("[照片转证件照] 收到原始响应:", remoteResponse);
+      } catch (requestError) {
+        logger.error("[照片转证件照] 请求失败:", requestError.message, requestError);
+        throw new Error(`请求失败：${requestError.message}`);
+      }
+      
       const response = remoteResponse && remoteResponse.data ? remoteResponse.data : remoteResponse;
 
       this.updateProcessingProgress(75, "正在生成证件照...");
@@ -3035,6 +3051,11 @@ Page({
         logger.log("[照片转证件照] 收到空响应");
         throw new Error("空响应");
       }
+      
+      if (!response.ok) {
+        logger.log("[照片转证件照] 响应不是 ok:", response);
+        throw new Error(response.errorMessage || response.detail || "处理失败");
+      }
 
       // 处理响应数据
       const file = response.file || {};
@@ -3044,6 +3065,7 @@ Page({
       let previewPath = "";
       if (file.inlineBase64) {
         try {
+          logger.log("[照片转证件照] 开始写入 base64 文件，长度:", file.inlineBase64.length);
           outputPath = await writeBase64File(
             `${wx.env.USER_DATA_PATH}/photo-id-result-${Date.now()}.png`,
             file.inlineBase64
@@ -3051,8 +3073,10 @@ Page({
           previewPath = outputPath;
           logger.log("[照片转证件照] 已写入本地预览文件", outputPath);
         } catch (error) {
-          logger.error("[照片转证件照] 写入本地预览失败:", error.message);
+          logger.error("[照片转证件照] 写入本地预览失败:", error.message, error);
         }
+      } else {
+        logger.log("[照片转证件照] 没有 inlineBase64 数据");
       }
       const shouldDownloadPreviewEagerly = false;
 
@@ -3143,7 +3167,7 @@ Page({
       });
       logger.log("[照片转证件照] 显示处理完成提示");
     } catch (error) {
-      logger.error("[照片转证件照] 处理失败:", error.message);
+      logger.error("[照片转证件照] 处理失败:", error.message, error);
       this.setData({
         isWorking: false,
         photoIdIsProcessing: false,
@@ -3152,9 +3176,9 @@ Page({
         processingStatus: "",
       });
       wx.showToast({
-        title: "处理失败，请稍后重试",
+        title: error.message || "处理失败，请稍后重试",
         icon: "none",
-        duration: 2000
+        duration: 3000
       });
     } finally {
       clearTimeout(timeoutId);
