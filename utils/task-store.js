@@ -951,6 +951,14 @@ function incrementPhotoIdUsage() {
   return nextStats;
 }
 
+function getDailyFreeUsage() {
+  return readStorage(STORAGE_KEYS.dailyFreeUsage, { date: '', tools: {} });
+}
+
+function setDailyFreeUsage(data) {
+  writeStorage(STORAGE_KEYS.dailyFreeUsage, data);
+}
+
 function getSyncSnapshot() {
   return {
     user: getUserState(),
@@ -959,6 +967,7 @@ function getSyncSnapshot() {
     recentToolIds: getRecentToolIds(),
     pointsRecords: getPointsRecords(),
     orders: getOrders(),
+    dailyFreeUsage: getDailyFreeUsage(),
   };
 }
 
@@ -1112,6 +1121,32 @@ function applyRemoteState(state, options = {}) {
     const localOrders = readStorage(STORAGE_KEYS.orders, []);
     const mergedOrders = normalizeRecords([...localOrders, ...snapshot.orders], 100);
     writeStorage(STORAGE_KEYS.orders, mergedOrders);
+  }
+
+  if (snapshot.dailyFreeUsage) {
+    const cloudFirst = !!options.cloudFirst;
+    const localUsage = getDailyFreeUsage();
+    const remoteUsage = snapshot.dailyFreeUsage;
+
+    const todayKey = (() => {
+      const today = new Date();
+      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    })();
+
+    let mergedUsage;
+    if (remoteUsage.date === todayKey && localUsage.date === todayKey) {
+      const mergedTools = { ...remoteUsage.tools, ...localUsage.tools };
+      mergedUsage = { date: todayKey, tools: mergedTools };
+    } else if (remoteUsage.date === todayKey) {
+      mergedUsage = remoteUsage;
+    } else if (localUsage.date === todayKey) {
+      mergedUsage = localUsage;
+    } else {
+      const newest = (remoteUsage.date || '') > (localUsage.date || '') ? remoteUsage : localUsage;
+      mergedUsage = newest;
+    }
+
+    setDailyFreeUsage(mergedUsage);
   }
 
   clearSyncDirty();

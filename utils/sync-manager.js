@@ -60,6 +60,7 @@ async function runSync(options = {}) {
     recentToolIds: snapshot.recentToolIds,
     pointsRecords: snapshot.pointsRecords,
     orders: snapshot.orders,
+    dailyFreeUsage: snapshot.dailyFreeUsage,
     preferRemote:
       options.preferRemote !== undefined
         ? !!options.preferRemote

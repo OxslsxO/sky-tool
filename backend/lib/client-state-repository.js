@@ -298,6 +298,7 @@ function createClientStateRepository(config) {
       orders: orders.map((item) => stripMongoFields(item, ["userId"])),
       favorites: preferences ? preferences.favoriteToolIds || [] : [],
       recentToolIds: preferences ? preferences.recentToolIds || [] : [],
+      dailyFreeUsage: preferences ? preferences.dailyFreeUsage || { date: '', tools: {} } : { date: '', tools: {} },
       createdAt: user.createdAt,
       updatedAt: user.updatedAt || nowIso(),
       lastSeenAt: device && device.lastSeenAt ? device.lastSeenAt : user.updatedAt,
@@ -327,6 +328,32 @@ function createClientStateRepository(config) {
     const user = normalizeUser(existing.user, incomingUser, { preferRemote });
     const now = nowIso();
 
+    let dailyFreeUsage;
+    if (payload.dailyFreeUsage) {
+      if (existing.dailyFreeUsage) {
+        const todayKey = (() => {
+          const today = new Date();
+          return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        })();
+
+        if (payload.dailyFreeUsage.date === todayKey && existing.dailyFreeUsage.date === todayKey) {
+          const mergedTools = { ...existing.dailyFreeUsage.tools, ...payload.dailyFreeUsage.tools };
+          dailyFreeUsage = { date: todayKey, tools: mergedTools };
+        } else if (payload.dailyFreeUsage.date === todayKey) {
+          dailyFreeUsage = payload.dailyFreeUsage;
+        } else if (existing.dailyFreeUsage.date === todayKey) {
+          dailyFreeUsage = existing.dailyFreeUsage;
+        } else {
+          const newest = (payload.dailyFreeUsage.date || '') > (existing.dailyFreeUsage.date || '') ? payload.dailyFreeUsage : existing.dailyFreeUsage;
+          dailyFreeUsage = newest;
+        }
+      } else {
+        dailyFreeUsage = payload.dailyFreeUsage;
+      }
+    } else {
+      dailyFreeUsage = existing.dailyFreeUsage || { date: '', tools: {} };
+    }
+
     return {
       userId: user.userId,
       identifiers: {
@@ -343,7 +370,7 @@ function createClientStateRepository(config) {
         [].concat(existing.pointsRecords || [], payload.pointsRecords || []),
         200
       ),
-      orders: normalizeRecords([].concat(existing.orders || [], payload.orders || []), 100),
+      orders: normalizeRecords([].concat(existing.orders || [], payload.orders || []),
       favorites: payload.preferRemote && (existing.favorites || []).length
         ? normalizeStringArray(existing.favorites, 12)
         : normalizeStringArray(
@@ -356,6 +383,7 @@ function createClientStateRepository(config) {
             Array.isArray(payload.recentToolIds) ? payload.recentToolIds : existing.recentToolIds,
             8
           ),
+      dailyFreeUsage,
       createdAt: existing.createdAt || now,
       updatedAt: now,
       lastSeenAt: now,
@@ -383,6 +411,7 @@ function createClientStateRepository(config) {
       orders: normalizeRecords(record.orders || [], 100),
       favorites: normalizeStringArray(record.favorites, 12),
       recentToolIds: normalizeStringArray(record.recentToolIds, 8),
+      dailyFreeUsage: record.dailyFreeUsage || { date: '', tools: {} },
       syncedAt: record.updatedAt || nowIso(),
     };
   }
@@ -526,6 +555,7 @@ function createClientStateRepository(config) {
             userId,
             favoriteToolIds: nextRecord.favorites,
             recentToolIds: nextRecord.recentToolIds,
+            dailyFreeUsage: nextRecord.dailyFreeUsage,
             updatedAt: nextRecord.updatedAt,
           },
           $setOnInsert: {

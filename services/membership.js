@@ -73,6 +73,12 @@ function consumeFreeQuota(toolId) {
   dailyUsage.tools[toolId].count += 1;
   dailyUsage.tools[toolId].lastUsedAt = Date.now();
   writeStorage(STORAGE_KEYS.dailyFreeUsage, dailyUsage);
+  
+  try {
+    const { markSyncDirty } = require('../utils/task-store');
+    markSyncDirty();
+  } catch (e) {
+  }
 }
 
 function addPoints(points, reason = '积分充值') {
