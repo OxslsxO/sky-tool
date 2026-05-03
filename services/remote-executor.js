@@ -140,11 +140,12 @@ function downloadRemoteFile(url) {
   });
 }
 
-function uploadFileForJson(pathname, file, formData = {}, options = {}) {
+async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
+  const readablePath = await ensureReadablePath(file.path);
   return new Promise((resolve, reject) => {
     const task = wx.uploadFile({
       url: buildServiceUrl(pathname),
-      filePath: file.path,
+      filePath: readablePath,
       name: "file",
       timeout: options.timeout || 600000,
       header: {
@@ -216,16 +217,63 @@ function downloadFileToTemp(url) {
   });
 }
 
-async function packLocalFile(file) {
-  let filePath = file.path;
-  
-  if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
+function downloadFileToUserData(url) {
+  const extMatch = /\.([A-Za-z0-9]+)(\?|$)/.exec(url || "");
+  const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : ".jpg";
+  const destPath = `${wx.env.USER_DATA_PATH}/_tmp_dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      filePath: destPath,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(destPath);
+          return;
+        }
+        reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+      },
+      fail: (err) => {
+        reject(new Error((err && err.errMsg) || "文件下载失败"));
+      },
+    });
+  });
+}
+
+async function ensureReadablePath(filePath) {
+  if (!filePath) return filePath;
+
+  if (filePath.startsWith("http://tmp/") || filePath.startsWith("http://tmp\\")) {
     try {
-      filePath = await downloadFileToTemp(filePath);
+      return await downloadFileToUserData(filePath);
+    } catch (userDataErr) {
+      try {
+        const tempPath = await downloadFileToTemp(filePath);
+        if (tempPath && !tempPath.startsWith("http://")) {
+          return tempPath;
+        }
+      } catch (_) {}
+      throw new Error(`无法读取临时文件：${filePath}，请重试`);
+    }
+  }
+
+  if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+    try {
+      const tempPath = await downloadFileToTemp(filePath);
+      if (tempPath && tempPath.startsWith("http://tmp/")) {
+        return await downloadFileToUserData(tempPath);
+      }
+      return tempPath;
     } catch (downloadErr) {
       throw new Error(`下载图片失败：${downloadErr.message}`);
     }
   }
+
+  return filePath;
+}
+
+async function packLocalFile(file) {
+  const filePath = await ensureReadablePath(file.path);
 
   return {
     name: file.name,
@@ -235,11 +283,12 @@ async function packLocalFile(file) {
 }
 
 async function uploadLocalFile(file, options = {}) {
+  const filePath = await ensureReadablePath(file.path);
   const response = await requestJson("/api/files/upload", {
     file: {
       name: file.name,
       sizeBytes: file.size || 0,
-      base64: await readFileBase64(file.path),
+      base64: await readFileBase64(filePath),
       contentType: options.contentType || file.contentType || "application/octet-stream",
       extension: options.extension || file.extension || "",
     },
@@ -258,4 +307,5 @@ module.exports = {
   uploadFileForJson,
   packLocalFile,
   uploadLocalFile,
+  ensureReadablePath,
 };

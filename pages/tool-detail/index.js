@@ -46,6 +46,7 @@ const {
   downloadRemoteFile,
   uploadLocalFile,
   uploadFileForJson,
+  ensureReadablePath,
 } = require("../../services/remote-executor");
 const payment = require("../../services/payment");
 
@@ -228,10 +229,11 @@ function mergeOcrLines(previous, current) {
   return `${prev} ${next}`;
 }
 
-function readFileArrayBuffer(filePath) {
+async function readFileArrayBuffer(filePath) {
+  const readablePath = await ensureReadablePath(filePath);
   return new Promise((resolve, reject) => {
     wx.getFileSystemManager().readFile({
-      filePath,
+      filePath: readablePath,
       success: (result) => resolve(result.data),
       fail: reject,
     });
