@@ -370,7 +370,7 @@ function createClientStateRepository(config) {
         [].concat(existing.pointsRecords || [], payload.pointsRecords || []),
         200
       ),
-      orders: normalizeRecords([].concat(existing.orders || [], payload.orders || []),
+      orders: normalizeRecords([].concat(existing.orders || [], payload.orders || []), 100),
       favorites: payload.preferRemote && (existing.favorites || []).length
         ? normalizeStringArray(existing.favorites, 12)
         : normalizeStringArray(
