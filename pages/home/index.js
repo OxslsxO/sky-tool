@@ -99,7 +99,7 @@ Page({
     if (globalUsageCount > 0) {
       usageText = `全站 ${this.formatUsageCount(globalUsageCount)} 次`;
     } else if (personalUsageCount > 0) {
-      usageText = `已使用 ${this.formatUsageCount(personalUsageCount)} 次`;
+      usageText = `全站使用 ${this.formatUsageCount(personalUsageCount)} 次`;
     }
 
     return {
@@ -269,5 +269,44 @@ Page({
         }
       },
     });
+  },
+
+  handlePressStart(event) {
+    const { index } = event.currentTarget.dataset;
+
+    const displayTools = this.data.displayTools.map((tool, i) => {
+      if (i === index) {
+        return { ...tool, isPressed: true };
+      }
+      return tool;
+    });
+    this.setData({ displayTools });
+  },
+
+  handlePressEnd(event) {
+    const { index } = event.currentTarget.dataset;
+
+    const displayTools = this.data.displayTools.map((tool, i) => {
+      if (i === index) {
+        const updates = { isPressed: false };
+        if (tool.isHot) {
+          updates.showRipple = true;
+        }
+        return { ...tool, ...updates };
+      }
+      return tool;
+    });
+    this.setData({ displayTools });
+
+    setTimeout(() => {
+      const resetTools = this.data.displayTools.map((tool, i) => {
+        if (i === index && tool.showRipple) {
+          const { showRipple, ...rest } = tool;
+          return rest;
+        }
+        return tool;
+      });
+      this.setData({ displayTools: resetTools });
+    }, 600);
   },
 });

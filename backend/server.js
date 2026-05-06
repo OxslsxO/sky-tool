@@ -1,4 +1,4 @@
-﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 console.log("🚀 sky-toolbox-backend 正在启动...");
 
@@ -1472,6 +1472,13 @@ async function persistPaidOrderToDatabase(orderId, order) {
       return;
     }
 
+    // 重要：先检查这个订单是否已经处理过，防止重复增加积分
+    const existingOrder = await collections.orders.findOne({ userId, id: orderId });
+    if (existingOrder && existingOrder.status === "paid") {
+      console.log(`⚠️ 订单 ${orderId} 已经处理过了，跳过防止重复充值`);
+      return;
+    }
+
     const now = new Date().toISOString();
 
     const orderRecord = {
@@ -1689,6 +1696,8 @@ app.post("/api/pay/verify", async (req, res) => {
     return res.status(404).json({ error: "ORDER_NOT_FOUND", message: "订单不存在" });
   }
 
+  let latestUser = null;
+  
   if (wechatPay) {
     try {
       console.log(`[支付] 查询订单 ${orderId}`);
@@ -1714,6 +1723,16 @@ app.post("/api/pay/verify", async (req, res) => {
     }
   }
 
+  // 获取最新的用户状态信息
+  try {
+    const collections = await clientStateRepository.getCollections();
+    if (collections && order.userId) {
+      latestUser = await collections.users.findOne({ userId: order.userId });
+    }
+  } catch (e) {
+    console.warn("[支付] 获取用户状态失败", e);
+  }
+
   res.json({
     success: true,
     orderId,
@@ -1721,6 +1740,17 @@ app.post("/api/pay/verify", async (req, res) => {
     paid: order.status === "paid",
     type: order.type,
     itemId: order.itemId,
+    // 返回最新的用户状态给前端
+    user: latestUser ? {
+      userId: latestUser.userId,
+      openid: latestUser.openid,
+      nickname: latestUser.nickname,
+      avatarUrl: latestUser.avatarUrl,
+      avatar: latestUser.avatar,
+      points: latestUser.points || 0,
+      phoneNumber: latestUser.phoneNumber,
+      updatedAt: latestUser.updatedAt
+    } : null
   });
 });
 

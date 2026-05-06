@@ -14,13 +14,6 @@ const categories = [
     banner: "更适合学生和上班族的合并、拆分、压缩与导出。",
   },
   {
-    id: "text",
-    name: "识别与文字",
-    description: "把图片内容提取成可复制可整理的文本。",
-    accent: "#6e8b74",
-    banner: "OCR 和文档识别优先强调清晰结果与继续编辑。",
-  },
-  {
     id: "utility",
     name: "日常效率",
     description: "随手可用的小工具，适合碎片化场景。",

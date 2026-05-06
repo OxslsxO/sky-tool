@@ -27,6 +27,9 @@ const STORAGE_KEYS = {
 Page({
   data: {
     loading: false,
+    showUserInfoStep: false,
+    avatarUrl: '',
+    nickname: '',
   },
 
   onLoad() {
@@ -36,13 +39,36 @@ Page({
     }
   },
 
-  async onChooseAvatar(e) {
+  onChooseAvatar(e) {
     console.log('🎯 获取到微信头像:', e.detail);
     const { avatarUrl } = e.detail;
+    this.setData({
+      avatarUrl,
+      showUserInfoStep: true,
+      nickname: '微信用户',
+    });
+  },
+
+  onNicknameInput(e) {
+    this.setData({
+      nickname: e.detail.value,
+    });
+  },
+
+  async onConfirmLogin() {
+    const { avatarUrl, nickname } = this.data;
+
+    if (!nickname || !nickname.trim()) {
+      wx.showToast({
+        title: '请输入昵称',
+        icon: 'none',
+      });
+      return;
+    }
 
     this.setData({ loading: true });
     try {
-      await this.loginWechat(avatarUrl);
+      await this.loginWechat(avatarUrl, nickname.trim());
     } catch (err) {
       console.error('❌ 登录失败:', err);
       wx.showModal({
@@ -55,7 +81,7 @@ Page({
     }
   },
 
-  async loginWechat(avatarUrl) {
+  async loginWechat(avatarUrl, nickname) {
     console.log('🔄 开始微信登录...');
 
     try {
@@ -70,7 +96,7 @@ Page({
 
       if (!hasBackendService()) {
         console.log('⚠️ 后端服务不可用，使用本地登录模式');
-        this.localLogin(avatarUrl);
+        this.localLogin(avatarUrl, nickname);
         return;
       }
 
@@ -86,7 +112,7 @@ Page({
             code: loginRes.code,
             userInfo: {
               avatarUrl: avatarUrl,
-              nickName: '微信用户',
+              nickName: nickname,
             },
           },
           success: resolve,
@@ -106,9 +132,9 @@ Page({
         const hasLocalData = this._hasLocalUserData();
 
         if (hasLocalData) {
-          await this._loginWithLocalData(userId, user, avatarUrl);
+          await this._loginWithLocalData(userId, user, avatarUrl, nickname);
         } else {
-          await this._loginWithCloudData(userId, user, avatarUrl);
+          await this._loginWithCloudData(userId, user, avatarUrl, nickname);
         }
 
         const currentTasks = getRawTasks();
@@ -130,7 +156,7 @@ Page({
       }
     } catch (err) {
       console.warn('⚠️ 登录过程出错，降级到本地模式:', err);
-      this.localLogin(avatarUrl);
+      this.localLogin(avatarUrl, nickname);
     }
   },
 
@@ -147,13 +173,13 @@ Page({
     }
   },
 
-  async _loginWithCloudData(userId, backendUser, avatarUrl) {
+  async _loginWithCloudData(userId, backendUser, avatarUrl, nickname) {
     console.log('☁️ 本地无数据，从云端恢复...');
 
     updateUserState({
       userId: userId,
       openid: backendUser.openid,
-      nickname: backendUser.nickname || '微信用户',
+      nickname: backendUser.nickname || nickname || '微信用户',
       avatarUrl: backendUser.avatarUrl || backendUser.avatar || avatarUrl,
       avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl,
       phoneNumber: backendUser.phoneNumber || '',
@@ -194,10 +220,10 @@ Page({
       }
     }
 
-    this._ensureAuthInfo(backendUser, avatarUrl);
+    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
   },
 
-  async _loginWithLocalData(userId, backendUser, avatarUrl) {
+  async _loginWithLocalData(userId, backendUser, avatarUrl, nickname) {
     console.log('📦 本地有数据，合并云端数据...');
 
     const localSnapshot = getSyncSnapshot();
@@ -221,7 +247,7 @@ Page({
       updateUserState({
         userId: userId,
         openid: backendUser.openid,
-        nickname: backendUser.nickname || '微信用户',
+        nickname: backendUser.nickname || nickname || '微信用户',
         avatarUrl: backendUser.avatarUrl || backendUser.avatar || avatarUrl,
         avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl,
         phoneNumber: backendUser.phoneNumber || '',
@@ -230,7 +256,7 @@ Page({
       });
     }
 
-    this._ensureAuthInfo(backendUser, avatarUrl);
+    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
 
     try {
       console.log('📤 同步本地数据到云端...');
@@ -244,19 +270,19 @@ Page({
       if (!cloudDataApplied && syncResult && syncResult.ok && syncResult.state) {
         console.log('✅ 从同步响应中恢复云端数据');
         applyRemoteState(syncResult.state, { cloudFirst: true });
-        this._ensureAuthInfo(backendUser, avatarUrl);
+        this._ensureAuthInfo(backendUser, avatarUrl, nickname);
       }
     } catch (syncErr) {
       console.warn('⚠️ 同步本地数据到云端失败:', syncErr);
     }
   },
 
-  _ensureAuthInfo(backendUser, avatarUrl) {
+  _ensureAuthInfo(backendUser, avatarUrl, nickname) {
     const currentUser = getUserState();
     updateUserState({
       userId: backendUser.userId || backendUser.openid || currentUser.userId,
       openid: backendUser.openid || currentUser.openid,
-      nickname: backendUser.nickname || currentUser.nickname || '微信用户',
+      nickname: backendUser.nickname || nickname || currentUser.nickname || '微信用户',
       avatarUrl: backendUser.avatarUrl || backendUser.avatar || avatarUrl || currentUser.avatarUrl,
       avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl || currentUser.avatar,
       authMode: 'wechat',
@@ -264,7 +290,7 @@ Page({
     });
   },
 
-  localLogin(avatarUrl) {
+  localLogin(avatarUrl, nickname) {
     console.log('🔐 使用本地登录模式');
     const currentUser = getUserState();
     const existingOpenid = (currentUser.openid && currentUser.openid.startsWith('local_')) ? currentUser.openid : `local_${Date.now()}`;
@@ -272,7 +298,7 @@ Page({
       authMode: 'wechat',
       openid: existingOpenid,
       avatarUrl: avatarUrl || currentUser.avatarUrl,
-      nickName: '微信用户',
+      nickname: nickname || '微信用户',
       lastLoginAt: new Date().toISOString(),
     });
 

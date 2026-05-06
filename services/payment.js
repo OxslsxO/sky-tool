@@ -240,7 +240,42 @@ async function purchasePoints(packageItem) {
     const verifyResult = await verifyPayment(orderResult.orderId);
     if (verifyResult.success && isVerifiedPaidOrder(verifyResult)) {
       updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
-      return addPointsDirectly(packageItem);
+      
+      // 重要：后端已在后端增加了积分，前端只需要记录订单并使用后端返回的最新用户信息
+      const totalPoints = packageItem.points + (packageItem.bonusPoints || 0);
+      addOrder({
+        type: "points",
+        itemId: packageItem.id,
+        provider: "wechat",
+        status: "paid",
+        title: `${packageItem.points}积分`,
+        amount: packageItem.price,
+        paidAt: Date.now(),
+      });
+      
+      // 直接使用后端返回的最新用户状态更新，确保积分准确
+      if (verifyResult.user) {
+        const { getUserState, updateUserState, addPointsRecord } = require("../utils/task-store");
+        const currentUser = getUserState();
+        // 更新用户状态，使用后端返回的积分
+        updateUserState({
+          ...verifyResult.user,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // 增加积分记录
+        addPointsRecord({
+          type: "recharge",
+          title: `充值${packageItem.points}积分`,
+          change: totalPoints,
+          packageId: packageItem.id,
+          price: packageItem.price,
+        });
+        
+        console.log("[payment] 用户积分已从后端同步更新:", verifyResult.user.points);
+      }
+      
+      return { success: true, message: `已充值${totalPoints}积分` };
     }
 
     throw new Error(`PAYMENT_NOT_CONFIRMED:${JSON.stringify(verifyResult)}`);
