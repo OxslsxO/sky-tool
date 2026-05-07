@@ -37,6 +37,13 @@
           <view class="audio-meta">{{audioMetaText}}</view>
         </view>
       </view>
+      <view class="detail-card__document" wx:if="{{task.status === 'success' && task.resultType === 'document' && !isAudioTask && !task.previewPath}}" bindtap="openDocumentResult">
+        <view class="detail-card__document-icon">📄</view>
+        <view class="detail-card__document-info">
+          <view class="detail-card__document-name">{{task.outputName || '文档文件'}}</view>
+          <view class="detail-card__document-hint">点击打开文件</view>
+        </view>
+      </view>
       <view class="detail-card__meta" wx:if="{{task.metaLines.length}}">
         <text class="detail-card__meta-line" wx:for="{{task.metaLines}}" wx:key="*this">{{item}}</text>
       </view>
@@ -53,6 +60,8 @@
     <view class="card action-card">
       <view class="action-card__buttons">
         <view class="btn-secondary action-card__button" wx:if="{{task.outputPath}}" bindtap="saveResult">保存</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.status === 'success' && task.resultType === 'document' && !task.outputPath && task.remoteUrl}}" bindtap="openDocumentResult">打开文件</view>
+        <view class="btn-ghost action-card__button" wx:if="{{task.remoteUrl}}" bindtap="copyDownloadLink">复制链接</view>
         <view class="btn-ghost action-card__button" bindtap="openTasks">返回</view>
       </view>
     </view>

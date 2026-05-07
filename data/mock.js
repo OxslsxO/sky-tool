@@ -89,7 +89,7 @@ const tools = [
     demoResult: "转换结果会提示可能丢失的特性，例如透明背景或压缩率变化。",
     params: [
       { key: "target", label: "目标格式", options: ["JPG", "PNG", "WEBP", "BMP"] },
-      { key: "quality", label: "输出质量", options: ["标准", "高清", "网页优化"] },
+      { key: "quality", label: "输出质量", options: ["低", "标准", "高清"] },
     ],
   },
   {
@@ -298,7 +298,6 @@ const tools = [
     demoResult: "默认输出清爽二维码，上传 Logo 后会自动提升纠错等级以提高可扫性。",
     params: [
       { key: "style", label: "风格", options: ["简洁黑白", "品牌绿", "暖色调"] },
-      { key: "margin", label: "边距", options: ["标准", "紧凑", "留白充足"] },
     ],
   },
   {

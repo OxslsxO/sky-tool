@@ -7,58 +7,34 @@ function readFileBase64(filePath) {
     try {
       const fsm = wx.getFileSystemManager();
       
-      const readFileDirectly = () => {
-        fsm.readFile({
-          filePath,
-          encoding: "base64",
-          success: (result) => {
-            if (!result || !result.data) {
-              reject(new Error("读取结果为空，请重试"));
-              return;
-            }
+      console.log("[readFileBase64] 开始读取文件，路径:", filePath);
+      
+      // 直接读取，不做多余的检查
+      fsm.readFile({
+        filePath: filePath,
+        encoding: "base64",
+        success: (result) => {
+          if (result && result.data) {
+            console.log("[readFileBase64] 读取成功，数据长度:", result.data.length);
             resolve(result.data);
-          },
-          fail: (readErr) => {
-            const errMsg = (readErr && readErr.errMsg) || "读取文件失败";
-            reject(new Error(`读取文件失败：${errMsg} (文件路径: ${filePath})`));
-          },
-        });
-      };
-
-      try {
-        fsm.getFileInfo({
-          filePath,
-          success: (info) => {
-            if (info.size > MAX_BASE64_FILE_SIZE) {
-              reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
-              return;
-            }
-            readFileDirectly();
-          },
-          fail: () => {
-            readFileDirectly();
-          },
-        });
-      } catch (apiErr) {
-        try {
-          wx.getFileInfo({
-            filePath,
-            success: (info) => {
-              if (info.size > MAX_BASE64_FILE_SIZE) {
-                reject(new Error("文件过大，无法读取（超过200MB），请使用上传方式处理"));
-                return;
-              }
-              readFileDirectly();
-            },
-            fail: () => {
-              readFileDirectly();
-            },
-          });
-        } catch (fallbackErr) {
-          readFileDirectly();
+          } else {
+            console.error("[readFileBase64] 读取结果为空");
+            reject(new Error("读取结果为空，请重试"));
+          }
+        },
+        fail: (readErr) => {
+          console.error("[readFileBase64] 读取失败:", readErr);
+          
+          // 检查是否是微信临时文件路径问题
+          const errMsg = readErr && readErr.errMsg ? readErr.errMsg : "";
+          console.error("[readFileBase64] 错误详情:", errMsg);
+          
+          // 给一个清晰的错误信息
+          reject(new Error(`文件读取失败，请重新选择文件。错误: ${errMsg || '未知错误'}`));
         }
-      }
+      });
     } catch (fatalErr) {
+      console.error("[readFileBase64] 发生致命错误:", fatalErr);
       reject(new Error(`文件处理失败：${(fatalErr && fatalErr.message) || "未知错误"}`));
     }
   });
@@ -141,10 +117,13 @@ function downloadRemoteFile(url) {
 }
 
 async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
-  const readablePath = await ensureReadablePath(file.path);
+  const readablePath = file.path;
+  const uploadUrl = /^https?:\/\//i.test(pathname) ? pathname : buildServiceUrl(pathname);
+  console.log("[uploadFileForJson] 准备上传，URL:", uploadUrl, "文件:", file.name, "路径:", readablePath);
+  
   return new Promise((resolve, reject) => {
     const task = wx.uploadFile({
-      url: buildServiceUrl(pathname),
+      url: uploadUrl,
       filePath: readablePath,
       name: "file",
       timeout: options.timeout || 600000,
@@ -157,10 +136,13 @@ async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
         sizeBytes: String(file.size || 0),
       },
       success: (response) => {
+        console.log("[uploadFileForJson] 上传成功，响应状态:", response.statusCode);
+        
         let data = null;
         try {
           data = response.data ? JSON.parse(response.data) : null;
         } catch (error) {
+          console.error("[uploadFileForJson] 解析响应失败:", error);
           reject(new Error("INVALID_UPLOAD_RESPONSE"));
           return;
         }
@@ -173,6 +155,8 @@ async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
         reject(data || new Error("REMOTE_UPLOAD_FAILED"));
       },
       fail: (err) => {
+        console.error("[uploadFileForJson] 上传失败:", err);
+        
         const errMsg = (err && err.errMsg) || "";
         let message = "文件上传失败，请检查后端服务是否启动";
         let code = "NETWORK_ERROR";
@@ -197,6 +181,32 @@ async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
       task.onProgressUpdate(options.onProgressUpdate);
     }
   });
+}
+
+async function uploadMultipleFilesForJson(pathname, files, formData = {}, options = {}) {
+  const results = [];
+  for (const file of files) {
+    try {
+      const result = await uploadFileForJson(pathname, file, formData, options);
+      if (result && result.files && result.files.length > 0) {
+        results.push(...result.files);
+      } else {
+        results.push({
+          name: file.name,
+          sizeBytes: file.size || 0,
+          pageCount: 0,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to upload file:", err);
+      results.push({
+        name: file.name,
+        sizeBytes: file.size || 0,
+        pageCount: 0,
+      });
+    }
+  }
+  return { ok: true, files: results };
 }
 
 function downloadFileToTemp(url) {
@@ -243,26 +253,15 @@ function downloadFileToUserData(url) {
 async function ensureReadablePath(filePath) {
   if (!filePath) return filePath;
 
-  if (filePath.startsWith("http://tmp/") || filePath.startsWith("http://tmp\\")) {
-    try {
-      return await downloadFileToUserData(filePath);
-    } catch (userDataErr) {
-      try {
-        const tempPath = await downloadFileToTemp(filePath);
-        if (tempPath && !tempPath.startsWith("http://")) {
-          return tempPath;
-        }
-      } catch (_) {}
-      throw new Error(`无法读取临时文件：${filePath}，请重试`);
-    }
+  // 对于微信临时文件，我们直接返回原路径
+  if (filePath.startsWith("http://tmp/") || filePath.startsWith("wxfile://")) {
+    console.log("[ensureReadablePath] 检测到微信临时路径，直接返回:", filePath);
+    return filePath;
   }
 
   if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
     try {
       const tempPath = await downloadFileToTemp(filePath);
-      if (tempPath && tempPath.startsWith("http://tmp/")) {
-        return await downloadFileToUserData(tempPath);
-      }
       return tempPath;
     } catch (downloadErr) {
       throw new Error(`下载图片失败：${downloadErr.message}`);
@@ -273,12 +272,16 @@ async function ensureReadablePath(filePath) {
 }
 
 async function packLocalFile(file) {
+  console.log("[packLocalFile] 开始打包文件:", file.name);
   const filePath = await ensureReadablePath(file.path);
+  console.log("[packLocalFile] 确保路径完成:", filePath);
+  const base64 = await readFileBase64(filePath);
+  console.log("[packLocalFile] 读取 base64 完成");
 
   return {
     name: file.name,
     sizeBytes: file.size || 0,
-    base64: await readFileBase64(filePath),
+    base64: base64,
   };
 }
 
@@ -305,6 +308,7 @@ module.exports = {
   requestJson,
   downloadRemoteFile,
   uploadFileForJson,
+  uploadMultipleFilesForJson,
   packLocalFile,
   uploadLocalFile,
   ensureReadablePath,

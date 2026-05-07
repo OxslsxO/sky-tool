@@ -56,6 +56,48 @@
   margin-top: 20rpx;
 }
 
+.detail-card__document {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx;
+  margin-top: 20rpx;
+  border-radius: 24rpx;
+  background: rgba(244, 240, 233, 0.9);
+}
+
+.detail-card__document-icon {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #1d5c4b 0%, #2d7a63 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48rpx;
+}
+
+.detail-card__document-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.detail-card__document-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2b28;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-card__document-hint {
+  font-size: 22rpx;
+  color: #6d7268;
+}
+
 .detail-card__attachment {
   display: flex;
   align-items: center;

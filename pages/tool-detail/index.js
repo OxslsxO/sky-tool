@@ -2,6 +2,8 @@ const qrcode = require("../../utils/vendor/qrcode-generator");
 const { PDFDocument } = require("../../utils/vendor/pdf-lib");
 const { getToolById, getCategoryById } = require("../../data/mock");
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const BACKGROUND_COLOR_MAP = {
   "白色": "#ffffff",
   "蓝色": "#2d6ec9",
@@ -48,6 +50,7 @@ const {
   uploadFileForJson,
   ensureReadablePath,
 } = require("../../services/remote-executor");
+const { buildServiceUrl } = require("../../services/backend-tools");
 const payment = require("../../services/payment");
 
 function chooseImage(count) {
@@ -555,6 +558,21 @@ Page({
     pdfToWordResultHeadline: "",
     pdfToWordResultDetail: "",
     pdfToWordResultMetaLines: [],
+    pdfSplitResultReady: false,
+    pdfSplitResultPath: "",
+    pdfSplitResultRemoteUrl: "",
+    pdfSplitResultName: "",
+    pdfSplitResultHeadline: "",
+    pdfSplitResultDetail: "",
+    pdfSplitResultMetaLines: [],
+    pdfSplitAttachments: [],
+    officeToPdfResultReady: false,
+    officeToPdfResultPath: "",
+    officeToPdfResultRemoteUrl: "",
+    officeToPdfResultName: "",
+    officeToPdfResultHeadline: "",
+    officeToPdfResultDetail: "",
+    officeToPdfResultMetaLines: [],
     imageToPdfResultReady: false,
     imageToPdfResultPath: "",
     imageToPdfResultRemoteUrl: "",
@@ -580,6 +598,7 @@ Page({
     showMoreColors: false,
     userState: null,
     selectedPayment: "points", // 默认选择积分支付
+    unitConvertResult: "", // 单位换算实时结果
   },
 
   onLoad(options) {
@@ -639,6 +658,13 @@ Page({
           backendConfigured: this.data.backendConfigured,
         }),
       });
+    }
+    
+    // 单位换算工具初始化时尝试计算
+    if (tool.id === "unit-convert") {
+      setTimeout(() => {
+        this.calculateUnitConvert();
+      }, 0);
     }
   },
 
@@ -786,6 +812,11 @@ Page({
   },
 
   getPrimaryActionText({ isClientTool: clientTool, backendConfigured }) {
+    // 单位换算不需要按钮
+    if (this.data.tool && this.data.tool.id === "unit-convert") {
+      return "";
+    }
+    
     if (this.data.isWorking) {
       return "处理中...";
     }
@@ -1095,6 +1126,15 @@ Page({
     }
 
     this.setData(nextState);
+    
+    // 单位换算时实时计算
+    if (this.data.tool && this.data.tool.id === "unit-convert") {
+      // 因为单位可能变化了，需要用最新数据计算
+      setTimeout(() => {
+        this.calculateUnitConvert();
+      }, 0);
+    }
+    
     if (this.data.tool && this.data.tool.id === "photo-id") {
       persistPhotoIdSession({
         ...this.data,
@@ -1111,6 +1151,7 @@ Page({
     this.setData({
       numberInput: event.detail.value,
     });
+    this.calculateUnitConvert();
   },
 
   handleCustomWidth(event) {
@@ -1131,12 +1172,34 @@ Page({
     this.setData({
       [field]: unit,
     });
+    this.calculateUnitConvert();
   },
 
   swapUnits() {
     this.setData({
       fromUnit: this.data.toUnit,
       toUnit: this.data.fromUnit,
+    });
+    this.calculateUnitConvert();
+  },
+
+  calculateUnitConvert() {
+    const { tool, selections, numberInput, fromUnit, toUnit } = this.data;
+    if (!tool || tool.id !== "unit-convert" || !numberInput) {
+      this.setData({ unitConvertResult: "" });
+      return;
+    }
+    
+    const conversion = convertValue({
+      group: selections.group,
+      value: numberInput,
+      fromUnit,
+      toUnit,
+      precisionLabel: selections.precision,
+    });
+    
+    this.setData({
+      unitConvertResult: conversion ? conversion.text : "",
     });
   },
 
@@ -1219,11 +1282,85 @@ Page({
     this.startProcessingProgressTicker();
   },
 
+  validateBeforeExecute() {
+    const { tool, imageInput, backendFiles, qrText } = this.data;
+    if (!tool) {
+      return { valid: false, message: "请先选择工具" };
+    }
+
+    const toolId = tool.id;
+
+    // 需要图片输入的工具
+    const imageTools = ["photo-id", "image-compress", "image-convert", "resize-crop", "universal-compress", "ocr-text"];
+    if (imageTools.includes(toolId)) {
+      if (!imageInput) {
+        const toolNames = {
+          "photo-id": "图片",
+          "image-compress": "图片",
+          "image-convert": "图片",
+          "resize-crop": "图片",
+          "universal-compress": "文件",
+          "ocr-text": "图片"
+        };
+        return { valid: false, message: `请先选择一张${toolNames[toolId]}` };
+      }
+    }
+
+    // 需要后端文件输入的工具
+    const backendTools = ["pdf-merge", "pdf-split", "pdf-compress", "office-to-pdf", "pdf-to-word", "audio-convert"];
+    if (backendTools.includes(toolId)) {
+      if (!backendFiles || !backendFiles.length) {
+        const toolNames = {
+          "pdf-merge": "PDF文件",
+          "pdf-split": "PDF文件",
+          "pdf-compress": "PDF文件",
+          "office-to-pdf": "Office文件",
+          "pdf-to-word": "PDF文件",
+          "audio-convert": "音视频文件"
+        };
+        return { valid: false, message: `请先选择${toolNames[toolId]}` };
+      }
+      // PDF合并需要至少2个文件
+      if (toolId === "pdf-merge" && backendFiles.length < 2) {
+        return { valid: false, message: "至少需要选择2份PDF文件" };
+      }
+    }
+
+    // 图片转PDF需要文件
+    if (toolId === "image-to-pdf") {
+      if (!this.data.imageToPdfFiles || !this.data.imageToPdfFiles.length) {
+        return { valid: false, message: "请先选择要转换的图片" };
+      }
+    }
+
+    // 二维码生成需要文本
+    if (toolId === "qr-maker") {
+      if (!qrText || !qrText.trim()) {
+        return { valid: false, message: "请先输入要生成二维码的内容" };
+      }
+    }
+
+    // 单位换算不需要文件
+
+    return { valid: true };
+  },
+
   async handleExecute() {
     logger.log("[处理执行] 开始执行处理");
 
     if (this.data.isWorking) {
       logger.log("[处理执行] 已经在处理中，跳过");
+      return;
+    }
+
+    // 先验证文件/输入是否准备好，没有准备好直接提示，不扣积分
+    const validateResult = this.validateBeforeExecute();
+    if (!validateResult.valid) {
+      logger.log("[处理执行] 验证失败:", validateResult.message);
+      wx.showToast({
+        title: validateResult.message,
+        icon: "none",
+      });
       return;
     }
 
@@ -1486,6 +1623,14 @@ Page({
         this.loadPdfPreviews(backendFiles);
       } else if (tool.id === "pdf-to-word") {
         Object.assign(nextState, this.getClearedPdfToWordResult());
+        this.setData(nextState);
+      } else if (tool.id === "pdf-split") {
+        // PDF拆分：清除之前的结果并加载PDF页数
+        Object.assign(nextState, this.getClearedPdfSplitResult());
+        this.setData(nextState);
+        
+        // 异步加载PDF预览获取页数
+        this.loadPdfPreviewsForSplit(backendFiles);
       } else if (tool.id === "audio-convert") {
         if (this.data.audioConvertAudioContext) {
           this.data.audioConvertAudioContext.stop();
@@ -1507,10 +1652,8 @@ Page({
             .map((param) => param.key === "target" ? { ...param, options: targetOptions } : param),
           ...this.getClearedAudioConvertResult(),
         });
-      }
-
-      // PDF合并已经提前 setData 了，避免重复
-      if (tool.id !== "pdf-merge") {
+        this.setData(nextState);
+      } else {
         this.setData(nextState);
       }
     } catch (error) {
@@ -1755,6 +1898,19 @@ Page({
     };
   },
 
+  getClearedPdfSplitResult() {
+    return {
+      pdfSplitResultReady: false,
+      pdfSplitResultPath: "",
+      pdfSplitResultRemoteUrl: "",
+      pdfSplitResultName: "",
+      pdfSplitResultHeadline: "",
+      pdfSplitResultDetail: "",
+      pdfSplitResultMetaLines: [],
+      pdfSplitAttachments: [],
+    };
+  },
+
   getClearedPdfMergePreview() {
     return {
       pdfMergePreviewFiles: [],
@@ -1781,7 +1937,7 @@ Page({
         return;
       }
       // 上传文件并获取PDF信息
-      const { packLocalFile, requestJson } = require("../../services/remote-executor");
+      const { uploadFileForJson, requestJson, ensureReadablePath } = require("../../services/remote-executor");
       const { hasBackendService } = require("../../services/backend-tools");
       if (!hasBackendService()) {
         wx.showToast({
@@ -1798,42 +1954,39 @@ Page({
         });
         return;
       }
-      // 打包所有PDF文件
-      const packedFiles = [];
-      for (let file of files) {
+      
+      // 使用文件上传逐个获取PDF信息
+      const previewResults = [];
+      for (const file of files) {
         try {
-          const packed = await packLocalFile(file);
-          packedFiles.push(packed);
+          const result = await uploadFileForJson("/api/pdf/preview", file);
+          if (result && result.files && result.files.length > 0) {
+            previewResults.push(result.files[0]);
+          } else {
+            previewResults.push({
+              name: file.name,
+              sizeBytes: file.size || 0,
+              pageCount: 0,
+            });
+          }
         } catch (err) {
-          // 打包失败，继续
-          packedFiles.push({
+          console.error("Failed to upload file for preview:", err);
+          previewResults.push({
             name: file.name,
             sizeBytes: file.size || 0,
-            base64: "",
+            pageCount: 0,
           });
         }
       }
-      // 调用预览API
-      const result = await requestJson("/api/pdf/preview", { files: packedFiles });
-      if (result && result.ok && result.files) {
-        // 组合预览文件信息
-        const previewFiles = files.map((file, index) => ({
-          ...file,
-          pageCount: (result.files[index] && result.files[index].pageCount) || 0,
-        }));
-        this.setData({
-          pdfMergePreviewFiles: previewFiles,
-        });
-      } else {
-        // 失败时也显示基本信息
-        const previewFiles = files.map((file) => ({
-          ...file,
-          pageCount: 0,
-        }));
-        this.setData({
-          pdfMergePreviewFiles: previewFiles,
-        });
-      }
+      
+      // 组合预览文件信息
+      const previewFiles = files.map((file, index) => ({
+        ...file,
+        pageCount: (previewResults[index] && previewResults[index].pageCount) || 0,
+      }));
+      this.setData({
+        pdfMergePreviewFiles: previewFiles,
+      });
     } catch (error) {
       // 忽略预览错误，继续使用基本信息
       console.error("loadPdfPreviews error:", error);
@@ -1843,6 +1996,46 @@ Page({
       }));
       this.setData({
         pdfMergePreviewFiles: previewFiles,
+      });
+    }
+  },
+
+  async loadPdfPreviewsForSplit(files) {
+    try {
+      if (!files || !files.length) {
+        return;
+      }
+      // 上传文件并获取PDF信息
+      const { uploadFileForJson, requestJson, ensureReadablePath } = require("../../services/remote-executor");
+      const { hasBackendService } = require("../../services/backend-tools");
+      if (!hasBackendService()) {
+        // 没有后端时默认设置页码范围
+        this.setData({
+          pageRange: "1-1",
+        });
+        return;
+      }
+      
+      // 使用文件上传获取PDF信息
+      let pageCount = 1;
+      try {
+        const result = await uploadFileForJson("/api/pdf/preview", files[0]);
+        if (result && result.files && result.files.length > 0 && result.files[0].pageCount) {
+          pageCount = result.files[0].pageCount;
+        }
+      } catch (err) {
+        console.error("Failed to upload file for split preview:", err);
+      }
+      
+      // 更新默认页码范围为 1-pageCount
+      this.setData({
+        pageRange: `1-${pageCount}`,
+      });
+    } catch (error) {
+      // 忽略预览错误
+      console.error("loadPdfPreviewsForSplit error:", error);
+      this.setData({
+        pageRange: "1-1",
       });
     }
   },
@@ -2533,6 +2726,150 @@ Page({
     });
   },
 
+  async previewOfficeToPdfResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.officeToPdfResultPath;
+    const url = this.data.officeToPdfResultRemoteUrl;
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "预览链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在加载",
+      mask: true,
+    });
+
+    try {
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[Office转PDF] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ officeToPdfResultPath: filePath });
+      }
+
+      // 打开文档
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: filePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("预览失败:", error);
+      wx.showModal({
+        title: "预览失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  async downloadOfficeToPdfResult() {
+    // 优先使用本地缓存路径
+    let filePath = this.data.officeToPdfResultPath;
+    const url = this.data.officeToPdfResultRemoteUrl;
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "下载链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在打开",
+      mask: true,
+    });
+
+    try {
+      // 如果没有本地路径，先下载
+      if (!filePath && url) {
+        console.log("[Office转PDF] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        // 更新本地路径缓存
+        this.setData({ officeToPdfResultPath: filePath });
+      }
+
+      // 打开文档
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: filePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("下载失败:", error);
+      wx.showModal({
+        title: "下载失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  copyOfficeToPdfUrl() {
+    if (!this.data.officeToPdfResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.officeToPdfResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
   async previewPdfMergeResult() {
     // 优先使用本地缓存路径
     let filePath = this.data.pdfMergeResultPath;
@@ -2677,6 +3014,224 @@ Page({
     });
   },
 
+  async previewPdfSplitResult() {
+    let filePath = this.data.pdfSplitResultPath;
+    const url = this.data.pdfSplitResultRemoteUrl;
+
+    console.log("[PDF拆分] 预览开始", { filePath, url });
+
+    // 安全检查：如果 filePath 看起来像 URL，清除它并重新下载
+    if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
+      console.warn("[PDF拆分] 发现错误：本地路径居然是 URL，需要重新下载", filePath);
+      filePath = "";
+    }
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "预览链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在加载",
+      mask: true,
+    });
+
+    try {
+      if (!filePath && url) {
+        console.log("[PDF拆分] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              console.log("[PDF拆分] 下载结果", res);
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        console.log("[PDF拆分] 下载完成，本地路径:", filePath);
+        this.setData({ pdfSplitResultPath: filePath });
+      }
+
+      console.log("[PDF拆分] 准备打开文档，本地路径:", filePath);
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: filePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("预览失败:", error);
+      wx.showModal({
+        title: "预览失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  async previewPdfSplitAttachment(e) {
+    const { url, name } = e.currentTarget.dataset;
+    console.log("[PDF拆分] 预览附件开始", { url, name });
+    
+    if (!url) {
+      wx.showToast({
+        title: "预览链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在加载",
+      mask: true,
+    });
+
+    try {
+      console.log("[PDF拆分] 开始下载附件:", url);
+      const downloadRes = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url: url,
+          success: (res) => {
+            console.log("[PDF拆分] 附件下载结果:", res);
+            if (res.statusCode === 200) {
+              resolve(res);
+            } else {
+              reject(new Error(`下载失败: ${res.statusCode}`));
+            }
+          },
+          fail: (err) => reject(err),
+        });
+      });
+
+      console.log("[PDF拆分] 附件下载完成，准备打开文档:", downloadRes.tempFilePath);
+      await new Promise((resolve, reject) => {
+        wx.openDocument({
+          filePath: downloadRes.tempFilePath,
+          fileType: 'pdf',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("预览失败:", error);
+      wx.showModal({
+        title: "预览失败",
+        content: "请检查网络连接或尝试复制链接在其他应用中打开",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  async downloadPdfSplitResult() {
+    let filePath = this.data.pdfSplitResultPath;
+    const url = this.data.pdfSplitResultRemoteUrl;
+
+    console.log("[PDF拆分] 下载开始", { filePath, url });
+
+    // 安全检查：如果 filePath 看起来像 URL，清除它并重新下载
+    if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
+      console.warn("[PDF拆分] 发现错误：本地路径居然是 URL，需要重新下载", filePath);
+      filePath = "";
+    }
+
+    if (!filePath && !url) {
+      wx.showToast({
+        title: "下载链接不存在",
+        icon: "none",
+      });
+      return;
+    }
+
+    wx.showLoading({
+      title: "正在保存",
+      mask: true,
+    });
+
+    try {
+      if (!filePath && url) {
+        console.log("[PDF拆分] 无本地缓存，正在下载:", url);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: url,
+            success: (res) => {
+              console.log("[PDF拆分] 下载结果", res);
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        console.log("[PDF拆分] 下载完成，本地路径:", filePath);
+        this.setData({ pdfSplitResultPath: filePath });
+      }
+
+      console.log("[PDF拆分] 准备保存文件:", filePath);
+      await new Promise((resolve, reject) => {
+        wx.saveFile({
+          tempFilePath: filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+
+      wx.showToast({
+        title: "已保存到手机",
+        icon: "none",
+      });
+      wx.hideLoading();
+    } catch (error) {
+      wx.hideLoading();
+      console.error("保存失败:", error);
+      wx.showModal({
+        title: "保存失败",
+        content: "请检查网络连接或存储空间是否充足",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    }
+  },
+
+  copyPdfSplitUrl() {
+    if (!this.data.pdfSplitResultRemoteUrl) {
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.data.pdfSplitResultRemoteUrl,
+      success: () => {
+        wx.showToast({
+          title: "已复制下载链接",
+          icon: "none",
+        });
+      },
+    });
+  },
+
   async uploadGeneratedOutput(filePath, options = {}) {
     if (!filePath || !hasBackendService()) {
       return null;
@@ -2777,20 +3332,22 @@ Page({
     }
 
     this.updateProcessingProgress(16, "正在读取图片...");
-    const payload = {
-      file: await packLocalFile({
-        path: imageInput.path,
-        name: getFileName(imageInput.path),
-        size: imageInput.size,
-      }),
+    // 导入需要的工具函数
+    const { uploadFileForJson } = require("../../services/remote-executor");
+    
+    // 使用文件上传方式
+    const response = await this.requestJsonWithProgress("/api/ocr/image", {
       language: selections.language,
       layout: selections.layout,
-    };
-
-    const response = await this.requestJsonWithProgress("/api/ocr/image", payload, {
+    }, {
       target: 82,
       status: "正在识别文字...",
       sizeBytes: imageInput.size,
+    }, async (url) => {
+      return await uploadFileForJson(url, imageInput, {
+        language: selections.language,
+        layout: selections.layout,
+      });
     });
     this.updateProcessingProgress(84, "正在整理文字...");
     const resultText = response.text || "";
@@ -2892,7 +3449,7 @@ Page({
     this.startProcessingProgressTicker();
   },
 
-  async requestJsonWithProgress(pathname, data, options = {}) {
+  async requestJsonWithProgress(pathname, data, options = {}, uploadCallback) {
     const target = options.target || 86;
     const status = options.status || "正在处理...";
     const durationMs = options.durationMs || estimateRemoteDurationMs(
@@ -2901,7 +3458,12 @@ Page({
     );
 
     this.updateProcessingProgress(target, status, { durationMs });
-    const response = await requestJson(pathname, data, options.requestOptions || {});
+    let response;
+    if (typeof uploadCallback === 'function') {
+      response = await uploadCallback(buildServiceUrl(pathname));
+    } else {
+      response = await requestJson(pathname, data, options.requestOptions || {});
+    }
     this.updateProcessingDisplayProgress(target, status);
     return response;
   },
@@ -2999,20 +3561,10 @@ Page({
       });
 
       this.updateProcessingProgress(15, "正在上传图片...");
-      logger.log("[照片转证件照] 开始打包文件");
+      logger.log("[照片转证件照] 开始上传文件");
       
-      let packedFile;
-      try {
-        packedFile = await packLocalFile({
-          path: imageInput.path,
-          name: getFileName(imageInput.path),
-          size: imageInput.size,
-        });
-        logger.log("[照片转证件照] 文件打包完成，base64 长度:", packedFile.base64?.length || 0);
-      } catch (packError) {
-        logger.error("[照片转证件照] 文件打包失败:", packError.message, packError);
-        throw new Error(`文件打包失败：${packError.message}`);
-      }
+      // 导入需要的工具函数
+      const { uploadFileForJson } = require("../../services/remote-executor");
       
       if (isTimeout) {
         logger.log("[照片转证件照] 已超时，中断处理");
@@ -3022,8 +3574,8 @@ Page({
       logger.log("[照片转证件照] 发送请求到 /api/photo-id");
       let remoteResponse;
       try {
+        // 使用文件上传方式
         remoteResponse = await this.requestJsonWithProgress("/api/photo-id", {
-          file: packedFile,
           size: selections.size,
           background: selections.background,
           retouch: selections.retouch,
@@ -3035,6 +3587,12 @@ Page({
             timeout: 120000, // 减少到 2 分钟
             includeMeta: true,
           },
+        }, async (url) => {
+          return await uploadFileForJson(url, imageInput, {
+            size: selections.size,
+            background: selections.background,
+            retouch: selections.retouch,
+          });
         });
         logger.log("[照片转证件照] 收到原始响应:", remoteResponse);
       } catch (requestError) {
@@ -3328,20 +3886,33 @@ Page({
     }
 
     try {
-      this.updateProcessingProgress(18, "正在读取 PDF...");
+      this.updateProcessingProgress(18, "正在读取 PDF 文件...");
+      
+      // 使用简单直接的 base64 方式
+      const { packLocalFile } = require("../../services/remote-executor");
       const files = [];
+      
       for (let index = 0; index < backendFiles.length; index += 1) {
-        files.push(await packLocalFile(backendFiles[index]));
-        this.updateProcessingProgress(18 + Math.round(((index + 1) / backendFiles.length) * 24), "正在读取 PDF...");
+        try {
+          console.log(`[PDF合并] 正在处理第 ${index + 1} 个文件:`, backendFiles[index].name);
+          const processedFile = await packLocalFile(backendFiles[index]);
+          files.push(processedFile);
+          this.updateProcessingProgress(18 + Math.round(((index + 1) / backendFiles.length) * 24), "正在处理 PDF...");
+        } catch (readErr) {
+          console.error(`[PDF合并] 读取第 ${index + 1} 个文件失败:`, readErr);
+          throw readErr;
+        }
       }
-
+      
+      this.updateProcessingProgress(45, "正在合并 PDF...");
       const beforeBytes = backendFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+      
       const response = await this.requestJsonWithProgress("/api/pdf/merge", { files }, {
         target: 80,
         status: "正在合并 PDF...",
         sizeBytes: beforeBytes,
       });
-
+      
       this.updateProcessingProgress(82, "正在保存结果...");
       
       // 创建任务记录
@@ -3393,9 +3964,15 @@ Page({
       this.updateProcessingProgress(100, "合并完成");
     } catch (error) {
       console.error("PDF合并失败:", error);
+      // 确保我们在出错时重置状态
+      this.setData({
+        isWorking: false,
+        showProcessingOverlay: false,
+      });
       wx.showToast({
-        title: "合并失败，请重试",
+        title: error.message || "合并失败，请重试",
         icon: "none",
+        duration: 3000,
       });
     }
   },
@@ -3410,19 +3987,101 @@ Page({
       return;
     }
 
-    this.updateProcessingProgress(24, "正在读取 PDF...");
-    const file = await packLocalFile(backendFiles[0]);
-    const response = await this.requestJsonWithProgress("/api/pdf/split", {
-      file,
+    this.updateProcessingProgress(24, "正在上传 PDF...");
+    // 导入需要的工具函数
+    const { uploadFileForJson } = require("../../services/remote-executor");
+    
+    // 更新进度显示
+    const target = 84;
+    const status = "正在拆分 PDF...";
+    const durationMs = estimateRemoteDurationMs(tool.id, backendFiles[0].size);
+    this.updateProcessingProgress(target, status, { durationMs });
+    
+    // 使用文件上传而不是 base64 读取
+    const response = await uploadFileForJson("/api/pdf/split", backendFiles[0], {
       splitMode: selections.splitMode,
       pageRange,
-    }, {
-      target: 84,
-      status: "正在拆分 PDF...",
-      sizeBytes: backendFiles[0].size,
     });
-
-    await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+    
+    this.updateProcessingDisplayProgress(target, status);
+    this.updateProcessingProgress(86, "正在保存结果...");
+    
+    const fileResponse = response.file || {};
+    const remoteUrl = getPreferredRemoteFileUrl(fileResponse);
+    
+    // 处理附件（拆分出来的多个PDF）
+    const attachments = (response.files || []).map((item) => ({
+      name: item.name,
+      label: item.label,
+      url: getPreferredRemoteFileUrl(item),
+      sizeBytes: item.sizeBytes,
+    }));
+    
+    let localPath = "";
+    
+    // 如果有远程URL，先下载到本地
+    if (remoteUrl) {
+      try {
+        console.log("[PDF拆分] 正在下载文件:", remoteUrl);
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: remoteUrl,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        localPath = downloadRes.tempFilePath;
+        console.log("[PDF拆分] 文件已下载:", localPath);
+      } catch (downloadError) {
+        console.warn("[PDF拆分] 下载文件失败，仅保留远程链接:", downloadError);
+      }
+    }
+    
+    // 创建任务记录
+    const taskResult = createTask(tool, selections, {
+      instant: true,
+      skipUsage: true,
+      resultType: "document",
+      inputName: backendFiles[0].name,
+      outputName: fileResponse.name || "拆分结果",
+      beforeBytes: backendFiles[0].size,
+      afterBytes: fileResponse.sizeBytes || null,
+      resultHeadline: response.headline || "PDF拆分已完成",
+      resultDetail: response.detail || "",
+      outputPath: localPath,
+      remoteUrl: remoteUrl,
+      copyText: remoteUrl,
+      metaLines: response.metaLines || [],
+      attachments: attachments,
+    });
+    
+    this.latestCreatedTaskId = taskResult.task ? taskResult.task.id : this.data.latestCreatedTaskId;
+    
+    // 更新页面状态
+    this.setData({
+      latestCreatedTaskId: this.latestCreatedTaskId,
+      pdfSplitResultReady: true,
+      pdfSplitResultPath: localPath,
+      pdfSplitResultRemoteUrl: remoteUrl,
+      pdfSplitResultName: fileResponse.name || "拆分结果",
+      pdfSplitResultHeadline: response.headline || "PDF拆分已完成",
+      pdfSplitResultDetail: response.detail || "",
+      pdfSplitResultMetaLines: response.metaLines || [],
+      pdfSplitAttachments: attachments,
+    });
+    
+    wx.showToast({
+      title: "拆分完成",
+      icon: "none",
+    });
+    
+    this.updateProcessingProgress(100, "处理完成");
   },
 
   async runRemotePdfCompress() {
@@ -3436,7 +4095,12 @@ Page({
     }
 
     this.updateProcessingProgress(24, "正在读取 PDF...");
-    const file = await packLocalFile(backendFiles[0]);
+    // 导入需要的工具函数
+    const { packLocalFile, ensureReadablePath } = require("../../services/remote-executor");
+    // 先确保文件路径可用
+    const readablePath = await ensureReadablePath(backendFiles[0].path);
+    const processedFile = { ...backendFiles[0], path: readablePath };
+    const file = await packLocalFile(processedFile);
     const response = await this.requestJsonWithProgress("/api/pdf/compress", {
       file,
       mode: selections.mode,
@@ -3461,18 +4125,74 @@ Page({
 
     try {
       this.updateProcessingProgress(24, "正在读取文档...");
-      const file = await packLocalFile(backendFiles[0]);
+      // 导入需要的工具函数
+      const { uploadFileForJson } = require("../../services/remote-executor");
+      
+      // 使用文件上传方式
       const response = await this.requestJsonWithProgress("/api/office/to-pdf", {
-        file,
         quality: selections.quality,
         pageMode: selections.pageMode,
       }, {
         target: 84,
         status: "正在转换 PDF...",
         sizeBytes: backendFiles[0].size,
+      }, async (url) => {
+        return await uploadFileForJson(url, backendFiles[0], {
+          quality: selections.quality,
+          pageMode: selections.pageMode,
+        });
       });
 
+      this.updateProcessingProgress(82, "正在保存结果...");
       await this.createRemoteDocumentTask(tool, selections, response, backendFiles[0].name, backendFiles[0].size);
+
+      const fileResponse = response.file || {};
+      const remoteUrl = fileResponse.downloadUrl || fileResponse.url || fileResponse.fallbackUrl || fileResponse.externalUrl || "";
+      let localPath = "";
+
+      // 如果有远程URL，先下载到本地
+      if (remoteUrl) {
+        try {
+          console.log("[Office转PDF] 正在下载文件:", remoteUrl);
+          const downloadRes = await new Promise((resolve, reject) => {
+            wx.downloadFile({
+              url: remoteUrl,
+              success: (res) => {
+                if (res.statusCode === 200) {
+                  resolve(res);
+                } else {
+                  reject(new Error(`下载失败: ${res.statusCode}`));
+                }
+              },
+              fail: (err) => reject(err),
+            });
+          });
+          localPath = downloadRes.tempFilePath;
+          console.log("[Office转PDF] 文件已下载:", localPath);
+        } catch (downloadError) {
+          console.warn("[Office转PDF] 下载文件失败，仅保留远程链接:", downloadError);
+        }
+      }
+
+      // 使用原文件名，替换扩展名为 .pdf
+      const originalName = backendFiles[0].name || "文档";
+      const baseName = originalName.replace(/\.(docx?|xlsx?|pptx?)$/i, "");
+      const fileName = `${baseName}.pdf`;
+
+      const afterBytes = fileResponse.sizeBytes || null;
+      const beforeBytes = backendFiles[0].size || 0;
+
+      this.setData({
+        officeToPdfResultReady: true,
+        officeToPdfResultPath: localPath,
+        officeToPdfResultRemoteUrl: remoteUrl,
+        officeToPdfResultName: fileName,
+        officeToPdfResultHeadline: response.headline || "Office 转 PDF 已完成",
+        officeToPdfResultDetail: response.detail || "",
+        officeToPdfResultMetaLines: response.metaLines || [],
+      });
+
+      this.updateProcessingProgress(100, "转换完成");
     } catch (error) {
       console.error("[Office转PDF] 失败:", error);
       this.setData({
@@ -3507,15 +4227,22 @@ Page({
 
     try {
       this.updateProcessingProgress(22, "正在读取 PDF...");
-      const file = await packLocalFile(backendFiles[0]);
+      // 导入需要的工具函数
+      const { uploadFileForJson } = require("../../services/remote-executor");
+      
+      // 使用文件上传方式
       const response = await this.requestJsonWithProgress("/api/pdf/to-word", {
-        file,
         format: selections.format,
         layout: selections.layout,
       }, {
         target: 80,
         status: "正在转换 Word...",
         sizeBytes: backendFiles[0].size,
+      }, async (url) => {
+        return await uploadFileForJson(url, backendFiles[0], {
+          format: selections.format,
+          layout: selections.layout,
+        });
       });
 
       this.updateProcessingProgress(82, "正在保存结果...");
@@ -3628,15 +4355,24 @@ Page({
     }
 
     this.updateProcessingProgress(22, "正在读取音视频...");
-    const file = await packLocalFile(backendFiles[0]);
+    // 导入需要的工具函数
+    const { uploadFileForJson } = require("../../services/remote-executor");
+    
+    // 使用文件上传方式
     const response = await this.requestJsonWithProgress("/api/audio/convert", {
-      file,
       target,
       quality: selections.quality,
     }, {
       target: 84,
       status: "正在转换音视频...",
       sizeBytes: backendFiles[0].size,
+    }, async (url) => {
+      return await uploadFileForJson(url, {
+        file: backendFiles[0],
+        target,
+        quality: selections.quality,
+        fileName: backendFiles[0].name,
+      });
     });
 
     this.updateProcessingProgress(88, "正在保存结果...");
@@ -3794,9 +4530,9 @@ Page({
     }
 
     const qualityMap = {
+      "低": 0.68,
       "标准": 0.82,
-      "高清": 0.92,
-      "网页优化": 0.68,
+      "高清": 0.92
     };
 
     const exportFormat = selections.target.toLowerCase();
@@ -4336,12 +5072,6 @@ Page({
     qr.make();
 
     const moduleCount = qr.getModuleCount();
-    const marginMap = {
-      "标准": 4,
-      "紧凑": 2,
-      "留白充足": 6,
-    };
-
     const colorMap = {
       "简洁黑白": "#111111",
       "品牌绿": "#1d5c4b",
@@ -4349,7 +5079,7 @@ Page({
     };
 
     const cellSize = 8;
-    const margin = marginMap[selections.margin] || 4;
+    const margin = 4;
     const size = (moduleCount + margin * 2) * cellSize;
     const fillColor = colorMap[selections.style] || "#111111";
 
@@ -4405,7 +5135,6 @@ Page({
       resultText: content,
       metaLines: [
         `风格 ${selections.style}`,
-        `边距 ${selections.margin}`,
         `Logo ${qrLogoInput ? "已上传" : "未使用"}`,
         remoteFile ? `云端存储 ${remoteFile.provider === "qiniu" ? "七牛云" : "后端"}` : "云端存储 待同步",
       ],

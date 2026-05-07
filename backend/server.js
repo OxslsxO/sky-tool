@@ -334,13 +334,19 @@ function sanitizeBaseName(name) {
     .slice(0, 48);
 }
 
-function createOutputFileName(extension, baseName) {
+function createOutputFileName(extension, baseName, addRandomSuffix = true) {
   const normalizedExtension = normalizeExtension(extension);
   const safeBaseName = sanitizeBaseName(baseName);
-  const suffix = makeId();
-  return safeBaseName
-    ? `${safeBaseName}-${suffix}.${normalizedExtension}`
-    : `${suffix}.${normalizedExtension}`;
+  if (addRandomSuffix) {
+    const suffix = makeId();
+    return safeBaseName
+      ? `${safeBaseName}-${suffix}.${normalizedExtension}`
+      : `${suffix}.${normalizedExtension}`;
+  } else {
+    return safeBaseName
+      ? `${safeBaseName}.${normalizedExtension}`
+      : `${makeId()}.${normalizedExtension}`;
+  }
 }
 
 function getClientIp(req) {
@@ -417,9 +423,10 @@ function requireApiToken(req, res, next) {
 }
 
 async function saveOutputFile(req, buffer, options) {
+  const addRandomSuffix = options.addRandomSuffix !== false; // 默认添加随机后缀
   const stored = await storage.saveBuffer(req, buffer, {
     folder: options.folder || "outputs",
-    fileName: createOutputFileName(options.extension, options.baseName),
+    fileName: createOutputFileName(options.extension, options.baseName, addRandomSuffix),
     extension: options.extension,
     contentType: options.contentType,
   });
@@ -452,7 +459,7 @@ function buildFileResponse(storedFile, mimeType, label, req) {
 
   return {
     name: storedFile.fileName,
-    url: storedFile.url,
+    url: downloadUrl || storedFile.url,
     sizeBytes: storedFile.sizeBytes,
     mimeType,
     label: label || storedFile.fileName,
@@ -812,7 +819,7 @@ function normalizeBaiduOcrLines(data) {
 async function recognizeTextFromImageWithBaidu(file, languageLabel, layoutLabel) {
   const token = await getBaiduOcrAccessToken();
   const config = getBaiduOcrConfig();
-  const fileBuffer = decodeBase64File(file);
+  const fileBuffer = file?.buffer ? file.buffer : decodeBase64File(file);
   const imageBuffer = await prepareBaiduOcrImage(fileBuffer);
   const requestUrl = `${config.endpoint}?access_token=${encodeURIComponent(token)}`;
   const body = new URLSearchParams({
@@ -913,7 +920,7 @@ async function recognizeTextFromImage(file, languageLabel, layoutLabel) {
     throw new Error("OCR 功能不可用：tesseract.js 未加载");
   }
 
-  const fileBuffer = decodeBase64File(file);
+  const fileBuffer = file?.buffer ? file.buffer : decodeBase64File(file);
   const variants = await prepareOcrImageVariants(fileBuffer, layoutLabel);
   const worker = await tesseractWorker.createWorker(normalizeOcrLanguage(languageLabel));
 
@@ -1242,23 +1249,66 @@ app.get("/api/tools/download", async (req, res, next) => {
 });
 
 app.post("/api/photo-id", async (req, res) => {
-  const { file, size, background, retouch } = req.body || {};
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let size;
+  let background;
+  let retouch;
+  let inputBuffer;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 100 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      size = fields.size;
+      background = fields.background;
+      retouch = fields.retouch;
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      inputBuffer = uploadFile.buffer;
+      // 优先使用前端传递的fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[照片转证件照] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("照片转证件照 multipart上传解析失败:", error);
+      sendError(res, 400, "PHOTO_ID_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有base64模式
+    const data = req.body || {};
+    file = data.file;
+    size = data.size;
+    background = data.background;
+    retouch = data.retouch;
+    inputBuffer = decodeBase64File(file);
+  }
 
   try {
     if (!photoIdModule) {
       throw new Error("证件照功能不可用：photo-id 模块未加载");
     }
 
-    const inputBuffer = decodeBase64File(file);
     const result = await photoIdModule.buildPhotoIdImage(config, inputBuffer, {
       size,
       background,
       retouch,
     });
+    const originalFileName = file?.name || "photo-id";
+    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
+    const outputBaseName = baseNameWithoutExt ? `${baseNameWithoutExt}_证件照` : "photo-id";
     const output = await saveOutputFile(req, result.buffer, {
       extension: "png",
       contentType: "image/png",
-      baseName: "photo-id",
+      baseName: outputBaseName,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {
@@ -2043,64 +2093,230 @@ app.post("/api/client/state/sync", async (req, res) => {
 
 // 获取PDF信息（页数、基本信息）
 app.post("/api/pdf/preview", async (req, res) => {
+  // 检查是否是 multipart 上传
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const results = [];
+      
+      // 处理多个文件
+      const uploadFiles = Array.isArray(files.file) ? files.file : [files.file];
+      // 获取前端传递的文件名（可能有多个）
+      const customFileNames = Array.isArray(fields.fileName) ? fields.fileName : [fields.fileName || ""];
+      
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const uploadFile = uploadFiles[i];
+        const customFileName = customFileNames[i] || customFileNames[0] || "";
+        try {
+          if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+            results.push({
+              name: customFileName || uploadFile?.fileName || "",
+              sizeBytes: uploadFile?.sizeBytes || 0,
+              pageCount: 0,
+            });
+            continue;
+          }
+          
+          const pdfDoc = await PDFDocument.load(uploadFile.buffer);
+          const pageCount = pdfDoc.getPageCount();
+          const finalFileName = customFileName || uploadFile.fileName || "";
+          console.log("[PDF预览] 接收到的文件名:", finalFileName);
+          results.push({
+            name: finalFileName,
+            sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+            pageCount,
+          });
+        } catch (fileError) {
+          console.error("Error processing PDF file:", fileError);
+          results.push({
+            name: customFileName || uploadFile?.fileName || "",
+            sizeBytes: uploadFile?.sizeBytes || 0,
+            pageCount: 0,
+          });
+        }
+      }
+      
+      res.json({
+        ok: true,
+        files: results,
+      });
+    } catch (error) {
+      console.error("PDF preview multipart error:", error);
+      sendError(res, 400, "PDF_PREVIEW_FAILED", error.message || "PDF预览失败");
+    }
+    return;
+  }
+  
+  // 原有 base64 模式
   const files = req.body.files || [];
   try {
     const results = [];
     for (const file of files) {
-      assertPdfFile(file);
-      const pdfBuffer = decodeBase64File(file);
-      const pdfDoc = await PDFDocument.load(pdfBuffer);
-      const pageCount = pdfDoc.getPageCount();
-      results.push({
-        name: file.name || "",
-        sizeBytes: file.sizeBytes || 0,
-        pageCount,
-      });
+      try {
+        // 检查文件是否有效
+        if (!file || !file.base64) {
+          results.push({
+            name: file?.name || "",
+            sizeBytes: file?.sizeBytes || 0,
+            pageCount: 0,
+          });
+          continue;
+        }
+        
+        assertPdfFile(file);
+        const pdfBuffer = decodeBase64File(file);
+        const pdfDoc = await PDFDocument.load(pdfBuffer);
+        const pageCount = pdfDoc.getPageCount();
+        results.push({
+          name: file.name || "",
+          sizeBytes: file.sizeBytes || 0,
+          pageCount,
+        });
+      } catch (fileError) {
+        // 单个文件处理失败，不影响其他文件
+        console.error("Error processing PDF file:", fileError);
+        results.push({
+          name: file?.name || "",
+          sizeBytes: file?.sizeBytes || 0,
+          pageCount: 0,
+        });
+      }
     }
     res.json({
       ok: true,
       files: results,
     });
   } catch (error) {
+    console.error("PDF preview error:", error);
     sendError(res, 400, "PDF_PREVIEW_FAILED", error.message || "PDF预览失败");
   }
 });
 
 app.post("/api/pdf/merge", async (req, res) => {
-  const files = req.body.files || [];
-
-  try {
+  let files = [];
+  const contentType = req.headers['content-type'] || '';
+  let customFileNames = [];
+  const { urls, names } = req.body || {};
+  
+  if (urls && Array.isArray(urls) && urls.length >= 2) {
+    // URL 模式：后端去下载这些 URL 然后合并
+    console.log("[PDF合并] URL 模式，需要下载的文件数量:", urls.length);
+    const axios = require('axios');
+    const pdfBuffers = [];
+    
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      try {
+        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        pdfBuffers.push({
+          buffer: Buffer.from(response.data),
+          name: (names && names[i]) || `file${i + 1}.pdf`,
+          sizeBytes: response.data.length || 0
+        });
+        console.log(`[PDF合并] 成功下载第 ${i + 1} 个文件`);
+      } catch (downloadErr) {
+        console.error(`[PDF合并] 下载 URL 失败: ${url}`, downloadErr);
+      }
+    }
+    
+    if (pdfBuffers.length < 2) {
+      sendError(res, 400, "DOWNLOAD_FAILED", "下载文件失败，至少需要 2 份成功下载的 PDF");
+      return;
+    }
+    
+    files = pdfBuffers;
+    // 标记这是 URL 模式
+    res.locals.isUrlMode = true;
+  } else if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const fileArray = Array.isArray(uploadFiles.file) ? uploadFiles.file : [uploadFiles.file];
+      customFileNames = Array.isArray(fields.fileName) ? fields.fileName : [fields.fileName || ""];
+      
+      if (fileArray.length < 2) {
+        sendError(res, 400, "INVALID_FILE_COUNT", "至少需要 2 份 PDF 文件");
+        return;
+      }
+      
+      files = fileArray.map((file, index) => ({
+        name: customFileNames[index] || customFileNames[0] || file.fileName || "",
+        sizeBytes: file.sizeBytes || file.buffer?.length || 0,
+        buffer: file.buffer
+      }));
+    } catch (error) {
+      console.error("PDF merge multipart error:", error);
+      sendError(res, 400, "PDF_MERGE_FAILED", "文件处理失败");
+      return;
+    }
+  } else {
+    // 原有 base64 模式
+    files = req.body.files || [];
+    
     if (files.length < 2) {
       sendError(res, 400, "INVALID_FILE_COUNT", "至少需要 2 份 PDF 文件");
       return;
     }
+  }
 
+  try {
     const mergedPdf = await PDFDocument.create();
     let totalPages = 0;
+    const inputFilesInfo = [];
 
     for (const file of files) {
-      assertPdfFile(file);
-      const sourcePdf = await PDFDocument.load(decodeBase64File(file));
-      const pageCount = sourcePdf.getPageCount();
-      totalPages += pageCount;
-      const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-      copiedPages.forEach((page) => mergedPdf.addPage(page));
+      try {
+        let pdfBuffer;
+        if (res.locals.isUrlMode || contentType.includes('multipart/form-data')) {
+          // URL 模式或者 multipart 模式
+          pdfBuffer = file.buffer;
+          inputFilesInfo.push({
+            name: file.name,
+            sizeBytes: file.sizeBytes
+          });
+        } else {
+          // 原有 base64 模式
+          assertPdfFile(file);
+          pdfBuffer = decodeBase64File(file);
+          inputFilesInfo.push({
+            name: file.name || "",
+            sizeBytes: file.sizeBytes || 0
+          });
+        }
+        
+        const sourcePdf = await PDFDocument.load(pdfBuffer);
+        const pageCount = sourcePdf.getPageCount();
+        totalPages += pageCount;
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      } catch (fileError) {
+        console.error("Error processing PDF file for merge:", fileError);
+      }
     }
+
+    if (totalPages === 0) {
+      sendError(res, 400, "PDF_MERGE_FAILED", "未能成功处理任何 PDF 文件");
+      return;
+    }
+
+    // 基于第一个文件的名称生成合并后的文件名
+    const firstFileName = files[0]?.name || "";
+    const baseNameWithoutExt = firstFileName.replace(/\.[^/.]+$/, "");
+    const outputBaseName = baseNameWithoutExt ? `${baseNameWithoutExt}_merged` : "merged";
+    console.log("[PDF合并] 接收到的第一个文件名:", firstFileName, "生成输出文件名:", outputBaseName);
 
     const bytes = await mergedPdf.save({ useObjectStreams: true });
     const output = await saveOutputFile(req, Buffer.from(bytes), {
       extension: "pdf",
       contentType: "application/pdf",
-      baseName: "merged",
+      baseName: outputBaseName,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {
       toolId: "pdf-merge",
       status: "success",
-      inputFiles: files.map((file) => ({
-        name: file.name || "",
-        sizeBytes: file.sizeBytes || 0,
-      })),
+      inputFiles: inputFilesInfo,
       outputFiles: [
         {
           name: output.fileName,
@@ -2143,15 +2359,54 @@ app.post("/api/pdf/merge", async (req, res) => {
 });
 
 app.post("/api/pdf/split", async (req, res) => {
-  const file = req.body.file;
-  const splitMode = req.body.splitMode || "";
-  const pageRange = req.body.pageRange || "1";
+  // 检查是否是 multipart 上传
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let splitMode;
+  let pageRange;
+  let pdfBuffer;
+  
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = files.file;
+      splitMode = fields.splitMode || "";
+      pageRange = fields.pageRange || "1";
+      
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+      
+      pdfBuffer = uploadFile.buffer;
+      // 优先使用前端传递的 fileName 字段，如果没有才用 uploadFile.fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[PDF拆分] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("PDF拆分 multipart 上传解析失败:", error);
+      sendError(res, 400, "PDF_SPLIT_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有 base64 模式
+    file = req.body.file;
+    splitMode = req.body.splitMode || "";
+    pageRange = req.body.pageRange || "1";
+    assertPdfFile(file);
+    pdfBuffer = decodeBase64File(file);
+  }
 
   try {
-    assertPdfFile(file);
-    const pdfDoc = await PDFDocument.load(decodeBase64File(file));
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
     const totalPages = pdfDoc.getPageCount();
     const normalizedSplitMode = normalizeSplitMode(splitMode);
+    
+    // 从原文件名提取基础名称（不带扩展名）
+    const originalFileName = file?.name || "document";
+    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
 
     let groups = [];
     if (normalizedSplitMode === "page-range") {
@@ -2172,17 +2427,25 @@ app.post("/api/pdf/split", async (req, res) => {
       copiedPages.forEach((page) => nextPdf.addPage(page));
 
       const bytes = await nextPdf.save({ useObjectStreams: true });
+      
+      // 生成有意义的文件名
+      const pageLabel = pages.map(p => p + 1).join("-");
+      const outputBaseName = groups.length > 1 
+        ? `${baseNameWithoutExt}_part${index + 1}_pages${pageLabel}` 
+        : `${baseNameWithoutExt}_pages${pageLabel}`;
+        
       const output = await saveOutputFile(req, Buffer.from(bytes), {
         extension: "pdf",
         contentType: "application/pdf",
-        baseName: `split-${index + 1}`,
+        baseName: outputBaseName,
+        addRandomSuffix: false,
       });
 
       outputs.push(
         buildFileResponse(
           output,
           "application/pdf",
-          `拆分 ${index + 1} - 第 ${pages.map((page) => page + 1).join(", ")} 页`,
+          `${baseNameWithoutExt} - 第 ${pages.map((page) => page + 1).join(", ")} 页`,
           req
         )
       );
@@ -2193,8 +2456,8 @@ app.post("/api/pdf/split", async (req, res) => {
       status: "success",
       inputFiles: [
         {
-          name: file.name || "",
-          sizeBytes: file.sizeBytes || 0,
+          name: file?.name || "",
+          sizeBytes: file?.sizeBytes || 0,
         },
       ],
       outputFiles: outputs.map((item) => ({
@@ -2228,8 +2491,8 @@ app.post("/api/pdf/split", async (req, res) => {
       inputFiles: file
         ? [
           {
-            name: file.name || "",
-            sizeBytes: file.sizeBytes || 0,
+            name: file?.name || "",
+            sizeBytes: file?.sizeBytes || 0,
           },
         ]
         : [],
@@ -2246,18 +2509,54 @@ app.post("/api/pdf/split", async (req, res) => {
 });
 
 app.post("/api/pdf/compress", async (req, res) => {
-  const file = req.body.file;
-  const mode = req.body.mode || "";
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let mode;
+  let pdfBuffer;
+  
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      mode = fields.mode || "";
+      
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+      
+      pdfBuffer = uploadFile.buffer;
+      // 优先使用前端传递的 fileName 字段
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[PDF压缩] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("PDF compress multipart error:", error);
+      sendError(res, 400, "PDF_COMPRESS_FAILED", "文件处理失败");
+      return;
+    }
+  } else {
+    // 原有 base64 模式
+    file = req.body.file;
+    mode = req.body.mode || "";
+    assertPdfFile(file);
+    pdfBuffer = decodeBase64File(file);
+  }
 
   try {
-    assertPdfFile(file);
-
-    const pdfDoc = await PDFDocument.load(decodeBase64File(file));
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
     const bytes = await pdfDoc.save({ useObjectStreams: true });
+    
+    // 生成与原文件名关联的压缩文件名
+    const originalFileName = file?.name || "document";
+    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
     const output = await saveOutputFile(req, Buffer.from(bytes), {
       extension: "pdf",
       contentType: "application/pdf",
-      baseName: "compressed",
+      baseName: `${baseNameWithoutExt}_compressed`,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {
@@ -2265,8 +2564,8 @@ app.post("/api/pdf/compress", async (req, res) => {
       status: "success",
       inputFiles: [
         {
-          name: file.name || "",
-          sizeBytes: file.sizeBytes || 0,
+          name: file?.name || "",
+          sizeBytes: file?.sizeBytes || 0,
         },
       ],
       outputFiles: [
@@ -2902,9 +3201,44 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
 }
 
 app.post("/api/audio/convert", async (req, res) => {
-  const file = req.body.file;
-  const target = req.body.target || "MP3";
-  const quality = req.body.quality || "标准";
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let target;
+  let quality;
+  let fileBuffer;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      target = fields.target || "MP3";
+      quality = fields.quality || "标准";
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      fileBuffer = uploadFile.buffer;
+      // 优先使用前端传递的fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[音频转换] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("音频转换 multipart上传解析失败:", error);
+      sendError(res, 400, "AUDIO_CONVERT_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有base64模式
+    file = req.body.file;
+    target = req.body.target || "MP3";
+    quality = req.body.quality || "标准";
+    fileBuffer = decodeBase64File(file);
+  }
+
   const ffmpegPath = resolveFfmpegPath();
 
   if (!ffmpegPath) {
@@ -2970,7 +3304,6 @@ app.post("/api/audio/convert", async (req, res) => {
     let outputName = `${safeBaseName}.${targetExt}`;
     let outputPath = path.join(tempDir, outputName);
 
-    const fileBuffer = decodeBase64File(file);
     console.log("[Media Convert] 写入文件:", inputPath, "大小:", fileBuffer.length, "bytes");
 
     const magic = fileBuffer.slice(0, 8).toString("hex");
@@ -3058,6 +3391,7 @@ app.post("/api/audio/convert", async (req, res) => {
       extension: targetExt,
       contentType,
       baseName: safeBaseName,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {
@@ -3141,12 +3475,53 @@ app.post("/api/audio/convert", async (req, res) => {
 });
 
 app.post("/api/ocr/image", async (req, res) => {
-  const file = req.body.file;
-  const language = req.body.language || "中英混合";
-  const layout = req.body.layout || "";
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let language;
+  let layout;
+  let fileBuffer;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 100 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      language = fields.language || "中英混合";
+      layout = fields.layout || "";
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      fileBuffer = uploadFile.buffer;
+      // 优先使用前端传递的fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[OCR文字识别] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("OCR文字识别 multipart上传解析失败:", error);
+      sendError(res, 400, "OCR_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有base64模式
+    file = req.body.file;
+    language = req.body.language || "中英混合";
+    layout = req.body.layout || "";
+    fileBuffer = decodeBase64File(file);
+  }
 
   try {
-    const result = await recognizeTextFromImage(file, language, layout);
+    const result = await recognizeTextFromImage(
+      {
+        ...file,
+        buffer: fileBuffer
+      },
+      language,
+      layout
+    );
     const text = result.text || "";
 
     await recordOperation(req, {
@@ -3211,9 +3586,45 @@ app.post("/api/ocr/image", async (req, res) => {
 });
 
 app.post("/api/office/to-pdf", async (req, res) => {
-  const file = req.body.file;
-  const quality = req.body.quality || "";
-  const pageMode = req.body.pageMode || "";
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let quality;
+  let pageMode;
+  let pdfBuffer;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      quality = fields.quality || "";
+      pageMode = fields.pageMode || "";
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      pdfBuffer = uploadFile.buffer;
+      // 优先使用前端传递的fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[Office转PDF] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("Office转PDF multipart上传解析失败:", error);
+      sendError(res, 400, "OFFICE_CONVERT_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有base64模式
+    file = req.body.file;
+    quality = req.body.quality || "";
+    pageMode = req.body.pageMode || "";
+    assertPdfFile(file);
+    pdfBuffer = decodeBase64File(file);
+  }
+
   const sofficePath = resolveSofficePath();
 
   if (!sofficePath) {
@@ -3254,16 +3665,20 @@ app.post("/api/office/to-pdf", async (req, res) => {
     const inputName = `input-${randomId}${inputExt}`;
     const inputPath = path.join(tempDir, inputName);
 
-    fs.writeFileSync(inputPath, decodeBase64File(file));
+    fs.writeFileSync(inputPath, pdfBuffer);
     await runSofficeConvert(sofficePath, inputPath, tempDir);
 
     const outputFileName = `input-${randomId}.pdf`;
     const outputPath = path.join(tempDir, outputFileName);
     const bytes = fs.readFileSync(outputPath);
+    // 从原文件名提取基础名称，生成有意义的文件名
+    const originalFileName = file?.name || "document";
+    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
     const output = await saveOutputFile(req, bytes, {
       extension: "pdf",
       contentType: "application/pdf",
-      baseName: path.parse(inputName).name,
+      baseName: baseNameWithoutExt,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {
@@ -3564,36 +3979,78 @@ async function convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, options
 }
 
 app.post("/api/pdf/to-word", async (req, res) => {
-  const file = req.body.file;
-  const format = req.body.format || "DOCX";
-  const layout = req.body.layout || "exact";
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let format;
+  let layout;
+  let fileBuffer;
+  let ocrLocale;
+  let password;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      format = fields.format || "DOCX";
+      layout = fields.layout || "exact";
+      ocrLocale = fields.ocrLocale || fields.language || fields.locale || "";
+      password = fields.password || fields.pdfPassword || "";
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      fileBuffer = uploadFile.buffer;
+      // 优先使用前端传递的fileName
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[PDF转Word] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("PDF转Word multipart上传解析失败:", error);
+      sendError(res, 400, "PDF_TO_WORD_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    // 原有base64模式
+    file = req.body.file;
+    format = req.body.format || "DOCX";
+    layout = req.body.layout || "exact";
+    ocrLocale = req.body.ocrLocale || req.body.language || req.body.locale || "";
+    password = req.body.password || req.body.pdfPassword || "";
+    assertPdfFile(file);
+    fileBuffer = decodeBase64File(file);
+  }
 
   let tempDir = "";
 
   try {
-    assertPdfFile(file);
     tempDir = fs.mkdtempSync(path.join(config.tempDir, "pdf-word-"));
     console.log("[PDF to Word] 临时目录:", tempDir);
 
     const randomId = makeId();
     const inputName = `input-${randomId}.pdf`;
-
-    const fileBuffer = decodeBase64File(file);
     console.log("[PDF to Word] 输入文件大小:", fileBuffer.length, "bytes");
 
     const conversion = await convertPdfToWordWithAdobe(fileBuffer, inputName, tempDir, {
       format,
-      ocrLocale: req.body.ocrLocale || req.body.language || req.body.locale || "",
-      password: req.body.password || req.body.pdfPassword || "",
+      ocrLocale,
+      password,
       layout: layout, // 🔥 新增：传递布局模式
     });
 
     console.log("[PDF to Word] Word文档生成完成, 大小:", conversion.buffer.length, "bytes");
 
+    // 从原文件名提取基础名称，生成有意义的文件名
+    const originalFileName = file?.name || "document";
+    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
     const output = await saveOutputFile(req, conversion.buffer, {
       extension: conversion.extension,
       contentType: conversion.contentType,
-      baseName: path.parse(inputName).name,
+      baseName: baseNameWithoutExt,
+      addRandomSuffix: false,
     });
 
     await recordOperation(req, {

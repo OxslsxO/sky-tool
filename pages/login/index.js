@@ -175,6 +175,8 @@ Page({
 
   async _loginWithCloudData(userId, backendUser, avatarUrl, nickname) {
     console.log('☁️ 本地无数据，从云端恢复...');
+    const currentUser = getUserState();
+    const isNewUser = !currentUser.openid;
 
     updateUserState({
       userId: userId,
@@ -184,8 +186,19 @@ Page({
       avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl,
       phoneNumber: backendUser.phoneNumber || '',
       authMode: 'wechat',
+      points: isNewUser ? 100 : currentUser.points,
       lastLoginAt: new Date().toISOString(),
     });
+
+    // 如果是新用户，添加积分记录
+    if (isNewUser) {
+      const { addPointsRecord } = require("../../utils/task-store");
+      addPointsRecord({
+        type: "recharge",
+        title: "新用户注册奖励",
+        change: 100,
+      });
+    }
 
     let cloudDataApplied = false;
 
@@ -293,14 +306,27 @@ Page({
   localLogin(avatarUrl, nickname) {
     console.log('🔐 使用本地登录模式');
     const currentUser = getUserState();
+    const isNewUser = !currentUser.openid;
     const existingOpenid = (currentUser.openid && currentUser.openid.startsWith('local_')) ? currentUser.openid : `local_${Date.now()}`;
+    
     updateUserState({
       authMode: 'wechat',
       openid: existingOpenid,
       avatarUrl: avatarUrl || currentUser.avatarUrl,
       nickname: nickname || '微信用户',
+      points: isNewUser ? 100 : currentUser.points,
       lastLoginAt: new Date().toISOString(),
     });
+
+    // 如果是新用户，添加积分记录
+    if (isNewUser) {
+      const { addPointsRecord } = require("../../utils/task-store");
+      addPointsRecord({
+        type: "recharge",
+        title: "新用户注册奖励",
+        change: 100,
+      });
+    }
 
     wx.showToast({
       title: '登录成功（本地模式）',

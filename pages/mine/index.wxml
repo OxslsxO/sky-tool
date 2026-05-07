@@ -49,16 +49,7 @@
     </view>
   </view>
 
-  <view class="mine-section" wx:if="{{recents.length}}">
-    <view class="mine-section-head">
-      <text class="mine-section-title">最近使用</text>
-    </view>
-    <view class="mine-grid">
-      <view class="mine-grid-item" wx:for="{{recents}}" wx:key="id">
-        <tool-card tool="{{item}}" compact="{{true}}" bindselect="handleToolSelect" />
-      </view>
-    </view>
-  </view>
+
 
   <view class="redeem-overlay" wx:if="{{showRedeemModal}}" catchtap="preventBubble">
     <view class="redeem-modal" catchtap="preventBubble">

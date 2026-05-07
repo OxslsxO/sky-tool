@@ -21,7 +21,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_USER = {
   nickname: "微信用户",
-  points: 0,
+  points: 100,
   userId: "",
   deviceId: "",
   authMode: "guest",
@@ -908,8 +908,20 @@ function seedMockTasks() {
   const currentUser = getUserState();
   if (currentUser && !currentUser.points) {
     updateUserState({
-      points: 40,
+      points: 100,
     }, { silent: true });
+    
+    // 添加新用户积分记录
+    const initialPointsRecords = [
+      {
+        id: makeLocalId("pr"),
+        type: "recharge",
+        title: "新用户注册奖励",
+        change: 100,
+        createdAt: Date.now(),
+      },
+    ];
+    writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
   }
 }
 

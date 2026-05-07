@@ -41,7 +41,7 @@
         loading="{{loading}}"
       >
         <text class="btn-icon">💬</text>
-        选择头像
+        微信登录
       </button>
       <button
         wx:else

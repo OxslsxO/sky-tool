@@ -450,15 +450,16 @@
     <view class="section-head">
       <view>
         <text class="eyebrow">Files</text>
-        <text class="section-title">{{pdfToWordResultReady || audioConvertResultReady ? '转换结果' : backendPickerTitle}}</text>
+        <text class="section-title">{{pdfToWordResultReady || audioConvertResultReady || officeToPdfResultReady ? '转换结果' : backendPickerTitle}}</text>
         <text class="section-copy" wx:if="{{pdfToWordResultReady}}">{{pdfToWordResultDetail}}</text>
         <text class="section-copy" wx:if="{{audioConvertResultReady}}">{{audioConvertResultDetail}}</text>
+        <text class="section-copy" wx:if="{{officeToPdfResultReady}}">{{officeToPdfResultDetail}}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady && !pdfMergeResultReady}}">{{backendPickerButtonText}}</view>
-      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady || pdfMergeResultReady}}">重新选择</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{!pdfToWordResultReady && !audioConvertResultReady && !pdfMergeResultReady && !officeToPdfResultReady}}">{{backendPickerButtonText}}</view>
+      <view class="btn-ghost picker-button" bindtap="chooseBackendFiles" wx:if="{{pdfToWordResultReady || audioConvertResultReady || pdfMergeResultReady || officeToPdfResultReady}}">重新选择</view>
 
       <!-- PDF合并专用预览和排序UI -->
       <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length && !pdfMergeResultReady}}">
@@ -532,10 +533,50 @@
       </view>
 
       <!-- 普通文件列表（其他工具用） -->
-      <view class="file-list" wx:if="{{tool.id !== 'pdf-merge' && backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady}}">
+      <view class="file-list" wx:if="{{tool.id !== 'pdf-merge' && backendFiles.length && !pdfToWordResultReady && !audioConvertResultReady && !pdfSplitResultReady && !officeToPdfResultReady}}">
         <view class="file-item" wx:for="{{backendFiles}}" wx:key="path">
           <text class="file-item__name">{{item.name}}</text>
           <text class="file-item__meta">{{item.sizeText}}</text>
+        </view>
+      </view>
+
+      <!-- PDF拆分结果展示 -->
+      <view class="image-preview" wx:if="{{pdfSplitResultReady}}">
+        <view class="file-preview">
+          <text class="file-preview__icon">📄</text>
+          <text class="file-preview__name">{{pdfSplitResultName}}</text>
+        </view>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{pdfSplitResultHeadline}}</text>
+        <view class="chips-wrap" wx:if="{{pdfSplitResultDetail}}" style="justify-content: center; margin-top: 8rpx;">
+          <text class="chip-static">{{pdfSplitResultDetail}}</text>
+        </view>
+        <view class="chips-wrap" wx:if="{{pdfSplitResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{pdfSplitResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        
+        <!-- 附件列表（拆分出来的多个PDF） -->
+        <view class="pdf-split-attachments" wx:if="{{pdfSplitAttachments.length}}">
+          <view class="section-head">
+            <text class="eyebrow">附件</text>
+            <text class="section-title">拆分结果</text>
+          </view>
+          <view class="attachment-list">
+            <view class="attachment-item" wx:for="{{pdfSplitAttachments}}" wx:key="url" bindtap="previewPdfSplitAttachment" data-url="{{item.url}}" data-name="{{item.name}}">
+              <text class="attachment-icon">📄</text>
+              <view class="attachment-info">
+                <text class="attachment-name">{{item.name}}</text>
+                <text class="attachment-meta" wx:if="{{item.label}}">{{item.label}}</text>
+                <text class="attachment-meta" wx:else>{{item.sizeBytes ? formatFileSize(item.sizeBytes) : ''}}</text>
+              </view>
+              <text class="attachment-action">预览</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">预览文件</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">下载文件</view>
+          <view class="btn-ghost action-card__button" wx:if="{{pdfSplitResultRemoteUrl}}" bindtap="copyPdfSplitUrl">复制链接</view>
         </view>
       </view>
 
@@ -552,6 +593,25 @@
           <view class="btn-primary action-card__button" bindtap="previewPdfToWordResult">预览文件</view>
           <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">下载文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{pdfToWordResultRemoteUrl}}" bindtap="copyPdfToWordUrl">复制链接</view>
+        </view>
+      </view>
+
+      <view class="image-preview" wx:if="{{officeToPdfResultReady}}">
+        <view class="file-preview">
+          <text class="file-preview__icon">📄</text>
+          <text class="file-preview__name">{{officeToPdfResultName}}</text>
+        </view>
+        <text class="result-card__title" style="margin-top: 16rpx; text-align: center;">{{officeToPdfResultHeadline}}</text>
+        <view class="chips-wrap" wx:if="{{officeToPdfResultDetail}}" style="justify-content: center; margin-top: 8rpx;">
+          <text class="chip-static">{{officeToPdfResultDetail}}</text>
+        </view>
+        <view class="chips-wrap" wx:if="{{officeToPdfResultMetaLines.length}}" style="justify-content: center; margin-top: 12rpx;">
+          <text class="chip-static" wx:for="{{officeToPdfResultMetaLines}}" wx:key="*this">{{item}}</text>
+        </view>
+        <view class="action-card__buttons" style="margin-top: 24rpx;">
+          <view class="btn-primary action-card__button" bindtap="previewOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">预览文件</view>
+          <view class="btn-primary action-card__button" bindtap="downloadOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">下载文件</view>
+          <view class="btn-ghost action-card__button" wx:if="{{officeToPdfResultRemoteUrl}}" bindtap="copyOfficeToPdfUrl">复制链接</view>
         </view>
       </view>
 
@@ -662,14 +722,18 @@
         <view class="picker-line">到：{{toUnit}}</view>
       </picker>
       <view class="btn-ghost picker-button" bindtap="swapUnits">交换单位</view>
+      
+      <view class="unit-result" wx:if="{{unitConvertResult}}">
+        <text class="unit-result-value">{{unitConvertResult}}</text>
+      </view>
     </view>
   </view>
 
-  <view class="section" wx:if="{{tool.id !== 'photo-id'}}">
+  <view class="section" wx:if="{{tool.id !== 'photo-id' && tool.id !== 'unit-convert'}}">
     <view class="card action-card">
       <text class="action-card__title">{{actionTitle}}</text>
       
-      <!-- 支付方式选择（积分足够时可选） -->
+      <!-- 支付方式选择（积分足够时可选）-->
       <view class="payment-options" wx:if="{{billing && billing.mode === 'points'}}">
         <view 
           class="payment-option {{selectedPayment === 'points' ? 'selected' : ''}}"
@@ -722,6 +786,15 @@
           </view>
           <text wx:else>{{primaryActionText}}</text>
         </view>
+        <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '取消收藏' : '收藏工具'}}</view>
+      </view>
+    </view>
+  </view>
+  
+  <!-- 单位换算只显示收藏按钮 -->
+  <view class="section" wx:if="{{tool.id === 'unit-convert'}}">
+    <view class="card action-card">
+      <view class="action-card__buttons">
         <view class="btn-ghost action-card__button" bindtap="handleFavorite">{{favorite ? '取消收藏' : '收藏工具'}}</view>
       </view>
     </view>
