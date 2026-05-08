@@ -72,8 +72,28 @@ function chooseMessageFiles(count, extension) {
     wx.chooseMessageFile({
       count,
       type: "file",
-      extension,
-      success: (result) => resolve(result.tempFiles || []),
+      // 不指定 extension，让用户选择所有文件，然后在代码中验证
+      success: (result) => {
+        const files = result.tempFiles || [];
+        if (extension && extension.length > 0) {
+          // 只返回符合扩展名的文件
+          const filteredFiles = files.filter(file => {
+            const ext = file.name.split('.').pop().toLowerCase();
+            return extension.includes(ext);
+          });
+          if (filteredFiles.length === 0) {
+            wx.showToast({
+              title: '请选择正确格式的文件',
+              icon: 'none'
+            });
+            reject(new Error('Invalid file type'));
+            return;
+          }
+          resolve(filteredFiles);
+        } else {
+          resolve(files);
+        }
+      },
       fail: reject,
     });
   });
@@ -435,8 +455,15 @@ Page({
     audioConvertVideoFormats: AUDIO_CONVERT_VIDEO_FORMATS,
     // PDF合并相关
     pdfMergePreviewFiles: [], // 预览用的PDF文件信息（带页数）
-    pdfMergeSorting: false, // 是否正在排序
     pdfMergeCurrentIndex: 0, // 当前预览的索引
+    pdfMergeDraggingIndex: null, // 当前拖拽的索引
+    pdfMergeDragOffset: 0, // 拖拽偏移量
+    pdfMergeDragTimeout: null, // 拖拽计时器
+    pdfMergeFloatingLeft: 0, // 悬浮元素X位置
+    pdfMergeFloatingTop: 0, // 悬浮元素Y位置
+    pdfMergeTouchOffsetX: 0, // 触摸点相对元素偏移X
+    pdfMergeTouchOffsetY: 0, // 触摸点相对元素偏移Y
+    pdfMergeHighlightIndex: null, // 当前高亮目标位置
     pdfMergeResultReady: false,
     pdfMergeResultPath: "",
     pdfMergeResultRemoteUrl: "",
@@ -444,44 +471,23 @@ Page({
     pdfMergeResultHeadline: "",
     pdfMergeResultDetail: "",
     pdfMergeResultMetaLines: [],
-    tool: null,
-    category: null,
-    selections: {},
-    billing: null,
-    favorite: false,
-    relatedTasks: [],
-    heroScenario: "",
-    isClientTool: false,
-    isBackendTool: false,
-    visibleParams: [],
-    showImageUpload: false,
-    showTextInput: false,
-    showUnitConverter: false,
-    showCustomSize: false,
-    canvasWidth: 320,
-    canvasHeight: 320,
-    imageInput: null,
-    imageInputs: [],
-    textInput: "https://",
-    qrLogoInput: null,
-    numberInput: "1",
-    unitOptions: [],
-    fromUnit: "",
-    toUnit: "",
-    customWidth: "1600",
-    customHeight: "900",
-    isWorking: false,
-    helperTitle: "",
-    helperCopy: "",
-    backendConfigured: false,
-    actionTitle: "",
-    actionHint: "",
-    primaryActionText: "",
-    primaryActionDisabled: false,
-    latestCreatedTaskId: "",
-    backendFiles: [],
-    pageRange: "1-1",
-    showBackendFilePicker: false,
+    // 图片转PDF相关
+    imageToPdfResultReady: false,
+    imageToPdfResultPath: "",
+    imageToPdfResultRemoteUrl: "",
+    imageToPdfResultName: "",
+    imageToPdfResultHeadline: "",
+    imageToPdfResultDetail: "",
+    imageToPdfResultMetaLines: [],
+    imageToPdfCurrentIndex: 0,
+    imageToPdfDraggingIndex: null, // 当前拖拽的索引
+    imageToPdfDragOffset: 0, // 拖拽偏移量
+    imageToPdfDragTimeout: null, // 拖拽计时器
+    imageToPdfFloatingLeft: 0, // 悬浮元素X位置
+    imageToPdfFloatingTop: 0, // 悬浮元素Y位置
+    imageToPdfTouchOffsetX: 0, // 触摸点相对元素偏移X
+    imageToPdfTouchOffsetY: 0, // 触摸点相对元素偏移Y
+    imageToPdfHighlightIndex: null, // 当前高亮目标位置
     showBackendRangeInput: false,
     backendPickerTitle: "",
     backendPickerButtonText: "",
@@ -582,7 +588,6 @@ Page({
     imageToPdfResultDetail: "",
     imageToPdfResultMetaLines: [],
     imageToPdfCurrentIndex: 0,
-    imageToPdfSorting: false,
     photoIdIsProcessing: false,
     backgroundColorMap: BACKGROUND_COLOR_MAP,
     processingProgress: 0,
@@ -1329,7 +1334,7 @@ Page({
 
     // 图片转PDF需要文件
     if (toolId === "image-to-pdf") {
-      if (!this.data.imageToPdfFiles || !this.data.imageToPdfFiles.length) {
+      if (!this.data.imageInputs || !this.data.imageInputs.length) {
         return { valid: false, message: "请先选择要转换的图片" };
       }
     }
@@ -1614,7 +1619,6 @@ Page({
         }));
         Object.assign(nextState, this.getClearedPdfMergeResult());
         nextState.pdfMergePreviewFiles = initialPreviewFiles;
-        nextState.pdfMergeSorting = false;
         nextState.pdfMergeCurrentIndex = 0;
         
         // 先更新UI
@@ -1915,7 +1919,6 @@ Page({
   getClearedPdfMergePreview() {
     return {
       pdfMergePreviewFiles: [],
-      pdfMergeSorting: false,
       pdfMergeCurrentIndex: 0,
     };
   },
@@ -2048,18 +2051,6 @@ Page({
   },
 
   handlePdfMergeThumbLongPress(e) {
-    const index = e.currentTarget.dataset.index;
-    wx.showModal({
-      title: "调整PDF顺序",
-      content: "长按后可拖动调整顺序，点击完成保存。",
-      showCancel: false,
-      confirmText: "知道了",
-      success: () => {
-        this.setData({
-          pdfMergeSorting: true,
-        });
-      },
-    });
   },
 
   previewCompressResult() {
@@ -5228,10 +5219,49 @@ Page({
     this.updateProcessingProgress(14, "正在读取图片...");
     for (let index = 0; index < imageInputs.length; index += 1) {
       const imageItem = imageInputs[index];
-      const bytes = await readFileArrayBuffer(imageItem.path);
-      const embeddedImage = imageItem.extension === "png"
-        ? await pdfDoc.embedPng(bytes)
-        : await pdfDoc.embedJpg(bytes);
+      const ext = imageItem.extension || getImageExtension(imageItem.path);
+      let imageData;
+      try {
+        const readResult = await new Promise((resolve, reject) => {
+          wx.getFileSystemManager().readFile({
+            filePath: imageItem.path,
+            success: resolve,
+            fail: reject,
+          });
+        });
+        if (readResult.data instanceof ArrayBuffer) {
+          imageData = new Uint8Array(readResult.data);
+        } else if (typeof readResult.data === 'string') {
+          imageData = readResult.data;
+        } else {
+          const base64Result = await new Promise((resolve, reject) => {
+            wx.getFileSystemManager().readFile({
+              filePath: imageItem.path,
+              encoding: 'base64',
+              success: resolve,
+              fail: reject,
+            });
+          });
+          imageData = base64Result.data;
+        }
+      } catch (readErr) {
+        throw new Error("读取图片失败：" + (readErr.errMsg || readErr.message || "未知错误"));
+      }
+      let embeddedImage;
+      const isPngByExt = ext === "png";
+      if (isPngByExt) {
+        try {
+          embeddedImage = await pdfDoc.embedPng(imageData);
+        } catch (pngErr) {
+          embeddedImage = await pdfDoc.embedJpg(imageData);
+        }
+      } else {
+        try {
+          embeddedImage = await pdfDoc.embedJpg(imageData);
+        } catch (jpgErr) {
+          embeddedImage = await pdfDoc.embedPng(imageData);
+        }
+      }
 
       const imageWidth = embeddedImage.width;
       const imageHeight = embeddedImage.height;
@@ -5370,34 +5400,222 @@ Page({
   },
 
   handleThumbLongPress(e) {
-    const index = e.currentTarget.dataset.index;
-    const { tool } = this.data;
-    if (tool.id === "image-to-pdf") {
-      wx.showModal({
-        title: "调整图片顺序",
-        content: "长按后可拖动调整顺序，点击完成保存。",
-        showCancel: false,
-        confirmText: "知道了",
-        success: () => {
-          this.setData({
-            imageToPdfSorting: true,
-          });
-        },
-      });
-    }
   },
 
-  finishSorting() {
-    const { tool } = this.data;
-    if (tool.id === "pdf-merge") {
+  // 图片转PDF 缩略图触摸事件
+  handleImageToPdfThumbTouchStart(e) {
+    const index = e.currentTarget.dataset.index;
+    
+    // 获取触摸点位置和元素位置
+    const touch = e.touches[0];
+    const query = wx.createSelectorQuery();
+    
+    query.selectAll('.image-to-pdf-thumb').boundingClientRect().exec((res) => {
+      if (!res[0] || !res[0][index]) return;
+      
+      const rect = res[0][index];
+      // 计算触摸点相对于元素的偏移量
+      const offsetX = touch.clientX - rect.left;
+      const offsetY = touch.clientY - rect.top;
+      
+      // 设置悬浮元素初始位置
       this.setData({
-        pdfMergeSorting: false,
+        imageToPdfDraggingIndex: index,
+        imageToPdfFloatingLeft: rect.left - 10,
+        imageToPdfFloatingTop: rect.top - 10,
+        imageToPdfTouchOffsetX: offsetX + 10,
+        imageToPdfTouchOffsetY: offsetY + 10,
       });
-    } else {
-      this.setData({
-        imageToPdfSorting: false,
-      });
+    });
+  },
+
+  handleImageToPdfThumbTouchMove(e) {
+    if (this.data.imageToPdfDraggingIndex === null) {
+      return;
     }
+    
+    // 获取触摸点位置
+    const touch = e.touches[0];
+    const clientX = touch.clientX;
+    const clientY = touch.clientY;
+    
+    // 更新悬浮元素位置
+    this.setData({
+      imageToPdfFloatingLeft: clientX - this.data.imageToPdfTouchOffsetX,
+      imageToPdfFloatingTop: clientY - this.data.imageToPdfTouchOffsetY,
+    });
+    
+    const { imageToPdfDraggingIndex, imageInputs } = this.data;
+    if (imageToPdfDraggingIndex === null || !imageInputs.length) {
+      return;
+    }
+    
+    // 计算当前位置对应的索引
+    const query = wx.createSelectorQuery();
+    query.selectAll('.image-to-pdf-thumb').boundingClientRect();
+    query.exec((res) => {
+      if (!res[0] || !res[0].length) return;
+      
+      const rects = res[0];
+      // 找到触摸点在哪个缩略图上方或接近哪个缩略图
+      let newIndex = -1;
+      let minDistance = Infinity;
+      
+      for (let i = 0; i < rects.length; i++) {
+        if (i === imageToPdfDraggingIndex) continue;
+        
+        const rect = rects[i];
+        const centerX = rect.left + rect.width / 2;
+        const distance = Math.abs(clientX - centerX);
+        
+        // 找到距离最近的缩略图
+        if (distance < minDistance) {
+          minDistance = distance;
+          newIndex = i;
+        }
+      }
+      
+      // 更新高亮位置
+      this.setData({
+        imageToPdfHighlightIndex: newIndex >= 0 ? newIndex : null
+      });
+      
+      // 只有在足够接近目标位置并且不是当前位置时才交换
+      if (newIndex >= 0 && newIndex !== imageToPdfDraggingIndex && minDistance < rects[0].width * 0.8) {
+        // 交换位置
+        const newInputs = [...imageInputs];
+        const [removed] = newInputs.splice(imageToPdfDraggingIndex, 1);
+        newInputs.splice(newIndex, 0, removed);
+        
+        this.setData({
+          imageInputs: newInputs,
+          imageToPdfDraggingIndex: newIndex,
+        });
+      }
+    });
+  },
+
+  handleImageToPdfThumbTouchEnd(e) {
+    if (this.data.imageToPdfDragTimeout) {
+      clearTimeout(this.data.imageToPdfDragTimeout);
+    }
+    
+    this.setData({
+      imageToPdfDraggingIndex: null,
+      imageToPdfDragOffset: 0,
+      imageToPdfDragTimeout: null,
+      imageToPdfHighlightIndex: null,
+    });
+  },
+
+  // PDF合并 缩略图触摸事件
+  handlePdfMergeThumbTouchStart(e) {
+    const index = e.currentTarget.dataset.index;
+    
+    // 获取触摸点位置和元素位置
+    const touch = e.touches[0];
+    const query = wx.createSelectorQuery();
+    
+    query.selectAll('.pdf-merge-thumb').boundingClientRect().exec((res) => {
+      if (!res[0] || !res[0][index]) return;
+      
+      const rect = res[0][index];
+      // 计算触摸点相对于元素的偏移量
+      const offsetX = touch.clientX - rect.left;
+      const offsetY = touch.clientY - rect.top;
+      
+      // 设置悬浮元素初始位置
+      this.setData({
+        pdfMergeDraggingIndex: index,
+        pdfMergeFloatingLeft: rect.left - 10,
+        pdfMergeFloatingTop: rect.top - 10,
+        pdfMergeTouchOffsetX: offsetX + 10,
+        pdfMergeTouchOffsetY: offsetY + 10,
+      });
+    });
+  },
+
+  handlePdfMergeThumbTouchMove(e) {
+    if (this.data.pdfMergeDraggingIndex === null) {
+      return;
+    }
+    
+    // 获取触摸点位置
+    const touch = e.touches[0];
+    const clientX = touch.clientX;
+    const clientY = touch.clientY;
+    
+    // 更新悬浮元素位置
+    this.setData({
+      pdfMergeFloatingLeft: clientX - this.data.pdfMergeTouchOffsetX,
+      pdfMergeFloatingTop: clientY - this.data.pdfMergeTouchOffsetY,
+    });
+    
+    const { pdfMergeDraggingIndex, pdfMergePreviewFiles, backendFiles } = this.data;
+    if (pdfMergeDraggingIndex === null || !pdfMergePreviewFiles.length) {
+      return;
+    }
+    
+    // 计算当前位置对应的索引
+    const query = wx.createSelectorQuery();
+    query.selectAll('.pdf-merge-thumb').boundingClientRect();
+    query.exec((res) => {
+      if (!res[0] || !res[0].length) return;
+      
+      const rects = res[0];
+      // 找到触摸点在哪个缩略图上方或接近哪个缩略图
+      let newIndex = -1;
+      let minDistance = Infinity;
+      
+      for (let i = 0; i < rects.length; i++) {
+        if (i === pdfMergeDraggingIndex) continue;
+        
+        const rect = rects[i];
+        const centerX = rect.left + rect.width / 2;
+        const distance = Math.abs(clientX - centerX);
+        
+        // 找到距离最近的缩略图
+        if (distance < minDistance) {
+          minDistance = distance;
+          newIndex = i;
+        }
+      }
+      
+      // 更新高亮位置
+      this.setData({
+        pdfMergeHighlightIndex: newIndex >= 0 ? newIndex : null
+      });
+      
+      // 只有在足够接近目标位置并且不是当前位置时才交换
+      if (newIndex >= 0 && newIndex !== pdfMergeDraggingIndex && minDistance < rects[0].width * 0.8) {
+        // 交换位置
+        const newPreviewFiles = [...pdfMergePreviewFiles];
+        const newBackendFiles = [...backendFiles];
+        const [removedPreview] = newPreviewFiles.splice(pdfMergeDraggingIndex, 1);
+        const [removedBackend] = newBackendFiles.splice(pdfMergeDraggingIndex, 1);
+        newPreviewFiles.splice(newIndex, 0, removedPreview);
+        newBackendFiles.splice(newIndex, 0, removedBackend);
+        
+        this.setData({
+          pdfMergePreviewFiles: newPreviewFiles,
+          backendFiles: newBackendFiles,
+          pdfMergeDraggingIndex: newIndex,
+        });
+      }
+    });
+  },
+
+  handlePdfMergeThumbTouchEnd(e) {
+    if (this.data.pdfMergeDragTimeout) {
+      clearTimeout(this.data.pdfMergeDragTimeout);
+    }
+    
+    this.setData({
+      pdfMergeDraggingIndex: null,
+      pdfMergeDragOffset: 0,
+      pdfMergeDragTimeout: null,
+      pdfMergeHighlightIndex: null,
+    });
   },
 
   async previewImageToPdfResult() {

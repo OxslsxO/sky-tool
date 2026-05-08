@@ -12,7 +12,7 @@
     </view>
   </view>
 
-  <view class="section">
+  <view class="section" wx:if="{{visibleParams && visibleParams.length > 0}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Setup</text>
@@ -100,7 +100,7 @@
     <view class="card">
       <view class="btn-ghost picker-button" bindtap="chooseInputImage">{{tool.id === 'image-to-pdf' ? '选择图片（可多选）' : (tool.id === 'ocr-text' ? (ocrResultReady ? '重新选择图片' : '选择识别图片') : '选择图片')}}</view>
 
-      <view class="image-preview" wx:if="{{imageInput && !(tool.id === 'ocr-text' && ocrResultReady)}}">
+      <view class="image-preview" wx:if="{{imageInput && !(tool.id === 'ocr-text' && ocrResultReady) && tool.id !== 'image-to-pdf'}}">
         <image class="image-preview__image" src="{{imageInput.path}}" mode="aspectFit"></image>
         <text class="image-preview__meta">尺寸 {{imageInput.width}} × {{imageInput.height}}</text>
         <text class="image-preview__meta">大小 {{imageInput.sizeText}}</text>
@@ -149,11 +149,14 @@
         <scroll-view class="image-to-pdf-thumbs" scroll-x>
           <view class="image-to-pdf-thumbs__list">
             <view 
-              class="image-to-pdf-thumb {{imageToPdfCurrentIndex === index ? 'image-to-pdf-thumb--active' : ''}}"
+              class="image-to-pdf-thumb {{imageToPdfCurrentIndex === index ? 'image-to-pdf-thumb--active' : ''}} {{imageToPdfDraggingIndex === index ? 'image-to-pdf-thumb--dragging' : ''}} {{imageToPdfHighlightIndex === index && imageToPdfHighlightIndex !== imageToPdfDraggingIndex ? 'image-to-pdf-thumb--highlight' : ''}}"
               wx:for="{{imageInputs}}"
               wx:key="path"
               data-index="{{index}}"
               bindtap="handleThumbClick"
+              bindtouchstart="handleImageToPdfThumbTouchStart"
+              bindtouchmove="handleImageToPdfThumbTouchMove"
+              bindtouchend="handleImageToPdfThumbTouchEnd"
             >
               <image class="image-to-pdf-thumb__image" src="{{item.path}}" mode="aspectFill"></image>
               <view class="image-to-pdf-thumb__index">{{index + 1}}</view>
@@ -163,10 +166,18 @@
             </view>
           </view>
         </scroll-view>
-        
-        <view class="image-to-pdf-actions" wx:if="{{imageToPdfSorting}}">
-          <text class="image-to-pdf-hint">拖动缩略图调整顺序</text>
-          <view class="btn-ghost" style="margin-top: 16rpx;" bindtap="finishSorting">完成调整</view>
+
+        <!-- 悬浮拖拽元素 -->
+        <view 
+          wx:if="{{imageToPdfDraggingIndex !== null}}" 
+          class="image-to-pdf-floating-drag"
+          style="left: {{imageToPdfFloatingLeft}}px; top: {{imageToPdfFloatingTop}}px;"
+        >
+          <image 
+            class="image-to-pdf-floating-image" 
+            src="{{imageInputs[imageToPdfDraggingIndex].path}}" 
+            mode="aspectFill"
+          ></image>
         </view>
       </view>
       
@@ -465,9 +476,6 @@
       <view class="pdf-merge-container" wx:if="{{tool.id === 'pdf-merge' && pdfMergePreviewFiles.length && !pdfMergeResultReady}}">
         <view class="pdf-merge-header">
           <text class="pdf-merge-title">已选择 {{pdfMergePreviewFiles.length}} 个PDF</text>
-          <view class="btn-ghost" wx:if="{{pdfMergeSorting}}" bindtap="finishSorting">
-            完成排序
-          </view>
         </view>
 
         <!-- Swiper 大图预览 -->
@@ -492,26 +500,33 @@
         <scroll-view class="pdf-merge-thumbs" scroll-x>
           <view class="pdf-merge-thumbs__list">
             <view 
-              class="pdf-merge-thumb {{pdfMergeCurrentIndex === index ? 'pdf-merge-thumb--active' : ''}}"
+              class="pdf-merge-thumb {{pdfMergeCurrentIndex === index ? 'pdf-merge-thumb--active' : ''}} {{pdfMergeDraggingIndex === index ? 'pdf-merge-thumb--dragging' : ''}} {{pdfMergeHighlightIndex === index && pdfMergeHighlightIndex !== pdfMergeDraggingIndex ? 'pdf-merge-thumb--highlight' : ''}}"
               wx:for="{{pdfMergePreviewFiles}}"
               wx:key="path"
               data-index="{{index}}"
               bindtap="handleThumbClick"
-              bindlongpress="handlePdfMergeThumbLongPress"
+              bindtouchstart="handlePdfMergeThumbTouchStart"
+              bindtouchmove="handlePdfMergeThumbTouchMove"
+              bindtouchend="handlePdfMergeThumbTouchEnd"
             >
               <view class="pdf-thumb-icon">📄</view>
               <text class="pdf-thumb-name">{{index + 1}}</text>
-              <!-- 排序时显示删除按钮 -->
-              <view class="pdf-thumb-delete" wx:if="{{pdfMergeSorting}}" data-index="{{index}}" catchtap="handleDeleteThumbImage">
+              <view class="pdf-thumb-delete" data-index="{{index}}" catchtap="handleDeleteThumbImage">
                 <text class="pdf-thumb-delete-icon">✕</text>
               </view>
             </view>
           </view>
         </scroll-view>
 
-        <!-- 排序提示 -->
-        <view class="pdf-merge-sort-hint" wx:if="{{pdfMergeSorting}}">
-          <text class="sort-hint-text">长按拖动调整顺序，点击完成保存</text>
+        <!-- 悬浮拖拽元素 -->
+        <view 
+          wx:if="{{pdfMergeDraggingIndex !== null}}" 
+          class="pdf-merge-floating-drag"
+          style="left: {{pdfMergeFloatingLeft}}px; top: {{pdfMergeFloatingTop}}px;"
+        >
+          <view class="pdf-merge-floating-content">
+            <text class="pdf-merge-floating-icon">📄</text>
+          </view>
         </view>
       </view>
 
