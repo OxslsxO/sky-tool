@@ -2,7 +2,7 @@
   <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
     <view class="hero-left">
       <text class="hero-title">{{tool.name}}</text>
-      <text class="hero-cost" wx:if="{{tool.id !== 'photo-id'}}">{{billing ? billing.costText : (tool.points + '积分')}}</text>
+      <text class="hero-cost">{{tool.points === 0 ? '免费' : (billing ? billing.costText : tool.points + ' 积分')}}</text>
     </view>
     <view class="hero-right" wx:if="{{userState}}">
       <view class="user-info">

@@ -25,10 +25,12 @@
 
   <view class="section">
     <view class="card detail-card">
-      <text class="detail-card__title">本次结果</text>
-      <text class="detail-card__copy">{{task.finalDetail}}</text>
-      <image class="detail-card__preview" wx:if="{{task.previewPath}}" src="{{task.previewPath}}" mode="aspectFit" bindtap="previewResult"></image>
-      <view class="audio-player" wx:if="{{task.status === 'success' && isAudioTask}}" bindtap="toggleAudioPlay">
+      <text class="detail-card__title" wx:if="{{task.status !== 'expired'}}">本次结果</text>
+      <text class="detail-card__title" wx:else>任务已过期</text>
+      <text class="detail-card__copy" wx:if="{{task.status !== 'expired'}}">{{task.finalDetail}}</text>
+      <text class="detail-card__copy" wx:else>该任务已超过{{taskRetentionDays}}天保留期，结果文件已不再可用。</text>
+      <image class="detail-card__preview" wx:if="{{task.previewPath && task.resultType === 'image' && task.status !== 'expired'}}" src="{{task.previewPath}}" mode="aspectFit" bindtap="previewResult"></image>
+      <view class="audio-player" wx:if="{{task.status === 'success' && isAudioTask && task.status !== 'expired'}}" bindtap="toggleAudioPlay">
         <view class="audio-cover">
           <text class="audio-play-icon">{{isPlaying ? '⏸' : '▶'}}</text>
         </view>
@@ -37,17 +39,17 @@
           <view class="audio-meta">{{audioMetaText}}</view>
         </view>
       </view>
-      <view class="detail-card__document" wx:if="{{task.status === 'success' && task.resultType === 'document' && !isAudioTask && !task.previewPath}}" bindtap="openDocumentResult">
+      <view class="detail-card__document" wx:if="{{task.status === 'success' && task.resultType === 'document' && !isAudioTask && !task.previewPath && task.status !== 'expired'}}" bindtap="openDocumentResult">
         <view class="detail-card__document-icon">📄</view>
         <view class="detail-card__document-info">
           <view class="detail-card__document-name">{{task.outputName || '文档文件'}}</view>
           <view class="detail-card__document-hint">点击打开文件</view>
         </view>
       </view>
-      <view class="detail-card__meta" wx:if="{{task.metaLines.length}}">
+      <view class="detail-card__meta" wx:if="{{task.metaLines.length && task.status !== 'expired'}}">
         <text class="detail-card__meta-line" wx:for="{{task.metaLines}}" wx:key="*this">{{item}}</text>
       </view>
-      <view class="detail-card__attachments" wx:if="{{task.attachments.length}}">
+      <view class="detail-card__attachments" wx:if="{{task.attachments.length && task.status !== 'expired'}}">
         <view class="detail-card__attachment" wx:for="{{task.attachments}}" wx:key="url" data-url="{{item.url}}" bindtap="openAttachment">
           <text class="detail-card__attachment-name">{{item.label || item.name}}</text>
           <text class="detail-card__attachment-link">打开文件</text>
@@ -59,9 +61,9 @@
   <view class="section">
     <view class="card action-card">
       <view class="action-card__buttons">
-        <view class="btn-secondary action-card__button" wx:if="{{task.outputPath}}" bindtap="saveResult">保存</view>
-        <view class="btn-secondary action-card__button" wx:if="{{task.status === 'success' && task.resultType === 'document' && !task.outputPath && task.remoteUrl}}" bindtap="openDocumentResult">打开文件</view>
-        <view class="btn-ghost action-card__button" wx:if="{{task.remoteUrl}}" bindtap="copyDownloadLink">复制链接</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.outputPath && task.status !== 'expired'}}" bindtap="saveResult">保存</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.status === 'success' && task.resultType === 'document' && !task.outputPath && task.remoteUrl && task.status !== 'expired'}}" bindtap="openDocumentResult">打开文件</view>
+        <view class="btn-ghost action-card__button" wx:if="{{task.remoteUrl && task.status !== 'expired'}}" bindtap="copyDownloadLink">复制链接</view>
         <view class="btn-ghost action-card__button" bindtap="openTasks">返回</view>
       </view>
     </view>

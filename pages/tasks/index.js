@@ -1,5 +1,68 @@
-const { listTasks, getTaskDashboard } = require("../../utils/task-store");
+const { getRawTasks, getTaskById, getTaskDashboard } = require("../../utils/task-store");
 const { ensureWechatLogin } = require("../../utils/page-auth");
+
+// 简化的任务列表展示函数，只保留列表页需要的字段
+function getTaskListForDisplay() {
+  const rawTasks = getRawTasks();
+  const now = Date.now();
+  
+  return rawTasks.map(task => {
+    let status = task.status;
+    let progress = 100;
+
+    // 检查任务是否过期
+    const TASK_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+    if (now - task.createdAt > TASK_RETENTION_MS) {
+      status = "expired";
+    } else if (task.status === "processing") {
+      const elapsed = now - task.createdAt;
+      progress = Math.min(100, Math.max(12, Math.round((elapsed / task.duration) * 100)));
+      status = elapsed >= task.duration ? "success" : "processing";
+    }
+
+    const statusText = {
+      processing: "处理中",
+      success: "已完成",
+      failed: "处理失败",
+      expired: "已过期",
+    }[status] || "处理中";
+
+    const savedSize = task.beforeSize && task.afterSize
+      ? Math.max(task.beforeSize - task.afterSize, 0)
+      : 0;
+
+    const formatMegabytes = (mb) => {
+      if (!mb) return "0 MB";
+      return mb < 1 ? `${Math.round(mb * 1024)} KB` : `${mb.toFixed(1)} MB`;
+    };
+
+    const formatRelativeTime = (timestamp) => {
+      const diff = now - timestamp;
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+      
+      if (minutes < 1) return "刚刚";
+      if (minutes < 60) return `${minutes} 分钟前`;
+      if (hours < 24) return `${hours} 小时前`;
+      return `${days} 天前`;
+    };
+
+    return {
+      id: task.id,
+      toolId: task.toolId,
+      status,
+      statusText,
+      progress,
+      resultHeadline: task.resultHeadline,
+      finalDetail: task.resultDetail,
+      createdLabel: formatRelativeTime(task.createdAt),
+      beforeSizeText: formatMegabytes(task.beforeSize),
+      afterSizeText: formatMegabytes(task.afterSize),
+      savedSizeText: formatMegabytes(savedSize),
+    };
+  }).sort((left, right) => right.createdAt - left.createdAt);
+}
 
 Page({
   data: {
@@ -35,9 +98,19 @@ Page({
 
   startTimer() {
     this.clearTimer();
+    // 延长刷新间隔，只在有处理中的任务时才刷新
     this.timer = setInterval(() => {
-      this.refreshPage();
-    }, 1200);
+      const tasks = getTaskListForDisplay();
+      const hasProcessingTasks = tasks.some(t => t.status === 'processing');
+      
+      if (hasProcessingTasks) {
+        this.setData({
+          tasks,
+          dashboard: getTaskDashboard(),
+          visibleTasks: this.filterTasks(tasks, this.data.filter),
+        });
+      }
+    }, 3000); // 从1.2秒延长到3秒
   },
 
   clearTimer() {
@@ -48,7 +121,7 @@ Page({
   },
 
   refreshPage() {
-    const tasks = listTasks();
+    const tasks = getTaskListForDisplay();
     this.setData({
       tasks,
       dashboard: getTaskDashboard(),

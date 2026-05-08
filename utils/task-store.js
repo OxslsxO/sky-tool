@@ -299,7 +299,8 @@ function getRawTasks() {
 }
 
 function saveTasks(tasks, options = {}) {
-  const next = (tasks || []).map(stampTask);
+  const stampedTasks = (tasks || []).map(stampTask);
+  const next = cleanExpiredTasks(stampedTasks);
   writeStorage(STORAGE_KEYS.tasks, next);
 
   if (!options.silent) {
@@ -333,11 +334,29 @@ function mergeTaskLists(localTasks, remoteTasks) {
     .slice(0, 100);
 }
 
+const TASK_RETENTION_DAYS = 7;
+const TASK_RETENTION_MS = TASK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+function cleanExpiredTasks(tasks) {
+  const now = Date.now();
+  const validTasks = tasks.filter(task => 
+    now - task.createdAt <= TASK_RETENTION_MS
+  );
+  
+  return validTasks;
+}
+
 function refreshStoredTasks() {
   const tasks = readStorage(STORAGE_KEYS.tasks, []).map(stampTask);
   let changed = false;
 
-  const next = tasks.map((task) => {
+  // 先清理过期任务
+  const nonExpiredTasks = cleanExpiredTasks(tasks);
+  if (nonExpiredTasks.length !== tasks.length) {
+    changed = true;
+  }
+
+  const next = nonExpiredTasks.map((task) => {
     if (
       task.status === "processing" &&
       task.duration &&
@@ -359,7 +378,7 @@ function refreshStoredTasks() {
     return next;
   }
 
-  return tasks;
+  return next;
 }
 
 function getBillingPreview(tool) {
@@ -382,7 +401,7 @@ function getBillingPreview(tool) {
         usable: true,
         mode: 'free',
         text: '本次使用今日免费次数（每个工具每日限1次）',
-        costText: '免费使用',
+        costText: '今日有1次免费',
       };
     }
 
@@ -392,7 +411,7 @@ function getBillingPreview(tool) {
         usable: true,
         mode: 'points',
         text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
-        costText: `消耗 ${tool.points} 积分`,
+        costText: `${tool.points} 积分`,
       };
     }
 
@@ -400,7 +419,7 @@ function getBillingPreview(tool) {
       usable: false,
       mode: 'locked',
       text: priority.text || '积分不足，请购买积分包',
-      costText: '资源不足',
+      costText: `${tool.points} 积分`,
       needUpgrade: true,
     };
   } catch {
@@ -420,14 +439,14 @@ function getBillingPreview(tool) {
         usable: true,
         mode: 'points',
         text: `本次将消耗 ${tool.points} 积分，当前余额 ${user.points} 积分`,
-        costText: `消耗 ${tool.points} 积分`,
+        costText: `${tool.points} 积分`,
       };
     }
     return {
       usable: false,
       mode: 'locked',
       text: '积分不足，请先开通会员或购买积分包',
-      costText: '积分不足',
+      costText: `${tool.points} 积分`,
       needUpgrade: true,
     };
   }
@@ -723,13 +742,15 @@ function normalizeTask(task) {
   let status = task.status;
   let progress = 100;
 
-  if (task.status === "processing") {
+  // 检查任务是否过期
+  if (now - task.createdAt > TASK_RETENTION_MS) {
+    status = "expired";
+    progress = 100;
+  } else if (task.status === "processing") {
     const elapsed = now - task.createdAt;
     progress = Math.min(100, Math.max(12, Math.round((elapsed / task.duration) * 100)));
     status = elapsed >= task.duration ? "success" : "processing";
-  }
-
-  if (task.status === "failed") {
+  } else if (task.status === "failed") {
     status = "failed";
     progress = 100;
   }
@@ -739,27 +760,25 @@ function normalizeTask(task) {
     : 0;
   const previewPath = getPreviewPath(task);
 
+  // 只返回页面显示需要的字段，减少数据传输量
   return {
-    ...task,
-    previewPath,
-    tool,
+    id: task.id,
+    toolId: task.toolId,
+    tool: tool ? { name: tool.name, accent: tool.accent } : null, // 只保留工具的必要信息
     status,
     progress,
     statusText: buildStatusText(status),
     createdLabel: formatRelativeTime(task.createdAt),
-    createdAtText: formatDateTime(task.createdAt),
-    beforeSizeText: formatMegabytes(task.beforeSize),
-    afterSizeText: formatMegabytes(task.afterSize),
-    savedSizeText: formatMegabytes(savedSize),
+    resultHeadline: task.resultHeadline,
     finalDetail: status === "success"
       ? (task.resultDetail || task.resultText || buildTaskResult(task, tool))
       : task.resultDetail,
-    hasOutputPath: !!task.outputPath,
-    hasRemoteUrl: !!task.remoteUrl,
-    hasPreviewPath: !!previewPath,
-    hasCopyText: !!task.copyText,
-    metaLines: task.metaLines || [],
-    attachments: task.attachments || [],
+    beforeSizeText: formatMegabytes(task.beforeSize),
+    afterSizeText: formatMegabytes(task.afterSize),
+    savedSizeText: formatMegabytes(savedSize),
+    previewPath,
+    // 保留完整信息用于任务详情页
+    ...task,
   };
 }
 

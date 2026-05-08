@@ -15,6 +15,8 @@ function isAudioTask(task) {
   return false;
 }
 
+const TASK_RETENTION_DAYS = 7;
+
 Page({
   data: {
     taskId: "",
@@ -25,6 +27,7 @@ Page({
     isPlaying: false,
     audioContext: null,
     audioMetaText: "",
+    taskRetentionDays: TASK_RETENTION_DAYS,
   },
 
   onLoad(options) {
@@ -53,9 +56,13 @@ Page({
       const task = getTaskById(this.data.taskId);
       if (!task || task.status !== "processing") {
         this.clearTimer();
+        if (task) {
+          this.refreshTask();
+        }
+      } else {
+        this.refreshTask();
       }
-      this.refreshTask();
-    }, 1200);
+    }, 2000); // 从1.2秒延长到2秒
   },
 
   clearTimer() {
@@ -125,7 +132,7 @@ Page({
 
   previewResult() {
     const { task } = this.data;
-    if (!task.previewPath) {
+    if (!task.previewPath || task.status === 'expired') {
       return;
     }
 
@@ -137,7 +144,7 @@ Page({
 
   saveResult() {
     const { task } = this.data;
-    if (!task.outputPath) {
+    if (!task.outputPath || task.status === 'expired') {
       return;
     }
 
@@ -160,6 +167,14 @@ Page({
 
   openDocumentResult() {
     const { task } = this.data;
+    if (task.status === 'expired') {
+      wx.showToast({
+        title: "任务已过期，文件已不可用",
+        icon: "none",
+      });
+      return;
+    }
+
     if (task.outputPath) {
       wx.openDocument({
         filePath: task.outputPath,
@@ -200,7 +215,13 @@ Page({
 
   copyDownloadLink() {
     const { task } = this.data;
-    if (!task.remoteUrl) {
+    if (!task.remoteUrl || task.status === 'expired') {
+      if (task.status === 'expired') {
+        wx.showToast({
+          title: "任务已过期，文件已不可用",
+          icon: "none",
+        });
+      }
       return;
     }
 
@@ -274,6 +295,15 @@ Page({
   },
 
   openAttachment(event) {
+    const { task } = this.data;
+    if (task.status === 'expired') {
+      wx.showToast({
+        title: "任务已过期，文件已不可用",
+        icon: "none",
+      });
+      return;
+    }
+
     const { url } = event.currentTarget.dataset;
     if (!url) {
       return;
@@ -284,6 +314,14 @@ Page({
 
   toggleAudioPlay() {
     const { audioUrl, isPlaying, audioContext, task } = this.data;
+    if (task.status === 'expired') {
+      wx.showToast({
+        title: "任务已过期，文件已不可用",
+        icon: "none",
+      });
+      return;
+    }
+
     if (!audioUrl) {
       wx.showToast({
         title: "音频文件不可用",

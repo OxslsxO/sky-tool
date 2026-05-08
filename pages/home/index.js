@@ -40,6 +40,7 @@ Page({
     user: {},
     toolUsageStats: {},
     toolUsageTotal: 0,
+    toolUsageTotalStr: "0",
     toolUsageProvider: "",
     viewMode: "grid",
     selectedCategory: "all",
@@ -59,10 +60,10 @@ Page({
     this.refreshPage();
     this.updateGreeting();
     
-    // 完全禁用工具使用统计网络请求，避免启动时的问题
-    // setTimeout(() => {
-    //   this.refreshToolUsageStats();
-    // }, 1000);
+    // 恢复工具使用统计
+    setTimeout(() => {
+      this.refreshToolUsageStats();
+    }, 1000);
     
     if (typeof this.getTabBar === 'function' && this.getTabBar()) {
       this.getTabBar().setData({
@@ -167,9 +168,16 @@ Page({
         return map;
       }, {});
 
+      const total = Number(response.totalUsageCount) || stats.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+      let totalStr = String(total);
+      if (total >= 10000) {
+        totalStr = (total / 10000).toFixed(total >= 100000 ? 0 : 1) + '万';
+      }
+
       this.setData({
         toolUsageStats,
-        toolUsageTotal: Number(response.totalUsageCount) || stats.reduce((sum, item) => sum + (Number(item.count) || 0), 0),
+        toolUsageTotal: total,
+        toolUsageTotalStr: totalStr,
         toolUsageProvider: response.provider || "",
         displayTools: this.filterTools(this.data.keyword),
       });
