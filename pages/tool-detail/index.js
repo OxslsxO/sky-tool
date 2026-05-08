@@ -71,7 +71,7 @@ function chooseMessageFiles(count, extension) {
   return new Promise((resolve, reject) => {
     wx.chooseMessageFile({
       count,
-      type: "file",
+      type: "all",
       // 不指定 extension，让用户选择所有文件，然后在代码中验证
       success: (result) => {
         const files = result.tempFiles || [];
