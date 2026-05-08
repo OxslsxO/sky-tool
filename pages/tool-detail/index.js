@@ -67,11 +67,11 @@ function chooseImage(count) {
   });
 }
 
-function chooseMessageFiles(count, extension) {
+function chooseMessageFiles(count, extension, type) {
   return new Promise((resolve, reject) => {
     wx.chooseMessageFile({
       count,
-      type: "all",
+      type: type || "file",
       // 不指定 extension，让用户选择所有文件，然后在代码中验证
       success: (result) => {
         const files = result.tempFiles || [];
@@ -1025,7 +1025,7 @@ Page({
             });
           } else {
             // 选择文件
-            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "wav", "flac", "m4a", "aac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "ncm"]);
+            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "wav", "flac", "m4a", "aac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "ncm"], "all");
             Object.assign(nextState, {
               imageInput: null,
               imageInputs: [],
@@ -1555,7 +1555,7 @@ Page({
         "audio-convert": ["mp3", "wav", "flac", "ogg", "m4a", "aac", "mp4", "mov", "webm", "avi", "mkv", "wmv", "flv"],
       };
 
-      const files = await chooseMessageFiles(count, extensionMap[tool.id] || []);
+      const files = await chooseMessageFiles(count, extensionMap[tool.id] || [], tool.id === "audio-convert" ? "all" : "file");
 
       // PDF合并做上传限制
       if (tool.id === "pdf-merge") {
@@ -4359,8 +4359,7 @@ Page({
       status: "正在转换音视频...",
       sizeBytes: backendFiles[0].size,
     }, async (url) => {
-      return await uploadFileForJson(url, {
-        file: backendFiles[0],
+      return await uploadFileForJson(url, backendFiles[0], {
         target,
         quality: selections.quality,
         fileName: backendFiles[0].name,

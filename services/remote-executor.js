@@ -117,7 +117,7 @@ function downloadRemoteFile(url) {
 }
 
 async function uploadFileForJson(pathname, file, formData = {}, options = {}) {
-  const readablePath = file.path;
+  const readablePath = await ensureReadablePath(file.path);
   const uploadUrl = /^https?:\/\//i.test(pathname) ? pathname : buildServiceUrl(pathname);
   console.log("[uploadFileForJson] 准备上传，URL:", uploadUrl, "文件:", file.name, "路径:", readablePath);
   
@@ -253,10 +253,19 @@ function downloadFileToUserData(url) {
 async function ensureReadablePath(filePath) {
   if (!filePath) return filePath;
 
-  // 对于微信临时文件，我们直接返回原路径
   if (filePath.startsWith("http://tmp/") || filePath.startsWith("wxfile://")) {
-    console.log("[ensureReadablePath] 检测到微信临时路径，直接返回:", filePath);
-    return filePath;
+    try {
+      const saveRes = await new Promise((resolve, reject) => {
+        wx.getFileSystemManager().saveFile({
+          tempFilePath: filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+      return saveRes.savedFilePath;
+    } catch (saveErr) {
+      return filePath;
+    }
   }
 
   if (filePath.startsWith("http://") || filePath.startsWith("https://")) {

@@ -38,6 +38,10 @@
     </view>
   </view>
 
+  <view class="mine-support-tip">
+    <text>使用出现问题请添加微信：OxslsxO</text>
+  </view>
+
   <view class="mine-section" wx:if="{{favorites.length}}">
     <view class="mine-section-head">
       <text class="mine-section-title">我的收藏</text>

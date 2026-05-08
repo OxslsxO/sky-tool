@@ -112,6 +112,17 @@
   margin-top: 28rpx;
 }
 
+.mine-support-tip {
+  text-align: center;
+  margin-top: 24rpx;
+  padding: 16rpx 0;
+}
+
+.mine-support-tip text {
+  font-size: 24rpx;
+  color: #b0a090;
+}
+
 .action-card {
   display: flex;
   align-items: center;
