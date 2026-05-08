@@ -190,9 +190,9 @@ const tools = [
     supportedFormats: ["PDF"],
     formatText: "PDF + PDF",
     scenarios: ["报名材料", "合同附件", "课程讲义整合"],
-    helperText: "适合先整理文档顺序，再统一输出一个 PDF 便于分享。",
+    helperText: "直接按选择的排列顺序合并PDF，简单便捷。",
     demoResult: "合并后保留文件顺序，适合继续压缩或统一重命名。",
-    params: [{ key: "order", label: "排序方式", options: ["按上传顺序", "手动调整", "按文件名"] }],
+    params: [],
   },
   {
     id: "pdf-split",
