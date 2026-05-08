@@ -80,7 +80,17 @@ Page({
         wx.showToast({ title: result.message, icon: "none" });
       }
     } catch (error) {
-      wx.showToast({ title: "支付失败", icon: "none" });
+      const errMsg = (error && error.message) || "";
+      if (errMsg.indexOf("WECHAT_PAY_UNAVAILABLE") > -1 || errMsg.indexOf("503") > -1 || errMsg.indexOf("支付参数不完整") > -1) {
+        wx.showModal({
+          title: "支付暂不可用",
+          content: "微信支付服务正在配置中，请稍后再试或联系微信：OxslsxO",
+          showCancel: false,
+          confirmText: "知道了",
+        });
+      } else {
+        wx.showToast({ title: "支付失败", icon: "none" });
+      }
     } finally {
       this.setData({ purchasing: false });
     }

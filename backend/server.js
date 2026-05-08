@@ -1612,6 +1612,9 @@ const pendingOrders = loadPendingOrdersFromDisk();
 // 积分套餐配置和单次工具使用配置
 const PRODUCTS = {
   points: {
+    "p-10": { name: "10积分", price: 100, points: 10, bonusPoints: 1 },
+    "p-20": { name: "20积分", price: 200, points: 20, bonusPoints: 3 },
+    "p-30": { name: "30积分", price: 300, points: 30, bonusPoints: 5 },
     "p-50": { name: "50积分", price: 500, points: 50, bonusPoints: 10 },
     "p-200": { name: "200积分", price: 1800, points: 200, bonusPoints: 50 },
     "p-500": { name: "500积分", price: 4000, points: 500, bonusPoints: 150 },
