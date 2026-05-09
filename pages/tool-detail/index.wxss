@@ -992,22 +992,24 @@
 .processing-btn-background {
   display: flex;
   align-items: center;
-  gap: 8rpx;
-  padding: 14rpx 32rpx;
-  border-radius: 999rpx;
-  background: rgba(200, 149, 108, 0.08);
-  border: 2rpx solid rgba(200, 149, 108, 0.12);
+  gap: 10rpx;
+  padding: 18rpx 44rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #C8956C, #D4A574);
+  border: none;
+  box-shadow: 0 8rpx 24rpx rgba(200, 149, 108, 0.3);
 }
 
 .processing-btn-background__icon {
-  font-size: 22rpx;
-  color: #C8956C;
+  font-size: 24rpx;
+  color: #FFFFFF;
 }
 
 .processing-btn-background__text {
-  font-size: 24rpx;
-  color: #C8956C;
-  font-weight: 600;
+  font-size: 26rpx;
+  color: #FFFFFF;
+  font-weight: 700;
+  letter-spacing: 2rpx;
 }
 
 .bg-task-float {
