@@ -4437,12 +4437,36 @@ Page({
     }
 
     this.latestCreatedTaskId = result.task ? result.task.id : this.latestCreatedTaskId;
+
+    let localPath = "";
+    if (resultKind === "video" && remoteUrl) {
+      this.updateProcessingProgress(92, "正在缓存视频...");
+      try {
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url: remoteUrl,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`缓存失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        localPath = downloadRes.tempFilePath;
+      } catch (cacheErr) {
+        console.warn("[audio-convert] 视频预缓存失败，将使用远程 URL:", cacheErr);
+      }
+    }
+
     this.setData({
       latestCreatedTaskId: result.task ? result.task.id : this.data.latestCreatedTaskId,
       relatedTasks: this.getRelatedTasks(tool.id),
       selections: finalSelections,
       audioConvertResultReady: true,
-      audioConvertResultPath: "",
+      audioConvertResultPath: localPath,
       audioConvertResultRemoteUrl: remoteUrl,
       audioConvertResultName: outputName,
       audioConvertResultHeadline: response.headline || "音视频格式转换已完成",
