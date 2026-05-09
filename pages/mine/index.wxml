@@ -86,4 +86,5 @@
   </view>
 
   <view class="mine-footer"></view>
+  <bg-task-float />
 </view>

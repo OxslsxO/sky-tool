@@ -1,0 +1,21 @@
+<view wx:if="{{visible}}" class="bg-float">
+  <view class="bg-float__list">
+    <view
+      wx:for="{{tasks}}"
+      wx:key="id"
+      class="bg-float__item"
+      data-id="{{item.id}}"
+      bindtap="handleTapItem"
+    >
+      <view class="bg-float__badge">
+        <text class="bg-float__percent">{{item.progress}}%</text>
+      </view>
+      <view class="bg-float__info">
+        <text class="bg-float__title">{{item.title}}</text>
+        <view class="bg-float__bar-wrap">
+          <view class="bg-float__bar" style="width: {{item.progress}}%;"></view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

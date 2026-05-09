@@ -1,6 +1,7 @@
 {
   "navigationBarTitleText": "万里工具箱",
   "usingComponents": {
-    "tool-card": "/components/tool-card/index"
+    "tool-card": "/components/tool-card/index",
+    "bg-task-float": "/components/bg-task-float/index"
   }
 }

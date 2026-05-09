@@ -62,4 +62,5 @@
       <view class="btn-primary empty-button" bindtap="goHome">去首页挑工具</view>
     </view>
   </view>
+<bg-task-float />
 </view>

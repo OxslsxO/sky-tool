@@ -68,4 +68,5 @@
       </view>
     </view>
   </view>
+  <bg-task-float />
 </view>

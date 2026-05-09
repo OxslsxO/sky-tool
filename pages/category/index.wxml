@@ -39,4 +39,5 @@
       <tool-card wx:for="{{categoryTools}}" wx:key="id" tool="{{item}}" bindselect="handleToolSelect" />
     </view>
   </view>
+  <bg-task-float />
 </view>

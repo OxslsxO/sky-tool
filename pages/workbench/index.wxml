@@ -153,4 +153,5 @@
     class="tool-canvas"
     style="width: {{canvasWidth}}px; height: {{canvasHeight}}px;"
   ></canvas>
+  <bg-task-float />
 </view>

@@ -882,16 +882,5 @@
       </view>
     </view>
   </view>
-
-  <view wx:if="{{showBackgroundTaskFloat}}" class="bg-task-float" bindtap="restoreFromBackground">
-    <view class="bg-task-float__badge">
-      <text class="bg-task-float__percent">{{backgroundTaskProgress}}%</text>
-    </view>
-    <view class="bg-task-float__info">
-      <text class="bg-task-float__title">{{backgroundTaskTitle}}</text>
-      <view class="bg-task-float__bar-wrap">
-        <view class="bg-task-float__bar" style="width: {{backgroundTaskProgress}}%;"></view>
-      </view>
-    </view>
-  </view>
+  <bg-task-float />
 </view>

@@ -53,6 +53,7 @@ const {
 } = require("../../services/remote-executor");
 const { buildServiceUrl } = require("../../services/backend-tools");
 const payment = require("../../services/payment");
+const bgTasks = require("../../services/background-tasks");
 
 function chooseImage(count) {
   return new Promise((resolve, reject) => {
@@ -628,10 +629,6 @@ Page({
     processingTitle: "",
     processingKind: "",
     showProcessingOverlay: false,
-    showBackgroundTaskFloat: false,
-    backgroundTaskProgress: 0,
-    backgroundTaskTitle: "",
-    backgroundTaskStatus: "",
     showMoreColors: false,
     userState: null,
     selectedPayment: "points", // 默认选择积分支付
@@ -1585,21 +1582,25 @@ Page({
     }
     finally {
       logger.log("[处理执行] 进入 finally 块");
-      if (executionSucceeded && (this.data.showProcessingOverlay || this.data.showBackgroundTaskFloat)) {
+      if (executionSucceeded && this.data.showProcessingOverlay) {
         this.updateProcessingProgress(100, "处理完成");
         this.setData({
           processingDisplayProgress: 100,
           processingDisplayProgressText: 100,
-          backgroundTaskProgress: 100,
-          backgroundTaskStatus: "处理完成",
         });
         await wait(220);
+      }
+
+      if (this._bgTaskId) {
+        bgTasks.updateTask(this._bgTaskId, 100, "处理完成");
+        const bgTaskId = this._bgTaskId;
+        this._bgTaskId = null;
+        setTimeout(() => bgTasks.removeTask(bgTaskId), 1500);
       }
 
       const nextState = {
         isWorking: false,
         photoIdIsProcessing: false,
-        showBackgroundTaskFloat: false,
       };
       if (!this.data.photoIdResultReady) {
         nextState.showProcessingOverlay = false;
@@ -3549,7 +3550,7 @@ Page({
     const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
     const currentDisplay = Number(this.data.processingDisplayProgress || 0);
     const displayValue = Math.max(currentDisplay, nextProgress);
-    const updates = {
+    this.setData({
       processingProgress: nextProgress,
       processingDisplayProgress: displayValue,
       processingDisplayProgressText: Math.round(displayValue),
@@ -3558,12 +3559,10 @@ Page({
       processingEstimateTo: nextProgress,
       processingEstimateStartedAt: Date.now(),
       processingEstimateDurationMs: Math.max(0, Number(options.durationMs || 0)),
-    };
-    if (this.data.showBackgroundTaskFloat) {
-      updates.backgroundTaskProgress = Math.round(displayValue);
-      updates.backgroundTaskStatus = status || "";
+    });
+    if (this._bgTaskId) {
+      bgTasks.updateTask(this._bgTaskId, Math.round(displayValue), status || "");
     }
-    this.setData(updates);
     this.startProcessingProgressTicker();
   },
 
@@ -3577,7 +3576,7 @@ Page({
     }
     this._lastProgressUpdateTime = now;
     this._lastProgressUpdateValue = nextProgress;
-    const updates = {
+    this.setData({
       processingProgress: nextProgress,
       processingDisplayProgress: nextProgress,
       processingDisplayProgressText: nextProgress,
@@ -3586,12 +3585,10 @@ Page({
       processingEstimateTo: nextProgress,
       processingEstimateStartedAt: Date.now(),
       processingEstimateDurationMs: 0,
-    };
-    if (this.data.showBackgroundTaskFloat) {
-      updates.backgroundTaskProgress = nextProgress;
-      updates.backgroundTaskStatus = status || this.data.processingStatus || "";
+    });
+    if (this._bgTaskId) {
+      bgTasks.updateTask(this._bgTaskId, nextProgress, status || this.data.processingStatus || "");
     }
-    this.setData(updates);
     this.startProcessingProgressTicker();
   },
 
@@ -3620,7 +3617,7 @@ Page({
     }
 
     this.processingProgressTimer = setInterval(() => {
-      if (!this.data.showProcessingOverlay && !this.data.showBackgroundTaskFloat) {
+      if (!this.data.showProcessingOverlay && !this._bgTaskId) {
         this.stopProcessingProgressTicker();
         return;
       }
@@ -3644,15 +3641,13 @@ Page({
 
       const rounded = Math.min(100, Math.round(next));
       if (Math.abs(next - current) >= 0.1 || rounded !== this.data.processingDisplayProgressText) {
-        const updates = {
+        this.setData({
           processingDisplayProgress: next,
           processingDisplayProgressText: rounded,
-        };
-        if (this.data.showBackgroundTaskFloat) {
-          updates.backgroundTaskProgress = rounded;
-          updates.backgroundTaskStatus = this.data.processingStatus || "";
+        });
+        if (this._bgTaskId) {
+          bgTasks.updateTask(this._bgTaskId, rounded, this.data.processingStatus || "");
         }
-        this.setData(updates);
       }
     }, 180);
   },
@@ -3666,31 +3661,29 @@ Page({
 
   minimizeToBackground() {
     if (!this.data.isWorking) return;
+    const toolId = this.data.tool ? this.data.tool.id : "";
+    const title = this.data.processingTitle || "处理中";
+    this._bgTaskId = bgTasks.addTask(title, toolId);
+    bgTasks.updateTask(this._bgTaskId, this.data.processingDisplayProgressText || 0, this.data.processingStatus || "");
     this.setData({
       showProcessingOverlay: false,
-      showBackgroundTaskFloat: true,
-      backgroundTaskProgress: this.data.processingDisplayProgressText || 0,
-      backgroundTaskTitle: this.data.processingTitle || "处理中",
-      backgroundTaskStatus: this.data.processingStatus || "",
     });
   },
 
   restoreFromBackground() {
     if (!this.data.isWorking) {
-      this.setData({ showBackgroundTaskFloat: false });
+      if (this._bgTaskId) {
+        bgTasks.removeTask(this._bgTaskId);
+        this._bgTaskId = null;
+      }
       return;
+    }
+    if (this._bgTaskId) {
+      bgTasks.removeTask(this._bgTaskId);
+      this._bgTaskId = null;
     }
     this.setData({
       showProcessingOverlay: true,
-      showBackgroundTaskFloat: false,
-    });
-  },
-
-  updateBackgroundTaskFloat() {
-    if (!this.data.showBackgroundTaskFloat || !this.data.isWorking) return;
-    this.setData({
-      backgroundTaskProgress: this.data.processingDisplayProgressText || 0,
-      backgroundTaskStatus: this.data.processingStatus || "",
     });
   },
 

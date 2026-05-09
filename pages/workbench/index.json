@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "工具工作台"
+  "navigationBarTitleText": "工具工作台",
+  "usingComponents": {
+    "bg-task-float": "/components/bg-task-float/index"
+  }
 }
