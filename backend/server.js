@@ -3069,7 +3069,7 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
         }
 
         const args = [
-          "-y", "-i", tempInputPath,
+          "-y", "-probesize", "5M", "-analyzeduration", "500k", "-i", tempInputPath,
           ...qualityArgs,
           tempOutputPath
         ];
@@ -3128,10 +3128,11 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
         }
 
         const args = [
-          "-y", "-i", tempInputPath,
+          "-y", "-probesize", "20M", "-analyzeduration", "2M", "-i", tempInputPath,
           "-c:v", "libx264",
-          "-preset", "veryfast",
+          "-preset", "ultrafast",
           "-crf", crf,
+          "-threads", "4",
           "-c:a", "aac",
           "-b:a", "128k",
           tempOutputPath
@@ -3525,10 +3526,13 @@ function parseFfmpegTime(stderr) {
   return null;
 }
 
-function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetFormat, quality, onProgress) {
+function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetFormat, quality, onProgress, inputSizeBytes) {
   return new Promise((resolve, reject) => {
     const ext = targetFormat.toLowerCase();
-    const args = ["-y", "-probesize", "100M", "-analyzeduration", "10M", "-i", inputFilePath];
+    const fileSizeMB = (inputSizeBytes || 0) / 1024 / 1024;
+    const probeSize = fileSizeMB > 100 ? "100M" : fileSizeMB > 20 ? "20M" : "5M";
+    const analyzeDuration = fileSizeMB > 100 ? "10M" : fileSizeMB > 20 ? "2M" : "500k";
+    const args = ["-y", "-probesize", probeSize, "-analyzeduration", analyzeDuration, "-i", inputFilePath];
 
     if (isAudioExtension(ext)) {
       args.push("-vn");
@@ -3542,11 +3546,10 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
         args.push("-f", "adts");
       }
     } else if (isVideoExtension(ext)) {
-      args.push("-c:v", getVideoCodec(ext));
       if (ext === "webm") {
-        args.push("-b:v", "0", "-crf", getVideoCrf(quality), "-c:a", "libopus", "-b:a", "128k");
+        args.push("-c:v", "libvpx", "-b:v", "0", "-crf", getVideoCrf(quality), "-cpu-used", "8", "-threads", "4", "-c:a", "libopus", "-b:a", "128k");
       } else {
-        args.push("-preset", "veryfast", "-crf", getVideoCrf(quality), "-c:a", "aac", "-b:a", "160k");
+        args.push("-c:v", "libx264", "-preset", "ultrafast", "-crf", getVideoCrf(quality), "-threads", "4", "-c:a", "aac", "-b:a", "160k");
         if (ext === "mp4") {
           args.push("-movflags", "+faststart");
         }
@@ -3727,7 +3730,7 @@ async function processAudioConvertTask(taskId, taskData) {
 
     await runFfmpegConvert(ffmpegPath, actualInputPath, outputPath, target, quality, (progress, statusText) => {
       updateTaskProgress(taskId, 30 + progress * 0.6, statusText);
-    });
+    }, fileBuffer.length);
 
     updateTaskProgress(taskId, 90, "保存结果...");
     const bytes = fs.readFileSync(outputPath);

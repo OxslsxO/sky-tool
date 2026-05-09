@@ -4435,7 +4435,9 @@ Page({
 
   async pollTaskProgress(taskId) {
     let attempts = 0;
-    const maxAttempts = 1800;
+    const maxAttempts = 2400;
+    let lastProgress = 0;
+    let stallCount = 0;
     
     while (attempts < maxAttempts) {
       try {
@@ -4454,11 +4456,19 @@ Page({
         if (task.status === "failed") {
           throw new Error(task.error || "处理失败");
         }
+
+        if (task.progress > lastProgress) {
+          lastProgress = task.progress;
+          stallCount = 0;
+        } else {
+          stallCount++;
+        }
       } catch (error) {
         console.warn("[PollTask] 轮询失败:", error);
       }
       
-      await sleep(500);
+      const pollInterval = lastProgress < 15 ? 300 : lastProgress < 50 ? 600 : 800;
+      await sleep(stallCount > 10 ? 1500 : pollInterval);
       attempts++;
     }
     
@@ -4585,7 +4595,7 @@ Page({
       return;
     }
 
-    this.updateProcessingProgress(15, "正在上传文件...");
+    this.updateProcessingProgress(10, "正在上传文件...");
     
     const response = await this.uploadAndPollTask(
       buildServiceUrl("/api/audio/convert"),
@@ -4594,6 +4604,13 @@ Page({
         target,
         quality: selections.quality,
         fileName: backendFiles[0].name,
+      },
+      {
+        timeout: 600000,
+        onProgressUpdate: (progress) => {
+          const percent = Number(progress.progress || 0);
+          this.updateProcessingDisplayProgress(10 + Math.round(percent * 0.15), "正在上传文件...");
+        },
       }
     );
 
@@ -4632,19 +4649,7 @@ Page({
     if (resultKind === "video" && remoteUrl) {
       this.updateProcessingProgress(92, "正在缓存视频...");
       try {
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: remoteUrl,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`缓存失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
         localPath = downloadRes.tempFilePath;
       } catch (cacheErr) {
         console.warn("[audio-convert] 视频预缓存失败，将使用远程 URL:", cacheErr);
