@@ -1,7 +1,7 @@
 const { getRawTasks, getTaskById, getTaskDashboard } = require("../../utils/task-store");
+const { getToolById } = require("../../data/mock");
 const { ensureWechatLogin } = require("../../utils/page-auth");
 
-// 简化的任务列表展示函数，只保留列表页需要的字段
 function getTaskListForDisplay() {
   const rawTasks = getRawTasks();
   const now = Date.now();
@@ -10,7 +10,6 @@ function getTaskListForDisplay() {
     let status = task.status;
     let progress = 100;
 
-    // 检查任务是否过期
     const TASK_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
     if (now - task.createdAt > TASK_RETENTION_MS) {
       status = "expired";
@@ -48,15 +47,19 @@ function getTaskListForDisplay() {
       return `${days} 天前`;
     };
 
+    const tool = getToolById(task.toolId);
+
     return {
       id: task.id,
       toolId: task.toolId,
+      tool: tool ? { name: tool.name, accent: tool.accent } : { name: "工具", accent: "" },
       status,
       statusText,
       progress,
       resultHeadline: task.resultHeadline,
       finalDetail: task.resultDetail,
       createdLabel: formatRelativeTime(task.createdAt),
+      createdAt: task.createdAt,
       beforeSizeText: formatMegabytes(task.beforeSize),
       afterSizeText: formatMegabytes(task.afterSize),
       savedSizeText: formatMegabytes(savedSize),

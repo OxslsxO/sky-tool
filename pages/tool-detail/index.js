@@ -48,6 +48,7 @@ const {
   requestJson,
   packLocalFile,
   downloadRemoteFile,
+  safeDownloadFile,
   uploadLocalFile,
   uploadFileForJson,
   ensureReadablePath,
@@ -1027,7 +1028,7 @@ Page({
   // 万能压缩选择文件
   async chooseUniversalCompressFile() {
     wx.showActionSheet({
-      itemList: ['选择图片', '选择任意文件'],
+      itemList: ['选择图片', '选择视频', '选择其他文件'],
       success: async (res) => {
         try {
           this.ignoreOnShowRefreshUntil = Date.now() + 3000;
@@ -1035,7 +1036,6 @@ Page({
           const nextState = {};
 
           if (res.tapIndex === 0) {
-            // 选择图片
             const medias = await chooseImage(1);
             const imageInputs = [];
 
@@ -1058,9 +1058,30 @@ Page({
               imageInputs,
               backendFiles: [],
             });
+          } else if (res.tapIndex === 1) {
+            const videoRes = await new Promise((resolve, reject) => {
+              wx.chooseMedia({
+                count: 1,
+                mediaType: ["video"],
+                sourceType: ["album", "camera"],
+                success: resolve,
+                fail: reject,
+              });
+            });
+            const videoFile = videoRes.tempFiles[0];
+            const fileInfo = await getFileInfo(videoFile.tempFilePath);
+            Object.assign(nextState, {
+              imageInput: null,
+              imageInputs: [],
+              backendFiles: [{
+                path: videoFile.tempFilePath,
+                name: videoFile.tempFilePath.split("/").pop() || "video.mp4",
+                size: fileInfo ? fileInfo.size : (videoFile.size || 0),
+                sizeText: formatFileSize(fileInfo ? fileInfo.size : (videoFile.size || 0)),
+              }],
+            });
           } else {
-            // 选择文件 - 万能压缩支持所有文件类型
-            const files = await chooseMessageFiles(1, null, "all");
+            const files = await chooseMessageFiles(1, null, "file");
             
             // 检查文件大小
             if (files.length > 0 && files[0].size > 50 * 1024 * 1024) {
@@ -2560,19 +2581,7 @@ Page({
     wx.showLoading({ title: "正在下载文件", mask: true });
 
     try {
-      const downloadRes = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url,
-          success: (res) => {
-            if (res.statusCode === 200) {
-              resolve(res);
-            } else {
-              reject(new Error(`下载失败: ${res.statusCode}`));
-            }
-          },
-          fail: (err) => reject(err),
-        });
-      });
+      const downloadRes = await safeDownloadFile(url);
       filePath = downloadRes.tempFilePath;
       this.setData({ audioConvertResultPath: filePath });
     } catch (downloadErr) {
@@ -2640,21 +2649,13 @@ Page({
 
     try {
       if (!filePath && url) {
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
-        filePath = downloadRes.tempFilePath;
-        this.setData({ audioConvertResultPath: filePath });
+        try {
+          const downloadRes = await downloadRemoteFile(url, { maxRetries: 2 });
+          filePath = downloadRes.tempFilePath;
+          this.setData({ audioConvertResultPath: filePath });
+        } catch (dlErr) {
+          throw new Error(`下载失败: ${(dlErr && dlErr.message) || "网络错误"}`);
+        }
       }
 
       if (this.data.audioConvertResultKind === "video") {
@@ -2767,21 +2768,8 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[PDF转Word] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
         this.setData({ pdfToWordResultPath: filePath });
       }
 
@@ -2831,19 +2819,7 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[PDF转Word] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         // 更新本地路径缓存
         this.setData({ pdfToWordResultPath: filePath });
@@ -2911,19 +2887,7 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[Office转PDF] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         // 更新本地路径缓存
         this.setData({ officeToPdfResultPath: filePath });
@@ -2975,19 +2939,7 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[Office转PDF] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         // 更新本地路径缓存
         this.setData({ officeToPdfResultPath: filePath });
@@ -3055,19 +3007,7 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[PDF合并] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         // 更新本地路径缓存
         this.setData({ pdfMergeResultPath: filePath });
@@ -3119,19 +3059,7 @@ Page({
       // 如果没有本地路径，先下载
       if (!filePath && url) {
         console.log("[PDF合并] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         // 更新本地路径缓存
         this.setData({ pdfMergeResultPath: filePath });
@@ -3205,20 +3133,7 @@ Page({
     try {
       if (!filePath && url) {
         console.log("[PDF拆分] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              console.log("[PDF拆分] 下载结果", res);
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         console.log("[PDF拆分] 下载完成，本地路径:", filePath);
         this.setData({ pdfSplitResultPath: filePath });
@@ -3267,20 +3182,7 @@ Page({
 
     try {
       console.log("[PDF拆分] 开始下载附件:", url);
-      const downloadRes = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url: url,
-          success: (res) => {
-            console.log("[PDF拆分] 附件下载结果:", res);
-            if (res.statusCode === 200) {
-              resolve(res);
-            } else {
-              reject(new Error(`下载失败: ${res.statusCode}`));
-            }
-          },
-          fail: (err) => reject(err),
-        });
-      });
+      const downloadRes = await safeDownloadFile(url);
 
       console.log("[PDF拆分] 附件下载完成，准备打开文档:", downloadRes.tempFilePath);
       await new Promise((resolve, reject) => {
@@ -3334,20 +3236,7 @@ Page({
     try {
       if (!filePath && url) {
         console.log("[PDF拆分] 无本地缓存，正在下载:", url);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: url,
-            success: (res) => {
-              console.log("[PDF拆分] 下载结果", res);
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
         console.log("[PDF拆分] 下载完成，本地路径:", filePath);
         this.setData({ pdfSplitResultPath: filePath });
@@ -4137,19 +4026,7 @@ Page({
       if (remoteUrl) {
         try {
           console.log("[PDF合并] 正在下载文件:", remoteUrl);
-          const downloadRes = await new Promise((resolve, reject) => {
-            wx.downloadFile({
-              url: remoteUrl,
-              success: (res) => {
-                if (res.statusCode === 200) {
-                  resolve(res);
-                } else {
-                  reject(new Error(`下载失败: ${res.statusCode}`));
-                }
-              },
-              fail: (err) => reject(err),
-            });
-          });
+          const downloadRes = await safeDownloadFile(remoteUrl);
           localPath = downloadRes.tempFilePath;
           console.log("[PDF合并] 文件已下载:", localPath);
         } catch (downloadError) {
@@ -4234,19 +4111,7 @@ Page({
     if (remoteUrl) {
       try {
         console.log("[PDF拆分] 正在下载文件:", remoteUrl);
-        const downloadRes = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: remoteUrl,
-            success: (res) => {
-              if (res.statusCode === 200) {
-                resolve(res);
-              } else {
-                reject(new Error(`下载失败: ${res.statusCode}`));
-              }
-            },
-            fail: (err) => reject(err),
-          });
-        });
+        const downloadRes = await safeDownloadFile(remoteUrl);
         localPath = downloadRes.tempFilePath;
         console.log("[PDF拆分] 文件已下载:", localPath);
       } catch (downloadError) {
@@ -4365,19 +4230,7 @@ Page({
       if (remoteUrl) {
         try {
           console.log("[Office转PDF] 正在下载文件:", remoteUrl);
-          const downloadRes = await new Promise((resolve, reject) => {
-            wx.downloadFile({
-              url: remoteUrl,
-              success: (res) => {
-                if (res.statusCode === 200) {
-                  resolve(res);
-                } else {
-                  reject(new Error(`下载失败: ${res.statusCode}`));
-                }
-              },
-              fail: (err) => reject(err),
-            });
-          });
+          const downloadRes = await safeDownloadFile(remoteUrl);
           localPath = downloadRes.tempFilePath;
           console.log("[Office转PDF] 文件已下载:", localPath);
         } catch (downloadError) {
@@ -4467,19 +4320,7 @@ Page({
       if (remoteUrl) {
         try {
           console.log("[PDF转Word] 正在下载文件:", remoteUrl);
-          const downloadRes = await new Promise((resolve, reject) => {
-            wx.downloadFile({
-              url: remoteUrl,
-              success: (res) => {
-                if (res.statusCode === 200) {
-                  resolve(res);
-                } else {
-                  reject(new Error(`下载失败: ${res.statusCode}`));
-                }
-              },
-              fail: (err) => reject(err),
-            });
-          });
+          const downloadRes = await safeDownloadFile(remoteUrl);
           localPath = downloadRes.tempFilePath;
           console.log("[PDF转Word] 文件已下载:", localPath);
         } catch (downloadError) {
@@ -5347,7 +5188,7 @@ Page({
 
     let useInlineBase64 = false;
     let hasDownloadUrl = false;
-    let downloadUrl = response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
+    let downloadUrl = response.file.downloadUrl || response.file.url || response.file.fallbackUrl || response.file.externalUrl || "";
     
     if (downloadUrl) {
       hasDownloadUrl = true;
@@ -5398,45 +5239,80 @@ Page({
     
     logger.log("[压缩下载] 使用下载 URL 方式（更快更稳定）");
 
-    // 根据文件大小设置合适的超时时间
-    const downloadTimeout = Math.max(60000, Math.min(300000, fileSize / 10000)); // 最小1分钟，最大5分钟
+    const downloadTimeout = Math.max(60000, Math.min(300000, fileSize / 10000));
     
-    const downloadRes = await new Promise((resolve, reject) => {
-      let timeoutId;
-      const task = wx.downloadFile({
-        url: downloadUrl,
-        timeout: downloadTimeout,
-        success: (res) => {
-          clearTimeout(timeoutId);
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(res);
-          } else {
-            reject(new Error(`下载失败: HTTP ${res.statusCode}`));
-          }
-        },
-        fail: (err) => {
-          clearTimeout(timeoutId);
-          const errMsg = err.errMsg || err.message || "";
-          if (errMsg.indexOf("timeout") > -1 || errMsg.indexOf("超时") > -1) {
-            reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
-          } else {
-            reject(new Error(`下载失败: ${errMsg}`));
-          }
-        },
-      });
-      
-      // 备用超时保护
-      timeoutId = setTimeout(() => {
-        reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
-      }, downloadTimeout + 5000);
-      
-      if (task && task.onProgressUpdate) {
-        task.onProgressUpdate((progress) => {
-          const percent = Number(progress.progress || 0);
-          this.updateProcessingDisplayProgress(84 + Math.round(percent * 0.08), "正在下载结果...");
+    let downloadRes = null;
+    try {
+      downloadRes = await new Promise((resolve, reject) => {
+        let timeoutId;
+        const task = wx.downloadFile({
+          url: downloadUrl,
+          timeout: downloadTimeout,
+          success: (res) => {
+            clearTimeout(timeoutId);
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(res);
+            } else {
+              reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+            }
+          },
+          fail: (err) => {
+            clearTimeout(timeoutId);
+            const errMsg = err.errMsg || err.message || "";
+            if (errMsg.indexOf("timeout") > -1 || errMsg.indexOf("超时") > -1) {
+              reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
+            } else {
+              reject(new Error(`下载失败: ${errMsg}`));
+            }
+          },
         });
+        
+        timeoutId = setTimeout(() => {
+          reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
+        }, downloadTimeout + 5000);
+        
+        if (task && task.onProgressUpdate) {
+          task.onProgressUpdate((progress) => {
+            const percent = Number(progress.progress || 0);
+            this.updateProcessingDisplayProgress(84 + Math.round(percent * 0.08), "正在下载结果...");
+          });
+        }
+      });
+    } catch (dlError) {
+      const errMsg = (dlError && dlError.message) || "";
+      if (errMsg.indexOf("domain list") > -1 || errMsg.indexOf("not in domain") > -1) {
+        logger.log("[压缩下载] downloadFile 域名受限，改用 request 方式下载");
+        this.updateProcessingDisplayProgress(84, "正在下载结果...");
+
+        const reqRes = await new Promise((resolve, reject) => {
+          wx.request({
+            url: downloadUrl,
+            method: "GET",
+            responseType: "arraybuffer",
+            timeout: downloadTimeout,
+            success: (res) => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+              }
+            },
+            fail: (err) => {
+              reject(new Error(`下载失败: ${(err && err.errMsg) || "网络错误"}`));
+            },
+          });
+        });
+
+        const resultName = response.file.name || uploadFileName || "compressed-result";
+        const ext = resultName.includes('.') ? resultName.substring(resultName.lastIndexOf('.')) : ".bin";
+        const destPath = `${wx.env.USER_DATA_PATH}/compressed-${Date.now()}${ext}`;
+        const fs = wx.getFileSystemManager();
+        fs.writeFileSync(destPath, reqRes.data);
+        downloadRes = { tempFilePath: destPath };
+      } else {
+        throw dlError;
       }
-    });
+    }
     this.updateProcessingProgress(92, "正在整理结果...");
 
     return {

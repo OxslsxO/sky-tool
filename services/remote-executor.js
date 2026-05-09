@@ -157,6 +157,8 @@ async function downloadRemoteFile(url, options = {}) {
               if (err.errMsg.indexOf("exceed") > -1 || err.errMsg.indexOf("max") > -1) {
                 message = "文件过大，超过小程序下载限制，请直接访问下载链接";
                 code = "FILE_TOO_LARGE";
+              } else if (err.errMsg.indexOf("domain list") > -1 || err.errMsg.indexOf("not in domain") > -1) {
+                code = "DOMAIN_NOT_ALLOWED";
               }
             }
 
@@ -172,6 +174,36 @@ async function downloadRemoteFile(url, options = {}) {
       return result;
     } catch (error) {
       lastError = error;
+      if (error.code === "DOMAIN_NOT_ALLOWED") {
+        try {
+          const reqRes = await new Promise((resolve, reject) => {
+            wx.request({
+              url,
+              method: "GET",
+              responseType: "arraybuffer",
+              timeout: 120000,
+              success: (res) => {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  resolve(res);
+                } else {
+                  reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+                }
+              },
+              fail: (err) => {
+                reject(new Error(`下载失败: ${(err && err.errMsg) || "网络错误"}`));
+              },
+            });
+          });
+          const extMatch = /\.([A-Za-z0-9]+)(\?|$)/.exec(url || "");
+          const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : ".bin";
+          const destPath = `${wx.env.USER_DATA_PATH}/_dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+          const fs = wx.getFileSystemManager();
+          fs.writeFileSync(destPath, reqRes.data);
+          return { tempFilePath: destPath, statusCode: 200 };
+        } catch (reqError) {
+          throw reqError;
+        }
+      }
       const errMsg = error.errMsg || error.message || "";
       const canRetry = isRetryableNetworkError(errMsg) && error.code !== "FILE_TOO_LARGE" && attempt < maxRetries;
       if (!canRetry) {
@@ -305,7 +337,32 @@ function downloadFileToTemp(url) {
         reject(new Error(`下载失败: HTTP ${res.statusCode}`));
       },
       fail: (err) => {
-        reject(new Error((err && err.errMsg) || "文件下载失败"));
+        const errMsg = (err && err.errMsg) || "";
+        if (errMsg.indexOf("domain list") > -1 || errMsg.indexOf("not in domain") > -1) {
+          wx.request({
+            url,
+            method: "GET",
+            responseType: "arraybuffer",
+            timeout: 120000,
+            success: (reqRes) => {
+              if (reqRes.statusCode >= 200 && reqRes.statusCode < 300) {
+                const extMatch = /\.([A-Za-z0-9]+)(\?|$)/.exec(url || "");
+                const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : ".bin";
+                const destPath = `${wx.env.USER_DATA_PATH}/_tmp_dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+                const fs = wx.getFileSystemManager();
+                fs.writeFileSync(destPath, reqRes.data);
+                resolve(destPath);
+              } else {
+                reject(new Error(`下载失败: HTTP ${reqRes.statusCode}`));
+              }
+            },
+            fail: (reqErr) => {
+              reject(new Error(`下载失败: ${(reqErr && reqErr.errMsg) || "网络错误"}`));
+            },
+          });
+        } else {
+          reject(new Error(errMsg || "文件下载失败"));
+        }
       },
     });
   });
@@ -328,7 +385,29 @@ function downloadFileToUserData(url) {
         reject(new Error(`下载失败: HTTP ${res.statusCode}`));
       },
       fail: (err) => {
-        reject(new Error((err && err.errMsg) || "文件下载失败"));
+        const errMsg = (err && err.errMsg) || "";
+        if (errMsg.indexOf("domain list") > -1 || errMsg.indexOf("not in domain") > -1) {
+          wx.request({
+            url,
+            method: "GET",
+            responseType: "arraybuffer",
+            timeout: 120000,
+            success: (reqRes) => {
+              if (reqRes.statusCode >= 200 && reqRes.statusCode < 300) {
+                const fs = wx.getFileSystemManager();
+                fs.writeFileSync(destPath, reqRes.data);
+                resolve(destPath);
+              } else {
+                reject(new Error(`下载失败: HTTP ${reqRes.statusCode}`));
+              }
+            },
+            fail: (reqErr) => {
+              reject(new Error(`下载失败: ${(reqErr && reqErr.errMsg) || "网络错误"}`));
+            },
+          });
+        } else {
+          reject(new Error(errMsg || "文件下载失败"));
+        }
       },
     });
   });
@@ -410,10 +489,55 @@ async function uploadLocalFile(file, options = {}) {
   return response.file || null;
 }
 
+function safeDownloadFile(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      timeout: options.timeout || 120000,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res);
+        } else {
+          reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+        }
+      },
+      fail: (err) => {
+        const errMsg = (err && err.errMsg) || "";
+        if (errMsg.indexOf("domain list") > -1 || errMsg.indexOf("not in domain") > -1) {
+          wx.request({
+            url,
+            method: "GET",
+            responseType: "arraybuffer",
+            timeout: options.timeout || 120000,
+            success: (reqRes) => {
+              if (reqRes.statusCode >= 200 && reqRes.statusCode < 300) {
+                const extMatch = /\.([A-Za-z0-9]+)(\?|$)/.exec(url || "");
+                const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : ".bin";
+                const destPath = `${wx.env.USER_DATA_PATH}/_safe_dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+                const fs = wx.getFileSystemManager();
+                fs.writeFileSync(destPath, reqRes.data);
+                resolve({ tempFilePath: destPath, statusCode: 200 });
+              } else {
+                reject(new Error(`下载失败: HTTP ${reqRes.statusCode}`));
+              }
+            },
+            fail: (reqErr) => {
+              reject(new Error(`下载失败: ${(reqErr && reqErr.errMsg) || "网络错误"}`));
+            },
+          });
+        } else {
+          reject(new Error(errMsg || "文件下载失败"));
+        }
+      },
+    });
+  });
+}
+
 module.exports = {
   readFileBase64,
   requestJson,
   downloadRemoteFile,
+  safeDownloadFile,
   uploadFileForJson,
   uploadMultipleFilesForJson,
   packLocalFile,

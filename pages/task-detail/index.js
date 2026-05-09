@@ -1,5 +1,6 @@
 const { getTaskById } = require("../../utils/task-store");
 const { getToolById } = require("../../data/mock");
+const { downloadRemoteFile } = require("../../services/remote-executor");
 
 const AUDIO_EXTENSIONS = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
 
@@ -238,13 +239,7 @@ Page({
 
   async downloadAndOpen(url) {
     try {
-      const result = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url,
-          success: resolve,
-          fail: reject,
-        });
-      });
+      const result = await downloadRemoteFile(url, { maxRetries: 2 });
 
       if (result.statusCode && result.statusCode >= 400) {
         throw new Error("DOWNLOAD_FAILED");
@@ -255,7 +250,6 @@ Page({
         showMenu: true,
       });
     } catch (error) {
-      // 检测是否是文件大小问题
       let errorMsg = "下载或打开失败";
       let showCopyLink = false;
       
@@ -382,13 +376,7 @@ Page({
         wx.showLoading({
           title: "下载中...",
         });
-        const download = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: task.remoteUrl,
-            success: resolve,
-            fail: reject,
-          });
-        });
+        const download = await downloadRemoteFile(task.remoteUrl, { maxRetries: 2 });
         wx.hideLoading();
         if (download.statusCode >= 200 && download.statusCode < 300) {
           filePath = download.tempFilePath || "";
@@ -446,13 +434,7 @@ Page({
         wx.showLoading({
           title: "下载中...",
         });
-        const download = await new Promise((resolve, reject) => {
-          wx.downloadFile({
-            url: task.remoteUrl,
-            success: resolve,
-            fail: reject,
-          });
-        });
+        const download = await downloadRemoteFile(task.remoteUrl, { maxRetries: 2 });
         wx.hideLoading();
         if (download.statusCode >= 200 && download.statusCode < 300) {
           filePath = download.tempFilePath || "";

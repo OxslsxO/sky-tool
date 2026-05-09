@@ -1055,6 +1055,7 @@ function updateOrder(orderId, patch) {
 
 function refundPointsIfLowCompression(taskId, tool) {
   if (!taskId || !tool || tool.points <= 0) return false;
+  if (tool.id !== "universal-compress") return false;
 
   const task = getRawTasks().find((t) => t.id === taskId);
   if (!task) return false;
