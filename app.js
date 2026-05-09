@@ -20,15 +20,17 @@ App({
         console.log("✅ 已登录，准备数据");
         seedUserState();
 
+        // 延迟云端恢复，不阻塞启动
         if (hasBackendService() && user.userId) {
-          this._tryCloudRestore(user);
+          setTimeout(() => {
+            this._tryCloudRestore(user);
+          }, 2000);
         }
 
-        setTimeout(() => {
-          wx.switchTab({
-            url: '/pages/home/index',
-          });
-        }, 100);
+        // 快速跳转到首页
+        wx.switchTab({
+          url: '/pages/home/index',
+        });
       } else {
         console.log("❌ 未登录，跳转登录页");
         wx.reLaunch({

@@ -17,6 +17,7 @@
   "dependencies": {
     "@adobe/pdfservices-node-sdk": "^4.1.0",
     "@imgly/background-removal-node": "^1.4.5",
+    "adm-zip": "^0.5.16",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",

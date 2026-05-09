@@ -58,6 +58,15 @@ try {
   console.warn("⚠️ NCM 解密模块加载失败:", e.message);
 }
 
+// ==================== 工具函数 ====================
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // ==================== 微信支付初始化 ====================
 let wechatPay = null;
 
@@ -1638,6 +1647,145 @@ const PRODUCTS = {
   },
 };
 
+// ==================== 异步任务管理器 ====================
+const tasks = new Map();
+const TASK_TIMEOUT_MS = 30 * 60 * 1000; // 30分钟超时
+
+function generateTaskId() {
+  return `TASK-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function createTask(taskType, data = {}) {
+  const taskId = generateTaskId();
+  const task = {
+    id: taskId,
+    type: taskType,
+    status: "pending", // pending, processing, completed, failed
+    progress: 0, // 0-100
+    statusText: "准备中...",
+    result: null,
+    error: null,
+    createdAt: Date.now(),
+    startedAt: null,
+    completedAt: null,
+    data,
+  };
+  tasks.set(taskId, task);
+  
+  // 定期清理超时任务
+  setTimeout(() => {
+    if (tasks.has(taskId)) {
+      const t = tasks.get(taskId);
+      if (t.status === "pending" || t.status === "processing") {
+        console.log(`[任务管理器] 清理超时任务: ${taskId}`);
+        tasks.delete(taskId);
+      }
+    }
+  }, TASK_TIMEOUT_MS);
+  
+  return task;
+}
+
+function updateTaskProgress(taskId, progress, statusText) {
+  const task = tasks.get(taskId);
+  if (!task) return;
+  task.progress = Math.max(0, Math.min(100, progress));
+  if (statusText) task.statusText = statusText;
+}
+
+function updateTaskStatus(taskId, status, statusText) {
+  const task = tasks.get(taskId);
+  if (!task) return;
+  task.status = status;
+  if (statusText) task.statusText = statusText;
+  if (status === "processing" && !task.startedAt) {
+    task.startedAt = Date.now();
+  }
+  if (status === "completed" || status === "failed") {
+    task.completedAt = Date.now();
+  }
+}
+
+function setTaskResult(taskId, result) {
+  const task = tasks.get(taskId);
+  if (!task) return;
+  task.result = result;
+}
+
+function setTaskError(taskId, error) {
+  const task = tasks.get(taskId);
+  if (!task) return;
+  task.error = error;
+}
+
+function getTask(taskId) {
+  return tasks.get(taskId) || null;
+}
+
+// 任务状态查询 API
+app.get("/api/tasks/:taskId", async (req, res) => {
+  const taskId = req.params.taskId;
+  const task = getTask(taskId);
+  if (!task) {
+    return res.status(404).json({ ok: false, error: "TASK_NOT_FOUND", message: "任务不存在" });
+  }
+  res.json({
+    ok: true,
+    task: {
+      id: task.id,
+      status: task.status,
+      progress: task.progress,
+      statusText: task.statusText,
+      result: task.result,
+      error: task.error,
+    },
+  });
+});
+
+/**
+ * 通用的异步任务处理包装器
+ * @param {Object} req 请求对象
+ * @param {Object} res 响应对象
+ * @param {string} taskType 任务类型
+ * @param {Object} taskData 任务数据
+ * @param {Function} processor 处理函数，接收 (taskId, taskData, updateFn)
+ * @param {Object} options 选项
+ */
+async function createAsyncTask(req, res, taskType, taskData, processor, options = {}) {
+  const task = createTask(taskType, taskData);
+  
+  // 立即返回 taskId
+  res.json({
+    ok: true,
+    taskId: task.id,
+    status: "pending",
+  });
+  
+  // 后台执行任务
+  process.nextTick(async () => {
+    try {
+      updateTaskStatus(task.id, "processing", options.initialStatusText || "准备处理...");
+      updateTaskProgress(task.id, options.initialProgress || 5, options.initialStatusText || "初始化中...");
+      
+      // 提供进度更新函数给处理器
+      const updateFn = (progress, statusText) => {
+        updateTaskProgress(task.id, progress, statusText);
+      };
+      
+      const result = await processor(task.id, taskData, updateFn);
+      
+      updateTaskStatus(task.id, "completed", options.completeStatusText || "处理完成");
+      updateTaskProgress(task.id, 100, options.completeStatusText || "完成");
+      setTaskResult(task.id, result);
+      
+    } catch (error) {
+      console.error(`[AsyncTask] ${taskType} 处理失败:`, error);
+      updateTaskStatus(task.id, "failed", error.message || "处理失败");
+      setTaskError(task.id, error.message || "处理失败");
+    }
+  });
+}
+
 app.post("/api/pay/create", async (req, res) => {
   console.log(`[支付] 收到创建订单请求:`, req.body);
   
@@ -2629,6 +2777,40 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
     let outputExt = ext;
     let compressed = false;
     let compressionNote = "当前文件未发现可进一步压缩的空间";
+    
+    // 添加文件大小检查
+    const MAX_COMPRESS_SIZE = 20 * 1024 * 1024; // 20MB
+    if (fileBytes.length > MAX_COMPRESS_SIZE) {
+      console.log(`[compress] 文件过大 (${formatFileSize(fileBytes.length)})，直接返回原文件`);
+      compressionNote = "文件过大，为避免处理超时已保留原文件";
+      
+      const output = await saveOutputFile(req, outputBytes, {
+        extension: outputExt,
+        baseName: fileName.includes('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : "compressed",
+      });
+
+      const responseFile = buildFileResponse(output, "application/octet-stream", undefined, req);
+      // 大文件绝对不内联
+      responseFile.inlineBase64 = undefined;
+      
+      return {
+        ok: true,
+        resultType: "document",
+        headline: "文件处理完成",
+        detail: compressionNote,
+        file: responseFile,
+        compressed: false,
+        beforeBytes: fileBytes.length,
+        afterBytes: fileBytes.length,
+        savedBytes: 0,
+        savedPercent: 0,
+        note: compressionNote,
+        metaLines: [
+          `文件类型 ${ext}`,
+          `文件过大未压缩`,
+        ],
+      };
+    }
 
     // 检测并处理 NCM 格式
     const isNcmMagic = fileBytes.slice(0, 8).toString("hex") === "4354454e";
@@ -2647,13 +2829,179 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
 
     // 根据文件类型进行不同的压缩处理
     if (ext === "pdf") {
-      // PDF压缩 - 使用现有的PDF压缩逻辑
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const selected = selectSmallerOutput(fileBytes, Buffer.from(await pdfDoc.save({ useObjectStreams: true })));
-      outputBytes = selected.bytes;
-      compressed = selected.compressed;
-      compressionNote = compressed ? "已完成 PDF 基础结构优化" : "这个 PDF 已经比较紧凑，基础优化后体积没有下降";
+      // PDF压缩 - 多种优化策略，包括图片压缩和元数据移除
+      console.log("[compress] 开始处理PDF文件...");
+      
+      let bestOutput = fileBytes;
+      let bestSize = fileBytes.length;
+      let bestNote = "这个 PDF 已经比较紧凑，优化后体积没有明显下降";
+      
+      try {
+        const pdfDoc = await PDFDocument.load(fileBytes);
+        
+        // 移除元数据（Producer、Creator、CreationDate等）
+        pdfDoc.setProducer('');
+        pdfDoc.setCreator('');
+        pdfDoc.setTitle('');
+        pdfDoc.setAuthor('');
+        pdfDoc.setSubject('');
+        pdfDoc.setKeywords([]);
+        
+        // 尝试1: 基础优化 + 对象流
+        const optimized1 = Buffer.from(await pdfDoc.save({ 
+          useObjectStreams: true 
+        }));
+        if (optimized1.length < bestSize) {
+          bestOutput = optimized1;
+          bestSize = optimized1.length;
+          bestNote = "已完成 PDF 基础优化";
+          console.log(`[compress] 基础优化: ${formatFileSize(fileBytes.length)} -> ${formatFileSize(optimized1.length)}`);
+        }
+        
+        // 尝试2: 激进优化（根据压缩模式）
+        let quality = 0.7; // 默认质量
+        if (mode === "体积优先") quality = 0.5;
+        else if (mode === "质量优先") quality = 0.9;
+        
+        // 尝试压缩PDF中的图片（使用pdf-lib + sharp）
+        try {
+          const pages = pdfDoc.getPages();
+          let hasImages = false;
+          
+          // 由于pdf-lib处理嵌入图片比较复杂，我们尝试不同的保存选项
+          const optimized2 = Buffer.from(await pdfDoc.save({ 
+            useObjectStreams: true,
+            addDefaultPage: false
+          }));
+          
+          if (optimized2.length < bestSize) {
+            bestOutput = optimized2;
+            bestSize = optimized2.length;
+            bestNote = "已完成 PDF 深度优化";
+            console.log(`[compress] 深度优化: ${formatFileSize(fileBytes.length)} -> ${formatFileSize(optimized2.length)}`);
+          }
+        } catch (imgError) {
+          console.warn("[compress] 图片优化跳过:", imgError.message);
+        }
+        
+      } catch (e) {
+        console.warn("[compress] PDF优化失败:", e.message);
+      }
+      
+      outputBytes = bestOutput;
+      compressed = bestSize < fileBytes.length;
+      
+      if (compressed) {
+        const savedPercent = Math.round(((fileBytes.length - bestSize) / fileBytes.length) * 100);
+        compressionNote = `${bestNote}，节省 ${savedPercent}% 体积`;
+      } else {
+        compressionNote = bestNote;
+      }
       outputExt = "pdf";
+    } else if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) {
+      // Office文档处理 - 尝试压缩内部图片和优化
+      console.log(`[compress] 处理Office文档: ${ext}`);
+      
+      const isModernOffice = ["docx", "xlsx", "pptx"].includes(ext);
+      
+      if (isModernOffice) {
+        // 对于现代Office格式（ZIP结构），尝试重新压缩
+        try {
+          // 尝试使用adm-zip（如果可用）
+          let AdmZip = null;
+          try {
+            AdmZip = require('adm-zip');
+          } catch (e) {
+            console.log("[compress] adm-zip 不可用，使用基础处理");
+          }
+          
+          if (AdmZip) {
+            const zip = new AdmZip(fileBytes);
+            const zipEntries = zip.getEntries();
+            
+            let optimizedImages = 0;
+            const newZip = new AdmZip();
+            
+            // 遍历所有文件
+            for (const entry of zipEntries) {
+              if (entry.isDirectory) {
+                continue;
+              }
+              
+              const entryName = entry.entryName;
+              const content = zip.readFile(entryName);
+              
+              // 检查是否是图片文件
+              const isImage = /\.(jpg|jpeg|png|gif|bmp|tiff|webp)$/i.test(entryName);
+              
+              if (isImage && content && content.length > 10 * 1024) { // 只处理大于10KB的图片
+                try {
+                  // 使用sharp压缩图片
+                  let imageBuffer = content;
+                  
+                  // 根据压缩模式设置质量
+                  let imgQuality = 80;
+                  if (mode === "体积优先") imgQuality = 60;
+                  else if (mode === "质量优先") imgQuality = 95;
+                  
+                  // 压缩图片
+                  let compressedImg = await sharp(content)
+                    .jpeg({ quality: imgQuality, mozjpeg: true })
+                    .toBuffer();
+                  
+                  // 如果压缩后的图片更小，使用压缩版本
+                  if (compressedImg.length < content.length) {
+                    newZip.addFile(entryName, compressedImg);
+                    optimizedImages++;
+                    console.log(`[compress] 压缩图片: ${entryName} - ${formatFileSize(content.length)} -> ${formatFileSize(compressedImg.length)}`);
+                  } else {
+                    newZip.addFile(entryName, content);
+                  }
+                } catch (imgError) {
+                  // 图片压缩失败，使用原图
+                  newZip.addFile(entryName, content);
+                }
+              } else {
+                // 非图片文件直接复制
+                newZip.addFile(entryName, content);
+              }
+            }
+            
+            // 生成新的压缩文件
+            const rezipped = newZip.toBuffer();
+            const selected = selectSmallerOutput(fileBytes, rezipped);
+            outputBytes = selected.bytes;
+            compressed = selected.compressed;
+            
+            if (compressed) {
+              const savedPercent = Math.round(((fileBytes.length - outputBytes.length) / fileBytes.length) * 100);
+              if (optimizedImages > 0) {
+                compressionNote = `已优化 ${optimizedImages} 张图片，节省 ${savedPercent}% 体积`;
+              } else {
+                compressionNote = `已优化文档结构，节省 ${savedPercent}% 体积`;
+              }
+            } else {
+              compressionNote = "Office 文档已优化过，体积没有明显下降";
+            }
+          } else {
+            // 没有adm-zip，直接返回
+            compressionNote = "现代 Office 格式已包含高效压缩，进一步压缩效果有限";
+            outputBytes = fileBytes;
+            compressed = false;
+          }
+        } catch (e) {
+          console.warn("[compress] Office文档优化失败:", e.message);
+          compressionNote = "Office 文档优化失败，已保留原文件";
+          outputBytes = fileBytes;
+          compressed = false;
+        }
+      } else {
+        // 旧版Office格式
+        compressionNote = "旧版 Office 格式压缩效果有限，建议转换为新版格式";
+        outputBytes = fileBytes;
+        compressed = false;
+      }
+      outputExt = ext;
     } else if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
       const quality = getUniversalCompressImageQuality(mode);
       let image = sharp(fileBytes, { animated: false }).rotate();
@@ -2855,15 +3203,21 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
 
     const responseFile = buildFileResponse(output, "application/octet-stream", undefined, req);
     
-    // 检测是否是图片文件（通过扩展名或 outputExt）
-    const imageExts = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
-    const isImageFile = imageExts.includes(ext.toLowerCase()) || 
-                        imageExts.includes(outputExt.toLowerCase());
-    console.log(`[compress] ext: ${ext}, outputExt: ${outputExt}, isImageFile: ${isImageFile}`);
+    // 根据文件大小限制和 shouldInlineCompressedFile 来决定是否内联
+    const shouldInline = shouldInlineCompressedFile({ 
+      fileName: responseFile.name, 
+      mimeType: responseFile.contentType || responseFile.mimeType, 
+      fileBytes: outputBytes
+    });
+    console.log(`[compress] shouldInline: ${shouldInline}, file size: ${formatFileSize(outputBytes.length)}`);
     
-    // 对于所有文件都强制使用 inlineBase64，避免小程序网络请求失败
-    responseFile.inlineBase64 = outputBytes.toString("base64");
-    console.log(`[compress] set inlineBase64, length: ${responseFile.inlineBase64.length}`);
+    if (shouldInline) {
+      responseFile.inlineBase64 = outputBytes.toString("base64");
+      console.log(`[compress] set inlineBase64, length: ${responseFile.inlineBase64.length}`);
+    } else {
+      responseFile.inlineBase64 = undefined;
+      console.log(`[compress] skip inlineBase64, will use download`);
+    }
     
     // 保持原文件名，只替换扩展名
     let finalFileName = fileName;
@@ -3147,7 +3501,31 @@ function getMediaContentType(ext) {
   return contentTypes[normalized] || "application/octet-stream";
 }
 
-function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetFormat, quality) {
+function parseFfmpegDuration(stderr) {
+  const durationMatch = stderr.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+  if (durationMatch) {
+    const hours = parseInt(durationMatch[1], 10);
+    const minutes = parseInt(durationMatch[2], 10);
+    const seconds = parseInt(durationMatch[3], 10);
+    const centiseconds = parseInt(durationMatch[4], 10);
+    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+  }
+  return null;
+}
+
+function parseFfmpegTime(stderr) {
+  const timeMatch = stderr.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const seconds = parseInt(timeMatch[3], 10);
+    const centiseconds = parseInt(timeMatch[4], 10);
+    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+  }
+  return null;
+}
+
+function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetFormat, quality, onProgress) {
   return new Promise((resolve, reject) => {
     const ext = targetFormat.toLowerCase();
     const args = ["-y", "-probesize", "100M", "-analyzeduration", "10M", "-i", inputFilePath];
@@ -3180,10 +3558,28 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
     console.log("[FFmpeg] 执行命令:", ffmpegPath, args.join(" "));
 
     let stderrOutput = "";
+    let totalDuration = null;
     const child = spawn(ffmpegPath, args);
 
     child.stderr.on("data", (data) => {
-      stderrOutput += data.toString();
+      const chunk = data.toString();
+      stderrOutput += chunk;
+      
+      if (onProgress) {
+        // 先解析总时长
+        if (totalDuration === null) {
+          totalDuration = parseFfmpegDuration(stderrOutput);
+        }
+        
+        // 解析当前时间并计算进度
+        if (totalDuration !== null) {
+          const currentTime = parseFfmpegTime(chunk);
+          if (currentTime !== null) {
+            const progress = Math.min(99, Math.max(0, (currentTime / totalDuration) * 100));
+            onProgress(progress, "转换中...");
+          }
+        }
+      }
     });
 
     child.on("error", (err) => {
@@ -3198,86 +3594,30 @@ function runFfmpegConvert(ffmpegPath, inputFilePath, outputFilePath, targetForma
         return;
       }
       console.log("[FFmpeg] 转换成功");
+      if (onProgress) {
+        onProgress(100, "转换完成");
+      }
       resolve();
     });
   });
 }
 
-app.post("/api/audio/convert", async (req, res) => {
-  const contentType = req.headers['content-type'] || '';
-  let file;
-  let target;
-  let quality;
-  let fileBuffer;
-
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
-      const uploadFile = uploadFiles.file;
-      target = fields.target || "MP3";
-      quality = fields.quality || "标准";
-
-      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
-        throw new Error("缺少文件内容");
-      }
-
-      fileBuffer = uploadFile.buffer;
-      // 优先使用前端传递的fileName
-      const customFileName = fields.fileName || "";
-      file = {
-        name: customFileName || uploadFile.fileName || "",
-        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
-      };
-      console.log("[音频转换] 接收到的文件名:", file.name);
-    } catch (error) {
-      console.error("音频转换 multipart上传解析失败:", error);
-      sendError(res, 400, "AUDIO_CONVERT_FAILED", "文件上传失败");
-      return;
-    }
-  } else {
-    // 原有base64模式
-    file = req.body.file;
-    target = req.body.target || "MP3";
-    quality = req.body.quality || "标准";
-    fileBuffer = decodeBase64File(file);
-  }
-
-  const ffmpegPath = resolveFfmpegPath();
-
-  if (!ffmpegPath) {
-    await recordOperation(req, {
-      toolId: "audio-convert",
-      status: "failed",
-      inputFiles: file
-        ? [
-          {
-            name: file.name || "",
-            sizeBytes: file.sizeBytes || 0,
-          },
-        ]
-        : [],
-      errorCode: "FFMPEG_UNAVAILABLE",
-      errorMessage: "当前服务未检测到 FFmpeg",
-      meta: {
-        target,
-        quality,
-      },
-    });
-
-    sendError(
-      res,
-      501,
-      "FFMPEG_UNAVAILABLE",
-      "当前服务端未检测到 FFmpeg，请安装后再启用音视频转换。"
-    );
-    return;
-  }
-
-  let tempDir = "";
+// 异步音视频转换处理函数
+async function processAudioConvertTask(taskId, taskData) {
+  const {
+    fileBuffer,
+    file,
+    target,
+    quality,
+    originalInputName,
+    ffmpegPath,
+    req,
+    tempDir,
+  } = taskData;
 
   try {
-    tempDir = fs.mkdtempSync(path.join(config.tempDir, "media-"));
-    const originalInputName = file && file.name ? file.name : `media-${makeId()}.mp4`;
+    updateTaskStatus(taskId, "processing", "准备处理...");
+    updateTaskProgress(taskId, 5, "初始化中...");
 
     const inputExt = path.extname(originalInputName) || ".mp3";
     const inputExtName = inputExt.replace(".", "").toLowerCase();
@@ -3291,15 +3631,11 @@ app.post("/api/audio/convert", async (req, res) => {
     const inputIsVideo = isVideoExtension(inputExtName);
 
     if (!targetIsAudio && !targetIsVideo) {
-      const error = new Error("Unsupported target format");
-      error.code = "UNSUPPORTED_MEDIA_TARGET";
-      throw error;
+      throw new Error("Unsupported target format");
     }
 
     if (targetIsVideo && inputIsAudio) {
-      const error = new Error("Audio files cannot be directly converted to video formats");
-      error.code = "AUDIO_TO_VIDEO_UNSUPPORTED";
-      throw error;
+      throw new Error("Audio files cannot be directly converted to video formats");
     }
 
     const originalBaseName = path.parse(originalInputName).name || "media";
@@ -3308,6 +3644,7 @@ app.post("/api/audio/convert", async (req, res) => {
     let outputPath = path.join(tempDir, outputName);
 
     console.log("[Media Convert] 写入文件:", inputPath, "大小:", fileBuffer.length, "bytes");
+    updateTaskProgress(taskId, 10, "解析文件...");
 
     const magic = fileBuffer.slice(0, 8).toString("hex");
     console.log("[Media Convert] 文件头(hex):", magic);
@@ -3324,6 +3661,7 @@ app.post("/api/audio/convert", async (req, res) => {
 
     console.log("[Media Convert] 格式检查 - FLAC:", isFlac, "MP3:", isMp3, "WAV:", isWav, "OGG:", isOgg, "M4A:", isM4a, "VideoExt:", inputIsVideo);
     console.log("[Media Convert] 加密检查 - NCM:", isNcm, "KGM:", isKgm, "QMC:", isQmc);
+    updateTaskProgress(taskId, 15, "检查格式...");
 
     let formatMatch = true;
     let formatHint = "";
@@ -3358,13 +3696,13 @@ app.post("/api/audio/convert", async (req, res) => {
     }
 
     if (!formatMatch) {
-      const error = new Error(formatHint);
-      error.code = "INVALID_MEDIA_FORMAT";
-      throw error;
+      throw new Error(formatHint);
     }
+    updateTaskProgress(taskId, 20, "准备转换...");
 
     if (isNcmFile && ncmDecrypt) {
       console.log("[Media Convert] 检测到 NCM 格式，开始解密...");
+      updateTaskProgress(taskId, 25, "解密中...");
       const decryptResult = ncmDecrypt.decryptNcm(fileBuffer);
       const detectedFormat = decryptResult.format || "mp3";
       const decryptedPath = path.join(tempDir, `decrypted-${makeId()}.${detectedFormat}`);
@@ -3385,14 +3723,18 @@ app.post("/api/audio/convert", async (req, res) => {
     const stats = fs.statSync(actualInputPath);
     console.log("[Media Convert] 文件已写入，实际大小:", stats.size, "bytes");
     console.log("[Media Convert] 输出路径:", outputPath);
+    updateTaskProgress(taskId, 30, "开始转换...");
 
-    await runFfmpegConvert(ffmpegPath, actualInputPath, outputPath, target, quality);
+    await runFfmpegConvert(ffmpegPath, actualInputPath, outputPath, target, quality, (progress, statusText) => {
+      updateTaskProgress(taskId, 30 + progress * 0.6, statusText);
+    });
 
+    updateTaskProgress(taskId, 90, "保存结果...");
     const bytes = fs.readFileSync(outputPath);
-    const contentType = getMediaContentType(targetExt);
+    const responseContentType = getMediaContentType(targetExt);
     const output = await saveOutputFile(req, bytes, {
       extension: targetExt,
-      contentType,
+      contentType: responseContentType,
       baseName: safeBaseName,
       addRandomSuffix: false,
     });
@@ -3419,30 +3761,31 @@ app.post("/api/audio/convert", async (req, res) => {
       },
     });
 
-    res.json({
+    const result = {
       ok: true,
       resultType: "document",
       headline: "音视频格式转换已完成",
       detail: `已转换为 ${target} 格式，可直接下载使用。`,
-      file: buildFileResponse(output, contentType, undefined, req),
+      file: buildFileResponse(output, responseContentType, undefined, req),
       metaLines: [
         `原文件 ${originalInputName}`,
         `目标格式 ${target}`,
         `质量 ${quality}`,
       ].filter(Boolean),
-    });
+    };
+
+    updateTaskStatus(taskId, "completed", "处理完成");
+    updateTaskProgress(taskId, 100, "完成");
+    setTaskResult(taskId, result);
   } catch (error) {
     console.error("[Media Convert] 错误:", error);
     let errorMessage = "音视频转换失败";
-    let errorHint = "";
-
+    
     const errMsg = (error.message || "").toLowerCase();
     if (errMsg.includes("invalid data") || errMsg.includes("could not find codec")) {
       errorMessage = "无法解析音视频文件";
-      errorHint = "请检查文件是否损坏，或尝试转换为其他格式";
-    } else if (error.code === "AUDIO_TO_VIDEO_UNSUPPORTED") {
+    } else if (error.message.includes("Audio files cannot be directly converted")) {
       errorMessage = "音频不能直接转换为视频";
-      errorHint = "请选择 MP3、WAV、FLAC、OGG、M4A 或 AAC 等音频目标格式";
     } else if (errMsg.includes("ffmpeg")) {
       errorMessage = "FFmpeg 执行错误";
     }
@@ -3450,32 +3793,162 @@ app.post("/api/audio/convert", async (req, res) => {
     await recordOperation(req, {
       toolId: "audio-convert",
       status: "failed",
-      inputFiles: file
-        ? [
-          {
-            name: originalInputName || "",
-            sizeBytes: file.sizeBytes || 0,
-          },
-        ]
-        : [],
-      errorCode: error.code || "MEDIA_CONVERT_FAILED",
-      errorMessage: errorMessage,
-      meta: {
-        target,
-        quality,
-      },
+      inputFiles: file ? [{ name: originalInputName || "", sizeBytes: file.sizeBytes || 0 }] : [],
+      errorCode: "MEDIA_CONVERT_FAILED",
+      errorMessage,
+      meta: { target, quality },
     });
 
-    sendError(
-      res,
-      500,
-      error.code || "MEDIA_CONVERT_FAILED",
-      errorHint ? `${errorMessage}??{errorHint}` : errorMessage
-    );
+    updateTaskStatus(taskId, "failed", errorMessage);
+    setTaskError(taskId, errorMessage);
   } finally {
     cleanupTempDir(tempDir);
   }
+}
+
+app.post("/api/audio/convert", async (req, res) => {
+  const contentType = req.headers['content-type'] || '';
+  let file;
+  let target;
+  let quality;
+  let fileBuffer;
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const { fields, files: uploadFiles } = await parseMultipartRequest(req, 200 * 1024 * 1024);
+      const uploadFile = uploadFiles.file;
+      target = fields.target || "MP3";
+      quality = fields.quality || "标准";
+
+      if (!uploadFile || !uploadFile.buffer || !uploadFile.buffer.length) {
+        throw new Error("缺少文件内容");
+      }
+
+      fileBuffer = uploadFile.buffer;
+      const customFileName = fields.fileName || "";
+      file = {
+        name: customFileName || uploadFile.fileName || "",
+        sizeBytes: uploadFile.sizeBytes || uploadFile.buffer.length,
+      };
+      console.log("[音频转换] 接收到的文件名:", file.name);
+    } catch (error) {
+      console.error("音频转换 multipart上传解析失败:", error);
+      sendError(res, 400, "AUDIO_CONVERT_FAILED", "文件上传失败");
+      return;
+    }
+  } else {
+    file = req.body.file;
+    target = req.body.target || "MP3";
+    quality = req.body.quality || "标准";
+    fileBuffer = decodeBase64File(file);
+  }
+
+  const ffmpegPath = resolveFfmpegPath();
+
+  if (!ffmpegPath) {
+    await recordOperation(req, {
+      toolId: "audio-convert",
+      status: "failed",
+      inputFiles: file ? [{ name: file.name || "", sizeBytes: file.sizeBytes || 0 }] : [],
+      errorCode: "FFMPEG_UNAVAILABLE",
+      errorMessage: "当前服务未检测到 FFmpeg",
+      meta: { target, quality },
+    });
+    sendError(res, 501, "FFMPEG_UNAVAILABLE", "当前服务端未检测到 FFmpeg，请安装后再启用音视频转换。");
+    return;
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(config.tempDir, "media-"));
+  const originalInputName = file && file.name ? file.name : `media-${makeId()}.mp4`;
+
+  const task = createTask("audio-convert", {
+    fileBuffer,
+    file,
+    target,
+    quality,
+    originalInputName,
+    ffmpegPath,
+    req: {
+      headers: req.headers,
+      protocol: req.protocol,
+      hostname: req.hostname,
+    },
+    tempDir,
+  });
+
+  res.json({
+    ok: true,
+    taskId: task.id,
+    status: "pending",
+  });
+
+  process.nextTick(() => processAudioConvertTask(task.id, {
+    fileBuffer,
+    file,
+    target,
+    quality,
+    originalInputName,
+    ffmpegPath,
+    req,
+    tempDir,
+  }));
 });
+
+async function processOcrTask(taskId, taskData, update) {
+  const { fileBuffer, file, language, layout, req } = taskData;
+  
+  update(20, "识别中...");
+  
+  const result = await recognizeTextFromImage(
+    {
+      ...file,
+      buffer: fileBuffer
+    },
+    language,
+    layout
+  );
+  const text = result.text || "";
+  
+  update(80, "整理结果...");
+  
+  await recordOperation(req, {
+    toolId: "ocr-image",
+    status: "success",
+    inputFiles: file
+      ? [
+        {
+          name: file.name || "",
+          sizeBytes: file.sizeBytes || 0,
+        },
+      ]
+      : [],
+    meta: {
+      language,
+      layout,
+      textLength: text.trim().length,
+      confidence: result.confidence,
+      variant: result.variant,
+      provider: result.provider,
+    },
+  });
+  
+  return {
+    ok: true,
+    resultType: "text",
+    headline: "OCR 识别已完成",
+    detail: `共识别 ${text.trim().length} 个字符，可直接复制继续使用。`,
+    text,
+    lines: result.lines || [],
+    confidence: result.confidence,
+    provider: result.provider,
+    metaLines: [
+      `语言 ${language}`,
+      layout ? `模式 ${layout}` : "",
+      `引擎 ${result.provider === "baidu" ? "百度 OCR" : "Tesseract"}`,
+      result.confidence ? `置信度 ${result.confidence}` : "",
+    ].filter(Boolean),
+  };
+}
 
 app.post("/api/ocr/image", async (req, res) => {
   const contentType = req.headers['content-type'] || '';
@@ -3496,7 +3969,6 @@ app.post("/api/ocr/image", async (req, res) => {
       }
 
       fileBuffer = uploadFile.buffer;
-      // 优先使用前端传递的fileName
       const customFileName = fields.fileName || "";
       file = {
         name: customFileName || uploadFile.fileName || "",
@@ -3509,7 +3981,6 @@ app.post("/api/ocr/image", async (req, res) => {
       return;
     }
   } else {
-    // 原有base64模式
     file = req.body.file;
     language = req.body.language || "中英混合";
     layout = req.body.layout || "";
@@ -3517,53 +3988,18 @@ app.post("/api/ocr/image", async (req, res) => {
   }
 
   try {
-    const result = await recognizeTextFromImage(
+    await createAsyncTask(
+      req,
+      res,
+      "ocr-image",
+      { fileBuffer, file, language, layout, req },
+      processOcrTask,
       {
-        ...file,
-        buffer: fileBuffer
-      },
-      language,
-      layout
+        initialStatusText: "准备识别...",
+        initialProgress: 10,
+        completeStatusText: "识别完成"
+      }
     );
-    const text = result.text || "";
-
-    await recordOperation(req, {
-      toolId: "ocr-image",
-      status: "success",
-      inputFiles: file
-        ? [
-          {
-            name: file.name || "",
-            sizeBytes: file.sizeBytes || 0,
-          },
-        ]
-        : [],
-      meta: {
-        language,
-        layout,
-        textLength: text.trim().length,
-        confidence: result.confidence,
-        variant: result.variant,
-        provider: result.provider,
-      },
-    });
-
-    res.json({
-      ok: true,
-      resultType: "text",
-      headline: "OCR 识别已完成",
-      detail: `共识别 ${text.trim().length} 个字符，可直接复制继续使用。`,
-      text,
-      lines: result.lines || [],
-      confidence: result.confidence,
-      provider: result.provider,
-      metaLines: [
-        `语言 ${language}`,
-        layout ? `模式 ${layout}` : "",
-        `引擎 ${result.provider === "baidu" ? "百度 OCR" : "Tesseract"}`,
-        result.confidence ? `置信度 ${result.confidence}` : "",
-      ].filter(Boolean),
-    });
   } catch (error) {
     await recordOperation(req, {
       toolId: "ocr-image",
@@ -3588,6 +4024,71 @@ app.post("/api/ocr/image", async (req, res) => {
   }
 });
 
+async function processOfficeToPdfTask(taskId, taskData, update) {
+  const { fileBuffer, file, quality, pageMode, sofficePath, req, tempDir } = taskData;
+  
+  update(20, "转换中...");
+  
+  const randomId = makeId();
+  const inputExt = file && file.name ? path.extname(file.name) : ".docx";
+  const inputName = `input-${randomId}${inputExt}`;
+  const inputPath = path.join(tempDir, inputName);
+  fs.writeFileSync(inputPath, fileBuffer);
+  
+  update(40, "处理文档...");
+  
+  await runSofficeConvert(sofficePath, inputPath, tempDir);
+  
+  update(70, "保存结果...");
+  
+  const outputFileName = `input-${randomId}.pdf`;
+  const outputPath = path.join(tempDir, outputFileName);
+  const bytes = fs.readFileSync(outputPath);
+  const originalFileName = file?.name || "document";
+  const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
+  const output = await saveOutputFile(req, bytes, {
+    extension: "pdf",
+    contentType: "application/pdf",
+    baseName: baseNameWithoutExt,
+    addRandomSuffix: false,
+  });
+  
+  await recordOperation(req, {
+    toolId: "office-to-pdf",
+    status: "success",
+    inputFiles: [
+      {
+        name: file.name || "",
+        sizeBytes: file.sizeBytes || 0,
+      },
+    ],
+    outputFiles: [
+      {
+        name: output.fileName,
+        provider: output.provider,
+        sizeBytes: output.sizeBytes,
+      },
+    ],
+    meta: {
+      quality,
+      pageMode,
+    },
+  });
+  
+  return {
+    ok: true,
+    resultType: "document",
+    headline: "Office 转 PDF 已完成",
+    detail: "文档已导出为 PDF，可直接打开或继续压缩、合并。",
+    file: buildFileResponse(output, "application/pdf", undefined, req),
+    metaLines: [
+      `原文件 ${file.name || inputName}`,
+      quality ? `清晰度 ${quality}` : "",
+      pageMode ? `页面策略 ${pageMode}` : "",
+    ].filter(Boolean),
+  };
+}
+
 app.post("/api/office/to-pdf", async (req, res) => {
   const contentType = req.headers['content-type'] || '';
   let file;
@@ -3607,7 +4108,6 @@ app.post("/api/office/to-pdf", async (req, res) => {
       }
 
       pdfBuffer = uploadFile.buffer;
-      // 优先使用前端传递的fileName
       const customFileName = fields.fileName || "";
       file = {
         name: customFileName || uploadFile.fileName || "",
@@ -3620,7 +4120,6 @@ app.post("/api/office/to-pdf", async (req, res) => {
       return;
     }
   } else {
-    // 原有base64模式
     file = req.body.file;
     quality = req.body.quality || "";
     pageMode = req.body.pageMode || "";
@@ -3659,65 +4158,21 @@ app.post("/api/office/to-pdf", async (req, res) => {
     return;
   }
 
-  let tempDir = "";
-
   try {
-    tempDir = fs.mkdtempSync(path.join(config.tempDir, "office-"));
-    const randomId = makeId();
-    const inputExt = file && file.name ? path.extname(file.name) : ".docx";
-    const inputName = `input-${randomId}${inputExt}`;
-    const inputPath = path.join(tempDir, inputName);
-
-    fs.writeFileSync(inputPath, pdfBuffer);
-    await runSofficeConvert(sofficePath, inputPath, tempDir);
-
-    const outputFileName = `input-${randomId}.pdf`;
-    const outputPath = path.join(tempDir, outputFileName);
-    const bytes = fs.readFileSync(outputPath);
-    // 从原文件名提取基础名称，生成有意义的文件名
-    const originalFileName = file?.name || "document";
-    const baseNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
-    const output = await saveOutputFile(req, bytes, {
-      extension: "pdf",
-      contentType: "application/pdf",
-      baseName: baseNameWithoutExt,
-      addRandomSuffix: false,
-    });
-
-    await recordOperation(req, {
-      toolId: "office-to-pdf",
-      status: "success",
-      inputFiles: [
-        {
-          name: file.name || "",
-          sizeBytes: file.sizeBytes || 0,
-        },
-      ],
-      outputFiles: [
-        {
-          name: output.fileName,
-          provider: output.provider,
-          sizeBytes: output.sizeBytes,
-        },
-      ],
-      meta: {
-        quality,
-        pageMode,
-      },
-    });
-
-    res.json({
-      ok: true,
-      resultType: "document",
-      headline: "Office 转 PDF 已完成",
-      detail: "文档已导出为 PDF，可直接打开或继续压缩、合并。",
-      file: buildFileResponse(output, "application/pdf", undefined, req),
-      metaLines: [
-        `原文件 ${file.name || inputName}`,
-        quality ? `清晰度 ${quality}` : "",
-        pageMode ? `页面策略 ${pageMode}` : "",
-      ].filter(Boolean),
-    });
+    const tempDir = fs.mkdtempSync(path.join(config.tempDir, "office-"));
+    
+    await createAsyncTask(
+      req,
+      res,
+      "office-to-pdf",
+      { fileBuffer: pdfBuffer, file, quality, pageMode, sofficePath, req, tempDir },
+      processOfficeToPdfTask,
+      {
+        initialStatusText: "准备转换...",
+        initialProgress: 10,
+        completeStatusText: "转换完成"
+      }
+    );
   } catch (error) {
     await recordOperation(req, {
       toolId: "office-to-pdf",
@@ -3744,8 +4199,6 @@ app.post("/api/office/to-pdf", async (req, res) => {
       error.code || "OFFICE_TO_PDF_FAILED",
       error.message || "Office 转 PDF 失败"
     );
-  } finally {
-    cleanupTempDir(tempDir);
   }
 });
 

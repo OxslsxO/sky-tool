@@ -277,12 +277,35 @@ function writeArrayBufferFile(filePath, data) {
 
 function writeBase64File(filePath, base64) {
   return new Promise((resolve, reject) => {
-    wx.getFileSystemManager().writeFile({
+    const fsm = wx.getFileSystemManager();
+    let hasResolved = false;
+    
+    // 对于较大的文件，写入超时时间缩短到 30 秒，避免长时间阻塞
+    const timeoutId = setTimeout(() => {
+      if (!hasResolved) {
+        hasResolved = true;
+        reject(new Error("文件写入超时，请重试"));
+      }
+    }, 30000);
+
+    fsm.writeFile({
       filePath,
       data: base64,
       encoding: "base64",
-      success: () => resolve(filePath),
-      fail: reject,
+      success: () => {
+        clearTimeout(timeoutId);
+        if (!hasResolved) {
+          hasResolved = true;
+          resolve(filePath);
+        }
+      },
+      fail: (err) => {
+        clearTimeout(timeoutId);
+        if (!hasResolved) {
+          hasResolved = true;
+          reject(err);
+        }
+      },
     });
   });
 }
@@ -453,6 +476,10 @@ Page({
     // 音视频分类目标格式（分离音频和视频）
     audioConvertAudioFormats: AUDIO_CONVERT_AUDIO_FORMATS,
     audioConvertVideoFormats: AUDIO_CONVERT_VIDEO_FORMATS,
+    // 文件选择相关
+    imageInput: null,
+    imageInputs: [],
+    backendFiles: [],
     // PDF合并相关
     pdfMergePreviewFiles: [], // 预览用的PDF文件信息（带页数）
     pdfMergeCurrentIndex: 0, // 当前预览的索引
@@ -743,6 +770,8 @@ Page({
     const backendConfigured = hasBackendService();
     const clientTool = isClientTool(tool.id);
     const backendFiles = this.data && this.data.backendFiles ? this.data.backendFiles : [];
+    const imageInput = this.data && this.data.imageInput ? this.data.imageInput : null;
+    const imageInputs = this.data && this.data.imageInputs ? this.data.imageInputs : [];
     const audioInputKind = tool.id === "audio-convert" && backendFiles.length
       ? getAudioConvertInputKind(backendFiles[0].name)
       : "";
@@ -794,6 +823,10 @@ Page({
         backendConfigured,
       }),
       primaryActionDisabled: !clientTool && !backendConfigured && !isUniversalCompress,
+      // 保留用户已选择的文件
+      backendFiles,
+      imageInput,
+      imageInputs,
     };
   },
 
@@ -992,7 +1025,7 @@ Page({
   // 万能压缩选择文件
   async chooseUniversalCompressFile() {
     wx.showActionSheet({
-      itemList: ['选择图片', '选择文件(PDF/Office/音视频)'],
+      itemList: ['选择图片', '选择任意文件'],
       success: async (res) => {
         try {
           this.ignoreOnShowRefreshUntil = Date.now() + 3000;
@@ -1024,8 +1057,41 @@ Page({
               backendFiles: [],
             });
           } else {
-            // 选择文件
-            const files = await chooseMessageFiles(1, ["jpg", "jpeg", "png", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "wav", "flac", "m4a", "aac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "ncm"], "all");
+            // 选择文件 - 万能压缩支持所有文件类型
+            const files = await chooseMessageFiles(1, null, "all");
+            
+            // 检查文件大小
+            if (files.length > 0 && files[0].size > 50 * 1024 * 1024) {
+              wx.showModal({
+                title: '文件过大',
+                content: `选择的文件大小为 ${formatFileSize(files[0].size)}，建议选择小于 50MB 的文件以避免处理超时`,
+                showCancel: true,
+                confirmText: '继续使用',
+                cancelText: '重新选择',
+                success: (modalRes) => {
+                  if (!modalRes.confirm) {
+                    // 用户选择重新选择
+                    return;
+                  }
+                  // 用户选择继续使用，设置文件
+                  Object.assign(nextState, {
+                    imageInput: null,
+                    imageInputs: [],
+                    backendFiles: files.map((file) => ({
+                      path: file.path,
+                      name: file.name || getFileName(file.path),
+                      size: file.size || 0,
+                      sizeText: formatFileSize(file.size || 0),
+                    })),
+                  });
+                  // 清除之前的结果
+                  Object.assign(nextState, this.getClearedUniversalCompressResult());
+                  this.setData(nextState);
+                }
+              });
+              return;
+            }
+
             Object.assign(nextState, {
               imageInput: null,
               imageInputs: [],
@@ -1117,6 +1183,11 @@ Page({
       selections,
       ...this.buildViewState(this.data.tool, selections),
     };
+
+    // 确保不丢失已选择的文件
+    if (this.data.backendFiles && this.data.backendFiles.length > 0) {
+      nextState.backendFiles = this.data.backendFiles;
+    }
 
     if (this.data.tool && this.data.tool.id === "photo-id") {
       clearPhotoIdSession();
@@ -1269,21 +1340,23 @@ Page({
     return titleMap[tool && tool.id] || "处理中";
   },
 
-  showProcessingPanel(tool, options = {}) {
-    this.setData({
-      isWorking: true,
-      photoIdIsProcessing: tool && tool.id === "photo-id",
-      showProcessingOverlay: true,
-      processingProgress: options.progress || 6,
-      processingDisplayProgress: 0,
-      processingDisplayProgressText: 0,
-      processingEstimateFrom: 0,
-      processingEstimateTo: options.progress || 6,
-      processingEstimateStartedAt: Date.now(),
-      processingEstimateDurationMs: 0,
-      processingStatus: options.status || "正在准备...",
-      processingTitle: options.title || this.getProcessingTitle(tool),
-      processingKind: tool ? tool.id : "",
+  async showProcessingPanel(tool, options = {}) {
+    await new Promise((resolve) => {
+      this.setData({
+        isWorking: true,
+        photoIdIsProcessing: tool && tool.id === "photo-id",
+        showProcessingOverlay: true,
+        processingProgress: options.progress || 6,
+        processingDisplayProgress: 0,
+        processingDisplayProgressText: 0,
+        processingEstimateFrom: 0,
+        processingEstimateTo: options.progress || 6,
+        processingEstimateStartedAt: Date.now(),
+        processingEstimateDurationMs: 0,
+        processingStatus: options.status || "正在准备...",
+        processingTitle: options.title || this.getProcessingTitle(tool),
+        processingKind: tool ? tool.id : "",
+      }, resolve);
     });
     this.startProcessingProgressTicker();
   },
@@ -1297,7 +1370,7 @@ Page({
     const toolId = tool.id;
 
     // 需要图片输入的工具
-    const imageTools = ["photo-id", "image-compress", "image-convert", "resize-crop", "universal-compress", "ocr-text"];
+    const imageTools = ["photo-id", "image-compress", "image-convert", "resize-crop", "ocr-text"];
     if (imageTools.includes(toolId)) {
       if (!imageInput) {
         const toolNames = {
@@ -1305,10 +1378,16 @@ Page({
           "image-compress": "图片",
           "image-convert": "图片",
           "resize-crop": "图片",
-          "universal-compress": "文件",
           "ocr-text": "图片"
         };
         return { valid: false, message: `请先选择一张${toolNames[toolId]}` };
+      }
+    }
+    
+    // 万能压缩需要图片或文件输入
+    if (toolId === "universal-compress") {
+      if (!imageInput && (!backendFiles || backendFiles.length === 0)) {
+        return { valid: false, message: "请先选择文件" };
       }
     }
 
@@ -1439,10 +1518,11 @@ Page({
     }
 
     logger.log("[处理执行] 开始设置处理状态");
-    this.showProcessingPanel(tool, {
+    await this.showProcessingPanel(tool, {
       progress: tool && tool.id === "image-compress" ? 8 : 6,
       status: tool && tool.id === "image-compress" ? "正在读取原图..." : "正在初始化...",
     });
+    await wait(200);
     logger.log("[处理执行] 处理状态设置完成");
 
     let executionSucceeded = false;
@@ -1640,16 +1720,17 @@ Page({
         if (this.data.audioConvertAudioContext) {
           this.data.audioConvertAudioContext.stop();
         }
-        const firstFile = nextState.backendFiles[0] || {};
+        const firstFile = backendFiles[0] || {};
         const inputKind = getAudioConvertInputKind(firstFile.name);
         const targetOptions = getAudioConvertTargetOptions(inputKind);
         const selections = {
           ...this.data.selections,
           target: targetOptions[0] || "",
         };
+        
+        // 直接构建状态，确保 backendFiles 正确保留
         Object.assign(nextState, {
           selections,
-          ...this.buildViewState(tool, selections),
           audioTargetOptions: targetOptions,
           audioInputKind: inputKind,
           visibleParams: (tool.params || [])
@@ -1657,6 +1738,10 @@ Page({
             .map((param) => param.key === "target" ? { ...param, options: targetOptions } : param),
           ...this.getClearedAudioConvertResult(),
         });
+        
+        // 确保 backendFiles 被保留
+        nextState.backendFiles = backendFiles;
+        
         this.setData(nextState);
       } else {
         this.setData(nextState);
@@ -3456,10 +3541,13 @@ Page({
   updateProcessingProgress(progress, status, options = {}) {
     const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
     const currentDisplay = Number(this.data.processingDisplayProgress || 0);
+    const displayValue = Math.max(currentDisplay, nextProgress);
     this.setData({
       processingProgress: nextProgress,
+      processingDisplayProgress: displayValue,
+      processingDisplayProgressText: Math.round(displayValue),
       processingStatus: status || "",
-      processingEstimateFrom: currentDisplay,
+      processingEstimateFrom: displayValue,
       processingEstimateTo: nextProgress,
       processingEstimateStartedAt: Date.now(),
       processingEstimateDurationMs: Math.max(0, Number(options.durationMs || 0)),
@@ -3469,6 +3557,14 @@ Page({
 
   updateProcessingDisplayProgress(progress, status) {
     const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
+    const now = Date.now();
+    const lastTime = this._lastProgressUpdateTime || 0;
+    const lastProgress = this._lastProgressUpdateValue || 0;
+    if (now - lastTime < 200 && Math.abs(nextProgress - lastProgress) < 2) {
+      return;
+    }
+    this._lastProgressUpdateTime = now;
+    this._lastProgressUpdateValue = nextProgress;
     this.setData({
       processingProgress: nextProgress,
       processingDisplayProgress: nextProgress,
@@ -4337,6 +4433,108 @@ Page({
     }
   },
 
+  async pollTaskProgress(taskId) {
+    let attempts = 0;
+    const maxAttempts = 1800;
+    
+    while (attempts < maxAttempts) {
+      try {
+        const response = await requestJson(`/api/tasks/${taskId}`, null, { method: "GET" });
+        if (!response.ok) {
+          throw new Error("任务查询失败");
+        }
+        
+        const task = response.task;
+        this.updateProcessingProgress(task.progress, task.statusText || "处理中...");
+        
+        if (task.status === "completed") {
+          return task.result;
+        }
+        
+        if (task.status === "failed") {
+          throw new Error(task.error || "处理失败");
+        }
+      } catch (error) {
+        console.warn("[PollTask] 轮询失败:", error);
+      }
+      
+      await sleep(500);
+      attempts++;
+    }
+    
+    throw new Error("任务超时");
+  },
+
+  async uploadAndPollTask(url, file, formData, uploadOptions) {
+    const { uploadFileForJson } = require("../../services/remote-executor");
+    
+    const uploadResponse = await uploadFileForJson(url, file, formData, uploadOptions);
+    
+    if (!uploadResponse.ok || !uploadResponse.taskId) {
+      throw new Error("提交任务失败");
+    }
+    
+    return await this.pollTaskProgress(uploadResponse.taskId);
+  },
+
+  async runRemoteOcr() {
+    const { tool, selections, imageInput } = this.data;
+    if (!imageInput) {
+      wx.showToast({
+        title: "先选择一张图片",
+        icon: "none",
+      });
+      return;
+    }
+
+    this.updateProcessingProgress(16, "正在读取图片...");
+    
+    const response = await this.uploadAndPollTask(
+      buildServiceUrl("/api/ocr/image"),
+      imageInput,
+      {
+        language: selections.language,
+        layout: selections.layout,
+      }
+    );
+    
+    const resultText = response.text || "";
+    const resultLines = buildOcrLineItems(response.lines, resultText);
+    const result = createTask(tool, selections, {
+      instant: true,
+      skipUsage: true,
+      resultType: "text",
+      inputName: getFileName(imageInput.path),
+      outputName: "OCR 文本结果",
+      beforeBytes: imageInput.size,
+      resultHeadline: response.headline,
+      resultDetail: response.detail,
+      resultText: response.text,
+      copyText: response.text,
+      metaLines: response.metaLines || [],
+    });
+
+    if (result.task) {
+      this.latestCreatedTaskId = result.task.id;
+    }
+
+    this.setData({
+      latestCreatedTaskId: result.task ? result.task.id : this.data.latestCreatedTaskId,
+      ocrResultReady: true,
+      ocrResultText: resultText,
+      ocrResultLines: resultLines,
+      ocrResultHeadline: response.headline || "文字识别已完成",
+      ocrResultDetail: response.detail || `识别 ${resultText.length} 个字符`,
+      ocrResultProviderText: response.provider === "baidu" ? "百度 OCR" : "Tesseract",
+    });
+
+    wx.showToast({
+      title: "识别完成",
+      icon: "none",
+    });
+    this.updateProcessingProgress(100, "识别完成");
+  },
+
   async runRemoteAudioConvert() {
     const { tool, selections, backendFiles } = this.data;
     if (!backendFiles.length) {
@@ -4387,25 +4585,17 @@ Page({
       return;
     }
 
-    this.updateProcessingProgress(22, "正在读取音视频...");
-    // 导入需要的工具函数
-    const { uploadFileForJson } = require("../../services/remote-executor");
+    this.updateProcessingProgress(15, "正在上传文件...");
     
-    // 使用文件上传方式
-    const response = await this.requestJsonWithProgress("/api/audio/convert", {
-      target,
-      quality: selections.quality,
-    }, {
-      target: 84,
-      status: "正在转换音视频...",
-      sizeBytes: backendFiles[0].size,
-    }, async (url) => {
-      return await uploadFileForJson(url, backendFiles[0], {
+    const response = await this.uploadAndPollTask(
+      buildServiceUrl("/api/audio/convert"),
+      backendFiles[0],
+      {
         target,
         quality: selections.quality,
         fileName: backendFiles[0].name,
-      });
-    });
+      }
+    );
 
     this.updateProcessingProgress(88, "正在保存结果...");
     const fileResponse = response.file || {};
@@ -4475,6 +4665,8 @@ Page({
       audioConvertResultKind: resultKind,
       audioConvertIsPlaying: false,
     });
+
+    this.updateProcessingProgress(100, "完成");
   },
 
   async runImageCompress() {
@@ -4853,10 +5045,61 @@ Page({
       let resultPath = "";
       let resultRemoteUrl = "";
       let useResult = false;
+      let finalBeforeBytes = beforeBytes;
+      let finalInputFile = inputFile;
+      let finalFileType = fileType;
+
+      // 对于图片类型并且文件较大，先进行本地压缩，减少上传时间
+      if (fileType === "image" && beforeBytes > 2 * 1024 * 1024) {
+        this.updateProcessingProgress(10, "正在预处理图片...");
+
+        const qualityMap = {
+          "体积优先": 56,
+          "均衡": 76,
+          "清晰优先": 90,
+        };
+
+        const compressQuality = qualityMap[selections.mode] || 76;
+        const LARGE_IMAGE_SKIP_THRESHOLD = 10 * 1024 * 1024;
+
+        if (beforeBytes <= LARGE_IMAGE_SKIP_THRESHOLD) {
+          try {
+            const compressResult = await new Promise((resolve, reject) => {
+              wx.compressImage({
+                src: inputFile.path,
+                quality: compressQuality,
+                success: resolve,
+                fail: reject,
+              });
+            });
+
+            const fileInfo = await getFileInfo(compressResult.tempFilePath);
+            const compressedSize = fileInfo ? fileInfo.size : beforeBytes;
+
+            if (compressedSize < beforeBytes) {
+              const exportFormat = (fileName.split('.').pop() || "jpg").toLowerCase() === "png" ? "png" : "jpg";
+              finalInputFile = {
+                path: compressResult.tempFilePath,
+                name: fileName,
+                size: compressedSize,
+                width: inputFile.width,
+                height: inputFile.height,
+                extension: exportFormat,
+              };
+              finalBeforeBytes = compressedSize;
+            }
+          } catch (compressErr) {
+            // wx.compressImage 失败，直接上传原文件
+          }
+        } else {
+          this.updateProcessingProgress(14, "大文件直接上传...");
+        }
+      }
 
       // 调用后端处理
       this.updateProcessingProgress(18, "正在上传文件...");
-      response = await this.processFileCompress(inputFile, selections, fileType);
+      await wait(100);
+      response = await this.processFileCompress(finalInputFile, selections, finalFileType);
       resultPath = response.path;
       resultRemoteUrl = response.remoteUrl || "";
       useResult = true;
@@ -4880,14 +5123,14 @@ Page({
         universalCompressResultAfterSizeText: formatFileSize(afterBytes),
         universalCompressResultSavedText: hasSavings ? "节省 " + formatFileSize(savedBytes) + " (" + savedPercent + "%)" : "未节省体积",
         universalCompressResultMetaLines: [],
-        universalCompressFileType: fileType,
+        universalCompressFileType: finalFileType,
       });
 
-      if (useResult && fileType === "image") {
+      if (useResult && finalFileType === "image") {
         await this.createImageTask({
           inputName: fileName,
           outputName: response.name || "压缩结果",
-          sourcePath: fileType === "image" ? inputFile.path : "",
+          sourcePath: finalFileType === "image" ? inputFile.path : "",
           outputPath: resultPath,
           remoteUrl: resultRemoteUrl,
           beforeBytes,
@@ -4935,6 +5178,12 @@ Page({
           content: errorMessage || "文件上传超时，请检查网络后重试",
           showCancel: false,
         });
+      } else if (error && error.code === "DOWNLOAD_TIMEOUT") {
+        wx.showModal({
+          title: "下载超时",
+          content: errorMessage || "下载处理结果超时，请检查网络后重试",
+          showCancel: false,
+        });
       } else if (error && error.code === "FFMPEG_UNAVAILABLE") {
         wx.showModal({
           title: "暂不支持",
@@ -4954,6 +5203,7 @@ Page({
   // 处理通用文件压缩
   async processFileCompress(file, selections, fileType) {
     const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
+    const MAX_INLINE_BASE64_SIZE = 1 * 1024 * 1024; // 降低到 1MB 防止小程序卡死
     const fileSize = file.size || 0;
 
     if (fileSize > MAX_UPLOAD_SIZE) {
@@ -5006,24 +5256,27 @@ Page({
       throw uploadError;
     }
 
-    console.log("[压缩下载] API返回完整结果:", JSON.stringify(response).substring(0, 1000));
     this.updateProcessingProgress(82, "正在压缩文件...");
 
-    console.log("[压缩下载] file对象:", JSON.stringify(response.file || {}));
-    console.log("[压缩下载] has inlineBase64:", !!(response.file && response.file.inlineBase64));
-    console.log("[压缩下载] url:", response.file && response.file.url);
-    console.log("[压缩下载] externalUrl:", response.file && response.file.externalUrl);
-    console.log("[压缩下载] fallbackUrl:", response.file && response.file.fallbackUrl);
-    console.log("[压缩下载] fileType:", fileType);
+    let useInlineBase64 = false;
+    let hasDownloadUrl = false;
+    let downloadUrl = response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
+    
+    if (downloadUrl) {
+      hasDownloadUrl = true;
+    }
 
     if (response.file && response.file.inlineBase64) {
-      console.log("[压缩下载] 使用 inlineBase64 处理...");
+      const base64Size = (response.file.inlineBase64.length * 3) / 4;
+      // 只有在没有下载 URL 且文件较小时才使用内联 base64
+      useInlineBase64 = base64Size < MAX_INLINE_BASE64_SIZE && !hasDownloadUrl;
+    }
+
+    if (response.file && response.file.inlineBase64 && useInlineBase64) {
       const inlineFileName = response.file.name || uploadFileName || "compressed-result";
       
-      // 对于图片，直接构建 base64 URL，不写入文件（避免模拟器访问问题）
       let resultPath = null;
       if (fileType === "image") {
-        // 检测图片类型，构建正确的 data URL
         const mimeMap = {
           jpg: "image/jpeg",
           jpeg: "image/jpeg",
@@ -5035,21 +5288,18 @@ Page({
         const ext = (inlineFileName.split('.').pop() || 'jpg').toLowerCase();
         const mimeType = mimeMap[ext] || 'image/jpeg';
         resultPath = `data:${mimeType};base64,${response.file.inlineBase64}`;
-        console.log("[压缩下载] 构建 base64 图片 URL:", resultPath.substring(0, 100) + "...");
       } else {
-        // 其他文件仍然写入文件系统
         resultPath = await writeBase64File(
           `${wx.env.USER_DATA_PATH}/compressed-${Date.now()}-${inlineFileName}`,
           response.file.inlineBase64
         );
-        console.log("[压缩下载] 写入文件成功:", resultPath);
       }
       
       this.updateProcessingProgress(92, "正在整理结果...");
 
       return {
         path: resultPath,
-        remoteUrl: response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "",
+        remoteUrl: downloadUrl,
         name: inlineFileName,
         afterBytes: response.file.sizeBytes || null,
         compressed: !!response.compressed,
@@ -5059,36 +5309,40 @@ Page({
       };
     }
     
-    // 如果是图片类型但没有 inlineBase64，记录警告但仍然尝试
-    if (fileType === "image") {
-      console.warn("[压缩下载] 图片类型但没有 inlineBase64，可能会失败");
-    }
+    logger.log("[压缩下载] 使用下载 URL 方式（更快更稳定）");
 
-    let downloadUrl = response.file.downloadUrl || response.file.fallbackUrl || response.file.url || response.file.externalUrl || "";
-
-    console.log("[压缩下载] 最终选择的下载URL:", downloadUrl);
-
-    if (!downloadUrl) {
-      throw new Error("下载 URL 为空，请检查后端存储配置");
-    }
-
+    // 根据文件大小设置合适的超时时间
+    const downloadTimeout = Math.max(60000, Math.min(300000, fileSize / 10000)); // 最小1分钟，最大5分钟
+    
     const downloadRes = await new Promise((resolve, reject) => {
+      let timeoutId;
       const task = wx.downloadFile({
         url: downloadUrl,
+        timeout: downloadTimeout,
         success: (res) => {
-          console.log("[压缩下载] 下载响应 statusCode:", res.statusCode, "tempFilePath:", res.tempFilePath);
+          clearTimeout(timeoutId);
           if (res.statusCode >= 200 && res.statusCode < 300) {
             resolve(res);
           } else {
-            console.error("[压缩下载] 下载失败, URL:", downloadUrl, "statusCode:", res.statusCode);
-            reject(new Error(`下载失败: HTTP ${res.statusCode}, URL: ${downloadUrl}`));
+            reject(new Error(`下载失败: HTTP ${res.statusCode}`));
           }
         },
         fail: (err) => {
-          console.error("[压缩下载] 下载失败(err):", err, "URL:", downloadUrl);
-          reject(new Error(`下载失败: ${err.errMsg || err.message}, URL: ${downloadUrl}`));
+          clearTimeout(timeoutId);
+          const errMsg = err.errMsg || err.message || "";
+          if (errMsg.indexOf("timeout") > -1 || errMsg.indexOf("超时") > -1) {
+            reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
+          } else {
+            reject(new Error(`下载失败: ${errMsg}`));
+          }
         },
       });
+      
+      // 备用超时保护
+      timeoutId = setTimeout(() => {
+        reject({ message: `下载超时，请检查网络后重试`, code: "DOWNLOAD_TIMEOUT" });
+      }, downloadTimeout + 5000);
+      
       if (task && task.onProgressUpdate) {
         task.onProgressUpdate((progress) => {
           const percent = Number(progress.progress || 0);

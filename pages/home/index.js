@@ -44,12 +44,22 @@ Page({
     toolUsageProvider: "",
     viewMode: "grid",
     selectedCategory: "all",
+    isLoaded: false,
   },
 
   onLoad() {
+    // 快速初始化，只设置必要数据
     this.setData({
-      displayTools: this.filterTools(""),
+      isLoaded: false,
     });
+    
+    // 延迟加载完整内容
+    setTimeout(() => {
+      this.setData({
+        displayTools: this.filterTools(""),
+        isLoaded: true,
+      });
+    }, 100);
   },
 
   onShow() {
@@ -57,13 +67,17 @@ Page({
       return;
     }
 
-    this.refreshPage();
     this.updateGreeting();
+    
+    // 延迟刷新页面数据，避免阻塞
+    setTimeout(() => {
+      this.refreshPage();
+    }, 150);
     
     // 恢复工具使用统计
     setTimeout(() => {
       this.refreshToolUsageStats();
-    }, 1000);
+    }, 1200);
     
     if (typeof this.getTabBar === 'function' && this.getTabBar()) {
       this.getTabBar().setData({
@@ -81,14 +95,22 @@ Page({
     }));
 
     const user = getUserState();
+    const recentTools = getRecentTools().slice(0, 6).map((tool) => this.enhanceTool(tool));
 
+    // 分批更新数据，避免一次性更新过大导致阻塞
     this.setData({
-      displayTools: this.filterTools(this.data.keyword),
-      recentTools: getRecentTools().slice(0, 6).map((tool) => this.enhanceTool(tool)),
-      bundles,
-      dashboard: getTaskDashboard(),
       user,
+      dashboard: getTaskDashboard(),
+      recentTools,
+      bundles,
     });
+    
+    // 延迟更新工具列表
+    setTimeout(() => {
+      this.setData({
+        displayTools: this.filterTools(this.data.keyword),
+      });
+    }, 50);
   },
 
   enhanceTool(tool) {
@@ -104,7 +126,16 @@ Page({
     }
 
     return {
-      ...tool,
+      id: tool.id,
+      name: tool.name,
+      shortDescription: tool.shortDescription,
+      categoryId: tool.categoryId,
+      categoryIds: tool.categoryIds,
+      badge: tool.badge,
+      accent: tool.accent,
+      cardBackground: tool.cardBackground,
+      formatText: tool.formatText,
+      points: tool.points,
       usageCount,
       usageText,
       icon: TOOL_ICONS[tool.id] || "/icons/universal-compress.svg",
@@ -316,5 +347,10 @@ Page({
       });
       this.setData({ displayTools: resetTools });
     }, 600);
+  },
+
+  // 预防措施：避免某些情况下的错误提示
+  onChooseAvatar() {
+    console.warn('首页不应该触发 onChooseAvatar 事件');
   },
 });
