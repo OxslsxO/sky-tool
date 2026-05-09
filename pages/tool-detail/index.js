@@ -3549,7 +3549,7 @@ Page({
     const nextProgress = Math.min(100, Math.max(0, Math.round(progress)));
     const currentDisplay = Number(this.data.processingDisplayProgress || 0);
     const displayValue = Math.max(currentDisplay, nextProgress);
-    this.setData({
+    const updates = {
       processingProgress: nextProgress,
       processingDisplayProgress: displayValue,
       processingDisplayProgressText: Math.round(displayValue),
@@ -3558,7 +3558,12 @@ Page({
       processingEstimateTo: nextProgress,
       processingEstimateStartedAt: Date.now(),
       processingEstimateDurationMs: Math.max(0, Number(options.durationMs || 0)),
-    });
+    };
+    if (this.data.showBackgroundTaskFloat) {
+      updates.backgroundTaskProgress = Math.round(displayValue);
+      updates.backgroundTaskStatus = status || "";
+    }
+    this.setData(updates);
     this.startProcessingProgressTicker();
   },
 
@@ -3572,7 +3577,7 @@ Page({
     }
     this._lastProgressUpdateTime = now;
     this._lastProgressUpdateValue = nextProgress;
-    this.setData({
+    const updates = {
       processingProgress: nextProgress,
       processingDisplayProgress: nextProgress,
       processingDisplayProgressText: nextProgress,
@@ -3581,7 +3586,12 @@ Page({
       processingEstimateTo: nextProgress,
       processingEstimateStartedAt: Date.now(),
       processingEstimateDurationMs: 0,
-    });
+    };
+    if (this.data.showBackgroundTaskFloat) {
+      updates.backgroundTaskProgress = nextProgress;
+      updates.backgroundTaskStatus = status || this.data.processingStatus || "";
+    }
+    this.setData(updates);
     this.startProcessingProgressTicker();
   },
 
