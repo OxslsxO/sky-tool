@@ -29,6 +29,13 @@
   border: 2rpx solid rgba(200, 149, 108, 0.1);
 }
 
+.bg-float__item--done {
+  border-color: rgba(125, 185, 168, 0.25);
+  box-shadow:
+    0 12rpx 40rpx rgba(125, 185, 168, 0.18),
+    0 4rpx 12rpx rgba(125, 185, 168, 0.08);
+}
+
 .bg-float__badge {
   width: 64rpx;
   height: 64rpx;
@@ -40,8 +47,18 @@
   flex-shrink: 0;
 }
 
+.bg-float__badge--done {
+  background: linear-gradient(135deg, #7DB9A8, #5DA08A);
+}
+
 .bg-float__percent {
   font-size: 20rpx;
+  font-weight: 800;
+  color: #FFFFFF;
+}
+
+.bg-float__check {
+  font-size: 28rpx;
   font-weight: 800;
   color: #FFFFFF;
 }
@@ -73,6 +90,10 @@
 .bg-float__bar {
   height: 100%;
   border-radius: 999rpx;
-  background: linear-gradient(90deg, #C8956C, #7DB9A8);
+  background: linear-gradient(90deg, #C8956C, #D4A574);
   transition: width 0.3s ease;
+}
+
+.bg-float__bar--done {
+  background: linear-gradient(90deg, #7DB9A8, #5DA08A);
 }

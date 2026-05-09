@@ -1,13 +1,18 @@
-const bgTasks = require("../../services/background-tasks");
-
 Component({
-  data: {
-    tasks: [],
-    visible: false,
+  methods: {
+    handleTapItem(e) {
+      const { completed, storeTaskId } = e.currentTarget.dataset;
+      if (!completed) return;
+      if (!storeTaskId) return;
+      wx.navigateTo({
+        url: `/pages/task-detail/index?id=${storeTaskId}`,
+      });
+    },
   },
 
   lifetimes: {
     attached() {
+      const bgTasks = require("../../services/background-tasks");
       this._onTasksChange = (taskList) => {
         this.setData({
           tasks: taskList,
@@ -19,22 +24,9 @@ Component({
     },
 
     detached() {
+      const bgTasks = require("../../services/background-tasks");
       if (this._onTasksChange) {
         bgTasks.removeListener(this._onTasksChange);
-      }
-    },
-  },
-
-  methods: {
-    handleTapItem(e) {
-      const { id } = e.currentTarget.dataset;
-      const task = bgTasks.getTasks().find((t) => t.id === id);
-      if (!task) return;
-
-      if (task.toolId) {
-        wx.navigateTo({
-          url: `/pages/tool-detail/index?id=${task.toolId}`,
-        });
       }
     },
   },

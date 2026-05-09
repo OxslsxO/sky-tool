@@ -3,17 +3,20 @@
     <view
       wx:for="{{tasks}}"
       wx:key="id"
-      class="bg-float__item"
+      class="bg-float__item {{item.completed ? 'bg-float__item--done' : ''}}"
       data-id="{{item.id}}"
+      data-store-task-id="{{item.storeTaskId}}"
+      data-completed="{{item.completed}}"
       bindtap="handleTapItem"
     >
-      <view class="bg-float__badge">
-        <text class="bg-float__percent">{{item.progress}}%</text>
+      <view class="bg-float__badge {{item.completed ? 'bg-float__badge--done' : ''}}">
+        <text wx:if="{{item.completed}}" class="bg-float__check">✓</text>
+        <text wx:else class="bg-float__percent">{{item.progress}}%</text>
       </view>
       <view class="bg-float__info">
         <text class="bg-float__title">{{item.title}}</text>
         <view class="bg-float__bar-wrap">
-          <view class="bg-float__bar" style="width: {{item.progress}}%;"></view>
+          <view class="bg-float__bar {{item.completed ? 'bg-float__bar--done' : ''}}" style="width: {{item.progress}}%;"></view>
         </view>
       </view>
     </view>

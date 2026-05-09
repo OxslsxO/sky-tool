@@ -1592,10 +1592,18 @@ Page({
       }
 
       if (this._bgTaskId) {
-        bgTasks.updateTask(this._bgTaskId, 100, "处理完成");
+        const latestTaskId = this.latestCreatedTaskId || this.data.latestCreatedTaskId || "";
+        bgTasks.completeTask(this._bgTaskId, latestTaskId);
+        if (executionSucceeded) {
+          wx.showToast({
+            title: "任务完成",
+            icon: "success",
+            duration: 2000,
+          });
+        }
         const bgTaskId = this._bgTaskId;
         this._bgTaskId = null;
-        setTimeout(() => bgTasks.removeTask(bgTaskId), 1500);
+        setTimeout(() => bgTasks.removeTask(bgTaskId), 8000);
       }
 
       const nextState = {
