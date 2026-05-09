@@ -61,8 +61,8 @@
   <view class="section">
     <view class="card action-card">
       <view class="action-card__buttons">
-        <view class="btn-secondary action-card__button" wx:if="{{task.outputPath && task.status !== 'expired'}}" bindtap="saveResult">保存</view>
-        <view class="btn-secondary action-card__button" wx:if="{{task.status === 'success' && task.resultType === 'document' && !task.outputPath && task.remoteUrl && task.status !== 'expired'}}" bindtap="openDocumentResult">打开文件</view>
+        <view class="btn-secondary action-card__button" wx:if="{{(task.outputPath || task.remoteUrl) && task.status !== 'expired'}}" bindtap="saveResult">保存</view>
+        <view class="btn-secondary action-card__button" wx:if="{{task.status === 'success' && task.resultType === 'document' && !task.outputPath && !task.remoteUrl && task.status !== 'expired'}}" bindtap="openDocumentResult">打开文件</view>
         <view class="btn-ghost action-card__button" wx:if="{{task.remoteUrl && task.status !== 'expired'}}" bindtap="copyDownloadLink">复制链接</view>
         <view class="btn-ghost action-card__button" bindtap="openTasks">返回</view>
       </view>

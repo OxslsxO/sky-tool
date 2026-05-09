@@ -769,6 +769,7 @@ function normalizeTask(task) {
     progress,
     statusText: buildStatusText(status),
     createdLabel: formatRelativeTime(task.createdAt),
+    createdAtText: formatDateTime(task.createdAt),
     resultHeadline: task.resultHeadline,
     finalDetail: status === "success"
       ? (task.resultDetail || task.resultText || buildTaskResult(task, tool))

@@ -3,6 +3,7 @@ const { getToolById } = require("../../data/mock");
 const { downloadRemoteFile } = require("../../services/remote-executor");
 
 const AUDIO_EXTENSIONS = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
+const VIDEO_EXTENSIONS = ["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"];
 
 function isAudioTask(task) {
   if (!task || !task.toolId) return false;
@@ -143,25 +144,106 @@ Page({
     });
   },
 
-  saveResult() {
+  async saveResult() {
     const { task } = this.data;
-    if (!task.outputPath || task.status === 'expired') {
+    if (task.status === 'expired') {
+      wx.showToast({ title: "任务已过期", icon: "none" });
       return;
     }
 
-    wx.saveImageToPhotosAlbum({
-      filePath: task.outputPath,
-      success: () => {
-        wx.showToast({
-          title: "已保存到相册",
-          icon: "none",
+    let filePath = task.outputPath;
+
+    if (!filePath && task.remoteUrl) {
+      wx.showLoading({ title: "正在下载...", mask: true });
+      try {
+        const download = await downloadRemoteFile(task.remoteUrl, { maxRetries: 2 });
+        wx.hideLoading();
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      } catch (err) {
+        wx.hideLoading();
+        wx.showToast({ title: "下载失败", icon: "none" });
+        return;
+      }
+    }
+
+    if (!filePath) {
+      wx.showToast({ title: "文件不存在", icon: "none" });
+      return;
+    }
+
+    const ext = (task.outputName || filePath || "").split(".").pop().toLowerCase();
+    const isVideo = VIDEO_EXTENSIONS.includes(ext);
+    const isImage = ["jpg", "jpeg", "png", "webp", "bmp", "gif"].includes(ext);
+
+    if (isVideo) {
+      try {
+        await new Promise((resolve, reject) => {
+          wx.saveVideoToPhotosAlbum({
+            filePath,
+            success: resolve,
+            fail: reject,
+          });
         });
-      },
+        wx.showToast({ title: "已保存到相册", icon: "none" });
+      } catch (err) {
+        const errMsg = (err && err.errMsg) || "";
+        if (errMsg.indexOf("auth deny") > -1 || errMsg.indexOf("拒绝") > -1) {
+          wx.showModal({
+            title: "需要相册权限",
+            content: "请在设置中允许访问相册，以便保存视频",
+            confirmText: "去设置",
+            success: (res) => {
+              if (res.confirm) wx.openSetting();
+            },
+          });
+        } else {
+          wx.openDocument({
+            filePath,
+            showMenu: true,
+            fail: () => {
+              wx.showToast({ title: "保存失败", icon: "none" });
+            },
+          });
+        }
+      }
+      return;
+    }
+
+    if (isImage) {
+      try {
+        await new Promise((resolve, reject) => {
+          wx.saveImageToPhotosAlbum({
+            filePath,
+            success: resolve,
+            fail: reject,
+          });
+        });
+        wx.showToast({ title: "已保存到相册", icon: "none" });
+      } catch (err) {
+        const errMsg = (err && err.errMsg) || "";
+        if (errMsg.indexOf("auth deny") > -1 || errMsg.indexOf("拒绝") > -1) {
+          wx.showModal({
+            title: "需要相册权限",
+            content: "请在设置中允许访问相册，以便保存图片",
+            confirmText: "去设置",
+            success: (res) => {
+              if (res.confirm) wx.openSetting();
+            },
+          });
+        } else {
+          wx.showToast({ title: "保存失败", icon: "none" });
+        }
+      }
+      return;
+    }
+
+    wx.openDocument({
+      filePath,
+      showMenu: true,
       fail: () => {
-        wx.showToast({
-          title: "保存失败，请检查相册权限",
-          icon: "none",
-        });
+        wx.showToast({ title: "打开文件失败", icon: "none" });
       },
     });
   },
