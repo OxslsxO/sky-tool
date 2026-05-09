@@ -628,6 +628,10 @@ Page({
     processingTitle: "",
     processingKind: "",
     showProcessingOverlay: false,
+    showBackgroundTaskFloat: false,
+    backgroundTaskProgress: 0,
+    backgroundTaskTitle: "",
+    backgroundTaskStatus: "",
     showMoreColors: false,
     userState: null,
     selectedPayment: "points", // 默认选择积分支付
@@ -1581,11 +1585,13 @@ Page({
     }
     finally {
       logger.log("[处理执行] 进入 finally 块");
-      if (executionSucceeded && this.data.showProcessingOverlay) {
+      if (executionSucceeded && (this.data.showProcessingOverlay || this.data.showBackgroundTaskFloat)) {
         this.updateProcessingProgress(100, "处理完成");
         this.setData({
           processingDisplayProgress: 100,
           processingDisplayProgressText: 100,
+          backgroundTaskProgress: 100,
+          backgroundTaskStatus: "处理完成",
         });
         await wait(220);
       }
@@ -1593,6 +1599,7 @@ Page({
       const nextState = {
         isWorking: false,
         photoIdIsProcessing: false,
+        showBackgroundTaskFloat: false,
       };
       if (!this.data.photoIdResultReady) {
         nextState.showProcessingOverlay = false;
@@ -3603,7 +3610,7 @@ Page({
     }
 
     this.processingProgressTimer = setInterval(() => {
-      if (!this.data.showProcessingOverlay) {
+      if (!this.data.showProcessingOverlay && !this.data.showBackgroundTaskFloat) {
         this.stopProcessingProgressTicker();
         return;
       }
@@ -3627,10 +3634,15 @@ Page({
 
       const rounded = Math.min(100, Math.round(next));
       if (Math.abs(next - current) >= 0.1 || rounded !== this.data.processingDisplayProgressText) {
-        this.setData({
+        const updates = {
           processingDisplayProgress: next,
           processingDisplayProgressText: rounded,
-        });
+        };
+        if (this.data.showBackgroundTaskFloat) {
+          updates.backgroundTaskProgress = rounded;
+          updates.backgroundTaskStatus = this.data.processingStatus || "";
+        }
+        this.setData(updates);
       }
     }, 180);
   },
@@ -3640,6 +3652,36 @@ Page({
       clearInterval(this.processingProgressTimer);
       this.processingProgressTimer = null;
     }
+  },
+
+  minimizeToBackground() {
+    if (!this.data.isWorking) return;
+    this.setData({
+      showProcessingOverlay: false,
+      showBackgroundTaskFloat: true,
+      backgroundTaskProgress: this.data.processingDisplayProgressText || 0,
+      backgroundTaskTitle: this.data.processingTitle || "处理中",
+      backgroundTaskStatus: this.data.processingStatus || "",
+    });
+  },
+
+  restoreFromBackground() {
+    if (!this.data.isWorking) {
+      this.setData({ showBackgroundTaskFloat: false });
+      return;
+    }
+    this.setData({
+      showProcessingOverlay: true,
+      showBackgroundTaskFloat: false,
+    });
+  },
+
+  updateBackgroundTaskFloat() {
+    if (!this.data.showBackgroundTaskFloat || !this.data.isWorking) return;
+    this.setData({
+      backgroundTaskProgress: this.data.processingDisplayProgressText || 0,
+      backgroundTaskStatus: this.data.processingStatus || "",
+    });
   },
 
   async runRemotePhotoId() {
