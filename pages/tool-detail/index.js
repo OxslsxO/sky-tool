@@ -2416,38 +2416,49 @@ Page({
   },
 
   async getAudioConvertResultFilePath() {
-    console.log("[getAudioConvertResultFilePath] 开始获取文件路径");
     let filePath = this.data.audioConvertResultPath;
-    console.log("[getAudioConvertResultFilePath] 本地路径:", filePath);
-    console.log("[getAudioConvertResultFilePath] 远程 URL:", this.data.audioConvertResultRemoteUrl);
-    
-    if (!filePath && this.data.audioConvertResultRemoteUrl) {
-      console.log("[getAudioConvertResultFilePath] 开始下载远程文件:", this.data.audioConvertResultRemoteUrl);
-      try {
-        const download = await downloadRemoteFile(this.data.audioConvertResultRemoteUrl);
-        console.log("[getAudioConvertResultFilePath] 下载响应状态:", download.statusCode);
-        if (download.statusCode >= 200 && download.statusCode < 300) {
-          filePath = download.tempFilePath || "";
-          console.log("[getAudioConvertResultFilePath] 下载成功，临时路径:", filePath);
-          // 缓存下载的文件路径
-          this.setData({ audioConvertResultPath: filePath });
-        }
-      } catch (downloadErr) {
-        console.error("[getAudioConvertResultFilePath] 下载失败:", downloadErr);
-        throw downloadErr;
-      }
+    const url = this.data.audioConvertResultRemoteUrl;
+
+    if (filePath) {
+      return filePath;
     }
-    console.log("[getAudioConvertResultFilePath] 返回文件路径:", filePath);
+
+    if (!url) {
+      return "";
+    }
+
+    wx.showLoading({ title: "正在下载文件", mask: true });
+
+    try {
+      const downloadRes = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url,
+          success: (res) => {
+            if (res.statusCode === 200) {
+              resolve(res);
+            } else {
+              reject(new Error(`下载失败: ${res.statusCode}`));
+            }
+          },
+          fail: (err) => reject(err),
+        });
+      });
+      filePath = downloadRes.tempFilePath;
+      this.setData({ audioConvertResultPath: filePath });
+    } catch (downloadErr) {
+      console.error("[getAudioConvertResultFilePath] 下载失败:", downloadErr);
+      throw downloadErr;
+    } finally {
+      wx.hideLoading();
+    }
+
     return filePath;
   },
 
   async previewAudioConvertResult() {
     const current = this.data.audioConvertResultPath || this.data.audioConvertResultRemoteUrl;
     if (!current) {
-      wx.showToast({
-        title: "文件不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
@@ -2466,13 +2477,9 @@ Page({
         context.onEnded(() => {
           this.setData({ audioConvertIsPlaying: false });
         });
-        context.onError((err) => {
-          console.error('Audio play error:', err);
+        context.onError(() => {
           this.setData({ audioConvertIsPlaying: false });
-          wx.showToast({
-            title: "播放失败",
-            icon: "none",
-          });
+          wx.showToast({ title: "播放失败", icon: "none" });
         });
         this.setData({ audioConvertAudioContext: context });
       }
@@ -2483,130 +2490,112 @@ Page({
       return;
     }
 
-    // 对于视频，优先尝试打开文档预览，兼容性更好
+    wx.showToast({
+      title: "可在上方播放器中播放",
+      icon: "none",
+      duration: 2000,
+    });
+  },
+
+  async saveAudioConvertResult() {
+    let filePath = this.data.audioConvertResultPath;
+    const url = this.data.audioConvertResultRemoteUrl;
+
+    if (!filePath && !url) {
+      wx.showToast({ title: "文件不存在", icon: "none" });
+      return;
+    }
+
+    wx.showLoading({ title: "正在保存", mask: true });
+
     try {
-      if (this.data.audioConvertResultPath) {
+      if (!filePath && url) {
+        const downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url,
+            success: (res) => {
+              if (res.statusCode === 200) {
+                resolve(res);
+              } else {
+                reject(new Error(`下载失败: ${res.statusCode}`));
+              }
+            },
+            fail: (err) => reject(err),
+          });
+        });
+        filePath = downloadRes.tempFilePath;
+        this.setData({ audioConvertResultPath: filePath });
+      }
+
+      if (this.data.audioConvertResultKind === "video") {
+        try {
+          await new Promise((resolve, reject) => {
+            wx.saveVideoToPhotosAlbum({
+              filePath,
+              success: resolve,
+              fail: reject,
+            });
+          });
+          wx.hideLoading();
+          wx.showToast({ title: "已保存到相册", icon: "none" });
+          return;
+        } catch (videoErr) {
+          console.warn("[saveAudioConvertResult] 保存视频到相册失败，尝试用 openDocument:", videoErr);
+        }
+      }
+
+      const ext = (this.data.audioConvertResultName || "").split(".").pop().toLowerCase();
+      const fileTypeMap = {
+        mp3: "mp3", wav: "wav", flac: "flac", ogg: "ogg",
+        m4a: "m4a", aac: "aac", mp4: "mp4", mov: "mov", webm: "webm",
+      };
+
+      try {
         await new Promise((resolve, reject) => {
           wx.openDocument({
-            filePath: this.data.audioConvertResultPath,
-            fileType: 'mp4',
+            filePath,
+            fileType: fileTypeMap[ext] || ext,
+            showMenu: true,
             success: resolve,
             fail: reject,
           });
         });
-      } else {
-        // 如果没有本地路径，直接告诉用户可以在播放器中播放
-        wx.showToast({
-          title: "可在上方播放器中播放",
-          icon: "none",
-          duration: 2000,
-        });
-      }
-    } catch (e) {
-      console.error('Open document failed:', e);
-      // 如果 openDocument 失败，尝试 previewMedia
-      if (wx.previewMedia && this.data.audioConvertResultRemoteUrl) {
+        wx.hideLoading();
+      } catch (openErr) {
+        console.warn("[saveAudioConvertResult] openDocument 失败:", openErr);
         try {
-          wx.previewMedia({
-            sources: [{
-              url: this.data.audioConvertResultRemoteUrl,
-              type: "video",
-            }],
+          const saveRes = await new Promise((resolve, reject) => {
+            wx.saveFile({
+              tempFilePath: filePath,
+              success: resolve,
+              fail: reject,
+            });
           });
-        } catch (previewErr) {
-          console.error('Preview media failed:', previewErr);
-          wx.showToast({
-            title: "可在上方播放器中播放",
-            icon: "none",
-            duration: 2000,
+          wx.hideLoading();
+          wx.showToast({ title: "已保存到手机存储", icon: "none" });
+        } catch (saveErr) {
+          wx.hideLoading();
+          console.error("[saveAudioConvertResult] 保存文件失败:", saveErr);
+          wx.showModal({
+            title: "保存失败",
+            content: "可通过「复制链接」在其他应用中下载保存",
+            showCancel: false,
+            confirmText: "知道了",
           });
         }
-      } else {
-        wx.showToast({
-          title: "可在上方播放器中播放",
-          icon: "none",
-          duration: 2000,
-        });
-      }
-    }
-  },
-
-  async saveAudioConvertResult() {
-    try {
-      console.log("[saveAudioConvertResult] 开始保存文件");
-      const filePath = await this.getAudioConvertResultFilePath();
-      if (!filePath) {
-        console.error("[saveAudioConvertResult] 文件路径为空");
-        throw new Error("MEDIA_FILE_MISSING");
-      }
-      console.log("[saveAudioConvertResult] 文件路径:", filePath);
-
-      if (this.data.audioConvertResultKind === "video") {
-        console.log("[saveAudioConvertResult] 保存视频到相册");
-        await new Promise((resolve, reject) => {
-          wx.saveVideoToPhotosAlbum({
-            filePath,
-            success: resolve,
-            fail: (err) => {
-              console.error("[saveAudioConvertResult] 保存视频失败:", err);
-              reject(err);
-            },
-          });
-        });
-        wx.showToast({
-          title: "已保存到相册",
-          icon: "none",
-        });
-        return;
-      }
-
-      console.log("[saveAudioConvertResult] 保存音频");
-      try {
-        await new Promise((resolve, reject) => {
-          wx.openDocument({
-            filePath: filePath,
-            fileType: this.data.audioConvertResultName.split('.').pop(),
-            showMenu: true,
-            success: resolve,
-            fail: (err) => {
-              console.error("[saveAudioConvertResult] 打开文档失败:", err);
-              reject(err);
-            },
-          });
-        });
-      } catch (openErr) {
-        console.warn("[saveAudioConvertResult] 打开文档失败，尝试直接保存文件");
-        const saveRes = await new Promise((resolve, reject) => {
-          wx.saveFile({
-            tempFilePath: filePath,
-            success: resolve,
-            fail: (err) => {
-              console.error("[saveAudioConvertResult] 保存文件失败:", err);
-              reject(err);
-            },
-          });
-        });
-        console.log("[saveAudioConvertResult] 文件已保存到:", saveRes.savedFilePath);
-        wx.showToast({
-          title: "已保存到手机存储",
-          icon: "none",
-        });
       }
     } catch (error) {
+      wx.hideLoading();
       console.error("[saveAudioConvertResult] 保存失败:", error);
       let errMsg = "保存失败，请重试";
       if (error && error.errMsg) {
         if (error.errMsg.indexOf("auth deny") > -1 || error.errMsg.indexOf("拒绝") > -1) {
           errMsg = "请允许相册权限后重试";
         } else if (error.errMsg.indexOf("cancel") > -1) {
-          errMsg = "保存已取消";
+          return;
         }
       }
-      wx.showToast({
-        title: errMsg,
-        icon: "none",
-        duration: 2000,
-      });
+      wx.showToast({ title: errMsg, icon: "none", duration: 2000 });
     }
   },
 
