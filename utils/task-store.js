@@ -1053,6 +1053,30 @@ function updateOrder(orderId, patch) {
   return orders[index];
 }
 
+function refundPointsIfLowCompression(taskId, tool) {
+  if (!taskId || !tool || tool.points <= 0) return false;
+
+  const task = getRawTasks().find((t) => t.id === taskId);
+  if (!task) return false;
+
+  const beforeSize = task.beforeSize;
+  const afterSize = task.afterSize;
+  if (!beforeSize || beforeSize <= 0) return false;
+
+  const reduction = (beforeSize - (afterSize || beforeSize)) / beforeSize;
+  if (reduction >= 0.1) return false;
+
+  const user = getUserState();
+  const refundAmount = tool.points;
+  updateUserState({ points: user.points + refundAmount });
+  addPointsRecord({
+    type: "refund",
+    title: `${tool.name}（压缩不足退还）`,
+    change: refundAmount,
+  });
+  return true;
+}
+
 function consumePoints(tool) {
   const billing = getBillingPreview(tool);
 
@@ -1218,5 +1242,6 @@ module.exports = {
   addOrder,
   updateOrder,
   consumePoints,
+  refundPointsIfLowCompression,
   commitUsage,
 };

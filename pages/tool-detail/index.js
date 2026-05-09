@@ -35,6 +35,7 @@ const {
   getPhotoIdStats,
   incrementPhotoIdUsage,
   getUserState,
+  refundPointsIfLowCompression,
 } = require("../../utils/task-store");
 const { isClientTool } = require("../../utils/tool-engine");
 const { getGroupUnits, convertValue } = require("../../utils/unit-converter");
@@ -1595,15 +1596,43 @@ Page({
         const latestTaskId = this.latestCreatedTaskId || this.data.latestCreatedTaskId || "";
         bgTasks.completeTask(this._bgTaskId, latestTaskId);
         if (executionSucceeded) {
-          wx.showToast({
-            title: "任务完成",
-            icon: "success",
-            duration: 2000,
-          });
+          const tool = this.data.tool;
+          if (tool && latestTaskId && tool.points > 0) {
+            const refunded = refundPointsIfLowCompression(latestTaskId, tool);
+            if (refunded) {
+              this.setData({ userState: getUserState() });
+              wx.showToast({
+                title: "压缩不足，积分已退还",
+                icon: "none",
+                duration: 2500,
+              });
+            } else {
+              wx.showToast({
+                title: "任务完成",
+                icon: "success",
+                duration: 2000,
+              });
+            }
+          } else {
+            wx.showToast({
+              title: "任务完成",
+              icon: "success",
+              duration: 2000,
+            });
+          }
         }
         const bgTaskId = this._bgTaskId;
         this._bgTaskId = null;
         setTimeout(() => bgTasks.removeTask(bgTaskId), 8000);
+      } else if (executionSucceeded) {
+        const latestTaskId = this.latestCreatedTaskId || this.data.latestCreatedTaskId || "";
+        const tool = this.data.tool;
+        if (tool && latestTaskId && tool.points > 0) {
+          const refunded = refundPointsIfLowCompression(latestTaskId, tool);
+          if (refunded) {
+            this.setData({ userState: getUserState() });
+          }
+        }
       }
 
       const nextState = {

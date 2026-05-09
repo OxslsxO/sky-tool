@@ -5,10 +5,6 @@
 
     <view class="hero-stat-row">
       <view class="hero-stat">
-        <text class="hero-stat-value">{{dashboard.processingCount}}</text>
-        <text class="hero-stat-label">处理中</text>
-      </view>
-      <view class="hero-stat">
         <text class="hero-stat-value">{{dashboard.successCount}}</text>
         <text class="hero-stat-label">已完成</text>
       </view>
@@ -18,9 +14,7 @@
   <view class="section">
     <view class="chips-wrap">
       <view class="chip {{filter === 'all' ? 'chip-active' : ''}}" data-filter="all" bindtap="handleFilterTap">全部</view>
-      <view class="chip {{filter === 'processing' ? 'chip-active' : ''}}" data-filter="processing" bindtap="handleFilterTap">处理中</view>
       <view class="chip {{filter === 'success' ? 'chip-active' : ''}}" data-filter="success" bindtap="handleFilterTap">已完成</view>
-      <view class="chip {{filter === 'failed' ? 'chip-active' : ''}}" data-filter="failed" bindtap="handleFilterTap">失败</view>
       <view class="chip {{filter === 'expired' ? 'chip-active' : ''}}" data-filter="expired" bindtap="handleFilterTap">已过期</view>
     </view>
   </view>
