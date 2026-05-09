@@ -192,7 +192,7 @@
           <text class="chip-static" wx:for="{{imageToPdfResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewImageToPdfResult">预览 PDF</view>
+          <view class="btn-primary action-card__button" bindtap="previewImageToPdfResult">分享给好友</view>
           <view class="btn-primary action-card__button" bindtap="saveImageToPdfResult">保存 PDF</view>
           <view class="btn-ghost action-card__button" wx:if="{{imageToPdfResultRemoteUrl}}" bindtap="copyImageToPdfUrl">复制链接</view>
         </view>
@@ -230,7 +230,7 @@
           <text class="chip-static" wx:for="{{resizeResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewResizeResult">预览大图</view>
+          <view class="btn-primary action-card__button" bindtap="previewResizeResult">分享给好友</view>
           <view class="btn-ghost action-card__button" bindtap="saveResizeResult">保存到相册</view>
           <view class="btn-ghost action-card__button" wx:if="{{resizeResultRemoteUrl}}" bindtap="copyResizeResultLink">复制链接</view>
         </view>
@@ -328,7 +328,7 @@
         </view>
 
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewUniversalCompressResult">预览</view>
+          <view class="btn-primary action-card__button" bindtap="previewUniversalCompressResult">分享给好友</view>
           <view class="btn-ghost action-card__button" bindtap="saveUniversalCompressResult">保存</view>
           <view class="btn-ghost action-card__button" wx:if="{{universalCompressResultRemoteUrl}}" bindtap="copyUniversalCompressResultLink">复制链接</view>
         </view>
@@ -362,7 +362,7 @@
           <text class="chip-static" wx:for="{{convertResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewConvertResult">预览大图</view>
+          <view class="btn-primary action-card__button" bindtap="previewConvertResult">分享给好友</view>
           <view class="btn-ghost action-card__button" bindtap="saveConvertResult">保存到相册</view>
         </view>
       </view>
@@ -450,7 +450,7 @@
           <text class="chip-static" wx:for="{{photoIdResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewPhotoIdResult">预览大图</view>
+          <view class="btn-primary action-card__button" bindtap="previewPhotoIdResult">分享给好友</view>
           <view class="btn-ghost action-card__button" bindtap="savePhotoIdResult">保存到相册</view>
         </view>
       </view>
@@ -541,8 +541,8 @@
           <text class="chip-static" wx:for="{{pdfMergeResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewPdfMergeResult">预览文件</view>
-          <view class="btn-primary action-card__button" bindtap="downloadPdfMergeResult">下载文件</view>
+          <view class="btn-primary action-card__button" bindtap="previewPdfMergeResult">分享给好友</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfMergeResult">保存文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{pdfMergeResultRemoteUrl}}" bindtap="copyPdfMergeUrl">复制链接</view>
         </view>
       </view>
@@ -589,8 +589,8 @@
         </view>
 
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">预览文件</view>
-          <view class="btn-primary action-card__button" bindtap="downloadPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">下载文件</view>
+          <view class="btn-primary action-card__button" bindtap="previewPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">分享给好友</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfSplitResult" wx:if="{{pdfSplitResultPath || pdfSplitResultRemoteUrl}}">保存文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{pdfSplitResultRemoteUrl}}" bindtap="copyPdfSplitUrl">复制链接</view>
         </view>
       </view>
@@ -605,8 +605,8 @@
           <text class="chip-static" wx:for="{{pdfToWordResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewPdfToWordResult">预览文件</view>
-          <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">下载文件</view>
+          <view class="btn-primary action-card__button" bindtap="previewPdfToWordResult">分享给好友</view>
+          <view class="btn-primary action-card__button" bindtap="downloadPdfToWordResult">保存文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{pdfToWordResultRemoteUrl}}" bindtap="copyPdfToWordUrl">复制链接</view>
         </view>
       </view>
@@ -624,8 +624,8 @@
           <text class="chip-static" wx:for="{{officeToPdfResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">预览文件</view>
-          <view class="btn-primary action-card__button" bindtap="downloadOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">下载文件</view>
+          <view class="btn-primary action-card__button" bindtap="previewOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">分享给好友</view>
+          <view class="btn-primary action-card__button" bindtap="downloadOfficeToPdfResult" wx:if="{{officeToPdfResultPath || officeToPdfResultRemoteUrl}}">保存文件</view>
           <view class="btn-ghost action-card__button" wx:if="{{officeToPdfResultRemoteUrl}}" bindtap="copyOfficeToPdfUrl">复制链接</view>
         </view>
       </view>
@@ -658,7 +658,7 @@
           <text class="chip-static" wx:for="{{audioConvertResultMetaLines}}" wx:key="*this">{{item}}</text>
         </view>
         <view class="action-card__buttons" style="margin-top: 24rpx;">
-          <view class="btn-primary action-card__button" bindtap="previewAudioConvertResult">{{audioConvertResultKind === 'audio' && audioConvertIsPlaying ? '暂停预览' : (audioConvertResultKind === 'video' ? '打开预览' : '预览')}}</view>
+          <view class="btn-primary action-card__button" bindtap="previewAudioConvertResult">{{audioConvertResultKind === 'audio' && audioConvertIsPlaying ? '暂停' : (audioConvertResultKind === 'video' ? '分享给好友' : '预览')}}</view>
           <view class="btn-ghost action-card__button" bindtap="saveAudioConvertResult">保存</view>
           <view class="btn-ghost action-card__button" wx:if="{{audioConvertResultRemoteUrl}}" bindtap="copyAudioConvertResultLink">复制链接</view>
         </view>

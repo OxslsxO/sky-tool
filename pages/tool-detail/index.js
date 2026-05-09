@@ -57,6 +57,86 @@ const { buildServiceUrl } = require("../../services/backend-tools");
 const payment = require("../../services/payment");
 const bgTasks = require("../../services/background-tasks");
 
+const IMAGE_EXTS = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
+const VIDEO_EXTS = ["mp4", "mov", "avi", "mkv", "webm", "wmv", "flv", "3gp"];
+
+async function smartSaveFile(filePath, options = {}) {
+  const ext = (options.fileName || filePath || "").split(".").pop().toLowerCase();
+  const isImage = IMAGE_EXTS.includes(ext);
+  const isVideo = VIDEO_EXTS.includes(ext);
+
+  if (isImage) {
+    try {
+      await new Promise((resolve, reject) => {
+        wx.saveImageToPhotosAlbum({ filePath, success: resolve, fail: reject });
+      });
+      return { ok: true, method: "album" };
+    } catch (err) {
+      const errMsg = (err && err.errMsg) || "";
+      if (errMsg.indexOf("auth deny") > -1 || errMsg.indexOf("拒绝") > -1) {
+        throw Object.assign(new Error("NEED_ALBUM_AUTH"), { code: "NEED_ALBUM_AUTH" });
+      }
+      throw err;
+    }
+  }
+
+  if (isVideo) {
+    try {
+      await new Promise((resolve, reject) => {
+        wx.saveVideoToPhotosAlbum({ filePath, success: resolve, fail: reject });
+      });
+      return { ok: true, method: "album" };
+    } catch (err) {
+      const errMsg = (err && err.errMsg) || "";
+      if (errMsg.indexOf("auth deny") > -1 || errMsg.indexOf("拒绝") > -1) {
+        throw Object.assign(new Error("NEED_ALBUM_AUTH"), { code: "NEED_ALBUM_AUTH" });
+      }
+    }
+  }
+
+  try {
+    const saveRes = await new Promise((resolve, reject) => {
+      wx.saveFile({
+        tempFilePath: filePath,
+        success: resolve,
+        fail: reject,
+      });
+    });
+    return { ok: true, method: "storage", savedPath: saveRes.savedFilePath };
+  } catch (saveErr) {
+    await new Promise((resolve, reject) => {
+      wx.openDocument({ filePath, showMenu: true, success: resolve, fail: reject });
+    });
+    return { ok: true, method: "openDocument" };
+  }
+}
+
+function shareFileToFriend(filePath, fileName) {
+  if (!filePath) {
+    wx.showToast({ title: "文件不存在", icon: "none" });
+    return;
+  }
+  wx.shareFileMessage({
+    filePath,
+    fileName: fileName || undefined,
+    success() {},
+    fail(err) {
+      const errMsg = (err && err.errMsg) || "";
+      if (errMsg.indexOf("not supported") > -1 || errMsg.indexOf("不支持") > -1) {
+        wx.openDocument({
+          filePath,
+          showMenu: true,
+          fail() {
+            wx.showToast({ title: "打开失败", icon: "none" });
+          },
+        });
+      } else {
+        wx.showToast({ title: "分享失败", icon: "none" });
+      }
+    },
+  });
+}
+
 function chooseImage(count) {
   return new Promise((resolve, reject) => {
     wx.chooseMedia({
@@ -2204,16 +2284,25 @@ Page({
   handlePdfMergeThumbLongPress(e) {
   },
 
-  previewCompressResult() {
-    const current = this.data.compressResultPath || this.data.compressResultRemoteUrl;
-    if (!current) {
-      return;
+  async previewCompressResult() {
+    let filePath = this.data.compressResultPath;
+    if (!filePath && this.data.compressResultRemoteUrl) {
+      wx.showLoading({ title: "准备分享...", mask: true });
+      try {
+        const download = await downloadRemoteFile(this.data.compressResultRemoteUrl, { maxRetries: 2 });
+        wx.hideLoading();
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath;
+        }
+      } catch (err) {
+        wx.hideLoading();
+        wx.showToast({ title: "下载失败", icon: "none" });
+        return;
+      }
     }
-
-    wx.previewImage({
-      current,
-      urls: [current],
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, "压缩结果.png");
+    }
   },
 
   async saveCompressResult() {
@@ -2267,16 +2356,32 @@ Page({
     });
   },
 
-  previewResizeResult() {
-    const current = this.data.resizeResultPath || this.data.resizeResultRemoteUrl;
-    if (!current) {
+  async previewResizeResult() {
+    const filePath = this.data.resizeResultPath;
+    const remoteUrl = this.data.resizeResultRemoteUrl;
+
+    if (!filePath && !remoteUrl) {
       return;
     }
 
-    wx.previewImage({
-      current,
-      urls: [current],
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, "缩放大图.png");
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, "缩放大图.png");
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
+    }
   },
 
   async saveResizeResult() {
@@ -2330,159 +2435,102 @@ Page({
     });
   },
 
-  previewUniversalCompressResult() {
-    const current = this.data.universalCompressResultPath || this.data.universalCompressResultRemoteUrl;
-    if (!current) {
+  async previewUniversalCompressResult() {
+    const filePath = this.data.universalCompressResultPath;
+    const remoteUrl = this.data.universalCompressResultRemoteUrl;
+    const fileName = this.data.universalCompressResultName || "压缩结果";
+
+    if (!filePath && !remoteUrl) {
       return;
     }
 
-    // 如果是图片，使用图片预览
-    if (this.data.universalCompressFileType === "image") {
-      wx.previewImage({
-        current,
-        urls: [current],
-      });
-    } else {
-      // 其他文件直接打开
-      wx.openDocument({
-        filePath: current,
-        showMenu: true,
-      });
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
   async saveUniversalCompressResult() {
     const filePath = this.data.universalCompressResultPath;
-    const fileType = this.data.universalCompressFileType;
     const remoteUrl = this.data.universalCompressResultRemoteUrl;
+    const fileName = this.data.universalCompressResultName || "";
 
     try {
-      if (filePath) {
-        // 如果是图片，保存到相册
-        if (fileType === "image") {
-          await new Promise((resolve, reject) => {
-            wx.saveImageToPhotosAlbum({
-              filePath,
-              success: resolve,
-              fail: reject,
-            });
-          });
-          wx.showToast({
-            title: "已保存到相册",
-            icon: "none",
-          });
-        } else {
-          // 其他文件通过文档方式打开，让用户自己保存
-          await new Promise((resolve, reject) => {
-            wx.openDocument({
-              filePath,
-              showMenu: true,
-              success: resolve,
-              fail: reject,
-            });
-          });
-        }
-      } else if (remoteUrl) {
-        // 如果有远程链接，提供复制链接选项
-        wx.showModal({
-          title: "文件较大",
-          content: "文件较大，建议复制链接后在浏览器中下载保存。",
-          confirmText: "复制链接",
-          cancelText: "直接下载",
-          success: async (res) => {
-            if (res.confirm) {
-              wx.setClipboardData({
-                data: remoteUrl,
-                success: () => {
-                  wx.showToast({
-                    title: "已复制链接",
-                    icon: "none",
-                  });
-                },
-              });
-            } else {
-              try {
-                const download = await downloadRemoteFile(remoteUrl);
-                if (download.statusCode >= 200 && download.statusCode < 300) {
-                  if (fileType === "image") {
-                    await new Promise((resolve, reject) => {
-                      wx.saveImageToPhotosAlbum({
-                        filePath: download.tempFilePath,
-                        success: resolve,
-                        fail: reject,
-                      });
-                    });
-                    wx.showToast({
-                      title: "已保存到相册",
-                      icon: "none",
-                    });
-                  } else {
-                    await new Promise((resolve, reject) => {
-                      wx.openDocument({
-                        filePath: download.tempFilePath,
-                        showMenu: true,
-                        success: resolve,
-                        fail: reject,
-                      });
-                    });
-                  }
-                }
-              } catch (downloadError) {
-                console.error("下载失败:", downloadError);
-                wx.showModal({
-                  title: "下载失败",
-                  content: "文件过大，建议复制链接在浏览器中下载。",
-                  confirmText: "复制链接",
-                  success: (copyRes) => {
-                    if (copyRes.confirm) {
-                      wx.setClipboardData({
-                        data: remoteUrl,
-                        success: () => {
-                          wx.showToast({
-                            title: "已复制链接",
-                            icon: "none",
-                          });
-                        },
-                      });
-                    }
-                  },
-                });
+      let localPath = filePath;
+
+      if (!localPath && remoteUrl) {
+        wx.showLoading({ title: "正在下载...", mask: true });
+        try {
+          const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+          wx.hideLoading();
+          if (download.statusCode >= 200 && download.statusCode < 300) {
+            localPath = download.tempFilePath || "";
+          }
+        } catch (dlErr) {
+          wx.hideLoading();
+          wx.showModal({
+            title: "下载失败",
+            content: "建议复制链接后在浏览器中下载保存。",
+            confirmText: "复制链接",
+            success: (res) => {
+              if (res.confirm) {
+                wx.setClipboardData({ data: remoteUrl, success: () => wx.showToast({ title: "已复制链接", icon: "none" }) });
               }
-            }
-          },
-        });
+            },
+          });
+          return;
+        }
+      }
+
+      if (!localPath) {
+        wx.showToast({ title: "文件不存在", icon: "none" });
+        return;
+      }
+
+      const result = await smartSaveFile(localPath, { fileName });
+
+      if (result.method === "album") {
+        wx.showToast({ title: "已保存到相册", icon: "none" });
+      } else if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
       } else {
-        wx.showToast({
-          title: "文件暂不可用",
-          icon: "none",
-        });
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
       }
     } catch (error) {
-      console.error("保存失败:", error);
-      if (remoteUrl) {
+      if (error.code === "NEED_ALBUM_AUTH") {
+        wx.showModal({
+          title: "需要相册权限",
+          content: "请在设置中允许访问相册，以便保存文件",
+          confirmText: "去设置",
+          success: (res) => { if (res.confirm) wx.openSetting(); },
+        });
+      } else if (remoteUrl) {
         wx.showModal({
           title: "保存失败",
           content: "建议复制链接后在浏览器中下载保存。",
           confirmText: "复制链接",
           success: (res) => {
             if (res.confirm) {
-              wx.setClipboardData({
-                data: remoteUrl,
-                success: () => {
-                  wx.showToast({
-                    title: "已复制链接",
-                    icon: "none",
-                  });
-                },
-              });
+              wx.setClipboardData({ data: remoteUrl, success: () => wx.showToast({ title: "已复制链接", icon: "none" }) });
             }
           },
         });
       } else {
-        wx.showToast({
-          title: "保存失败，请重试",
-          icon: "none",
-        });
+        wx.showToast({ title: "保存失败", icon: "none" });
       }
     }
   },
@@ -2503,16 +2551,32 @@ Page({
     });
   },
 
-  previewConvertResult() {
-    const current = this.data.convertResultPath || this.data.convertResultRemoteUrl;
-    if (!current) {
+  async previewConvertResult() {
+    const filePath = this.data.convertResultPath;
+    const remoteUrl = this.data.convertResultRemoteUrl;
+
+    if (!filePath && !remoteUrl) {
       return;
     }
 
-    wx.previewImage({
-      current,
-      urls: [current],
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, "转换结果.png");
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, "转换结果.png");
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
+    }
   },
 
   async saveConvertResult() {
@@ -2595,8 +2659,11 @@ Page({
   },
 
   async previewAudioConvertResult() {
-    const current = this.data.audioConvertResultPath || this.data.audioConvertResultRemoteUrl;
-    if (!current) {
+    const filePath = this.data.audioConvertResultPath;
+    const remoteUrl = this.data.audioConvertResultRemoteUrl;
+    const fileName = this.data.audioConvertResultName || "转换结果";
+
+    if (!filePath && !remoteUrl) {
       wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
@@ -2623,22 +2690,38 @@ Page({
         this.setData({ audioConvertAudioContext: context });
       }
 
-      context.src = current;
+      const src = filePath || remoteUrl;
+      context.src = src;
       context.play();
       this.setData({ audioConvertIsPlaying: true });
       return;
     }
 
-    wx.showToast({
-      title: "可在上方播放器中播放",
-      icon: "none",
-      duration: 2000,
-    });
+    // 视频类型：分享给好友
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
+    }
   },
 
   async saveAudioConvertResult() {
     let filePath = this.data.audioConvertResultPath;
     const url = this.data.audioConvertResultRemoteUrl;
+    const fileName = this.data.audioConvertResultName || "";
 
     if (!filePath && !url) {
       wx.showToast({ title: "文件不存在", icon: "none" });
@@ -2654,79 +2737,34 @@ Page({
           filePath = downloadRes.tempFilePath;
           this.setData({ audioConvertResultPath: filePath });
         } catch (dlErr) {
-          throw new Error(`下载失败: ${(dlErr && dlErr.message) || "网络错误"}`);
-        }
-      }
-
-      if (this.data.audioConvertResultKind === "video") {
-        try {
-          await new Promise((resolve, reject) => {
-            wx.saveVideoToPhotosAlbum({
-              filePath,
-              success: resolve,
-              fail: reject,
-            });
-          });
           wx.hideLoading();
-          wx.showToast({ title: "已保存到相册", icon: "none" });
+          wx.showToast({ title: "下载失败", icon: "none" });
           return;
-        } catch (videoErr) {
-          console.warn("[saveAudioConvertResult] 保存视频到相册失败，尝试用 openDocument:", videoErr);
         }
       }
 
-      const ext = (this.data.audioConvertResultName || "").split(".").pop().toLowerCase();
-      const fileTypeMap = {
-        mp3: "mp3", wav: "wav", flac: "flac", ogg: "ogg",
-        m4a: "m4a", aac: "aac", mp4: "mp4", mov: "mov", webm: "webm",
-      };
+      const result = await smartSaveFile(filePath, { fileName });
+      wx.hideLoading();
 
-      try {
-        await new Promise((resolve, reject) => {
-          wx.openDocument({
-            filePath,
-            fileType: fileTypeMap[ext] || ext,
-            showMenu: true,
-            success: resolve,
-            fail: reject,
-          });
-        });
-        wx.hideLoading();
-      } catch (openErr) {
-        console.warn("[saveAudioConvertResult] openDocument 失败:", openErr);
-        try {
-          const saveRes = await new Promise((resolve, reject) => {
-            wx.saveFile({
-              tempFilePath: filePath,
-              success: resolve,
-              fail: reject,
-            });
-          });
-          wx.hideLoading();
-          wx.showToast({ title: "已保存到手机存储", icon: "none" });
-        } catch (saveErr) {
-          wx.hideLoading();
-          console.error("[saveAudioConvertResult] 保存文件失败:", saveErr);
-          wx.showModal({
-            title: "保存失败",
-            content: "可通过「复制链接」在其他应用中下载保存",
-            showCancel: false,
-            confirmText: "知道了",
-          });
-        }
+      if (result.method === "album") {
+        wx.showToast({ title: "已保存到相册", icon: "none" });
+      } else if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
       }
     } catch (error) {
       wx.hideLoading();
-      console.error("[saveAudioConvertResult] 保存失败:", error);
-      let errMsg = "保存失败，请重试";
-      if (error && error.errMsg) {
-        if (error.errMsg.indexOf("auth deny") > -1 || error.errMsg.indexOf("拒绝") > -1) {
-          errMsg = "请允许相册权限后重试";
-        } else if (error.errMsg.indexOf("cancel") > -1) {
-          return;
-        }
+      if (error.code === "NEED_ALBUM_AUTH") {
+        wx.showModal({
+          title: "需要相册权限",
+          content: "请在设置中允许访问相册，以便保存文件",
+          confirmText: "去设置",
+          success: (res) => { if (res.confirm) wx.openSetting(); },
+        });
+      } else {
+        wx.showToast({ title: "保存失败", icon: "none" });
       }
-      wx.showToast({ title: errMsg, icon: "none", duration: 2000 });
     }
   },
 
@@ -2747,105 +2785,64 @@ Page({
   },
 
   async previewPdfToWordResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.pdfToWordResultPath;
     const url = this.data.pdfToWordResultRemoteUrl;
+    const fileName = this.data.pdfToWordResultName || "转换结果.docx";
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "预览链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在加载",
-      mask: true,
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
 
+    wx.showLoading({ title: "正在下载...", mask: true });
     try {
-      // 如果没有本地路径，先下载
-      if (!filePath && url) {
-        console.log("[PDF转Word] 无本地缓存，正在下载:", url);
-        const downloadRes = await safeDownloadFile(url);
-        filePath = downloadRes.tempFilePath;
-        this.setData({ pdfToWordResultPath: filePath });
+      const download = await downloadRemoteFile(url, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
       }
-
-      // 打开文档
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'docx',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+    } catch (err) {
       wx.hideLoading();
-    } catch (error) {
-      wx.hideLoading();
-      console.error("预览失败:", error);
-      wx.showModal({
-        title: "预览失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
   async downloadPdfToWordResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.pdfToWordResultPath;
     const url = this.data.pdfToWordResultRemoteUrl;
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "下载链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "下载链接不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在打开",
-      mask: true,
-    });
+    wx.showLoading({ title: "正在保存", mask: true });
 
     try {
-      // 如果没有本地路径，先下载
       if (!filePath && url) {
-        console.log("[PDF转Word] 无本地缓存，正在下载:", url);
         const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
         this.setData({ pdfToWordResultPath: filePath });
       }
 
-      // 打开文档（用户可以在文档预览中选择保存）
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'docx',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+      const result = await smartSaveFile(filePath, { fileName: this.data.pdfToWordResultName || "转换结果.docx" });
       wx.hideLoading();
+
+      if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
+      }
     } catch (error) {
       wx.hideLoading();
-      console.error("打开失败:", error);
-      wx.showModal({
-        title: "打开失败",
-        content: "请尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "保存失败", icon: "none" });
     }
   },
 
@@ -2866,106 +2863,64 @@ Page({
   },
 
   async previewOfficeToPdfResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.officeToPdfResultPath;
     const url = this.data.officeToPdfResultRemoteUrl;
+    const fileName = this.data.officeToPdfResultName || "转换结果.pdf";
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "预览链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在加载",
-      mask: true,
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
 
+    wx.showLoading({ title: "正在下载...", mask: true });
     try {
-      // 如果没有本地路径，先下载
-      if (!filePath && url) {
-        console.log("[Office转PDF] 无本地缓存，正在下载:", url);
-        const downloadRes = await safeDownloadFile(url);
-        filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
-        this.setData({ officeToPdfResultPath: filePath });
+      const download = await downloadRemoteFile(url, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
       }
-
-      // 打开文档
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+    } catch (err) {
       wx.hideLoading();
-    } catch (error) {
-      wx.hideLoading();
-      console.error("预览失败:", error);
-      wx.showModal({
-        title: "预览失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
   async downloadOfficeToPdfResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.officeToPdfResultPath;
     const url = this.data.officeToPdfResultRemoteUrl;
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "下载链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "下载链接不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在打开",
-      mask: true,
-    });
+    wx.showLoading({ title: "正在保存", mask: true });
 
     try {
-      // 如果没有本地路径，先下载
       if (!filePath && url) {
-        console.log("[Office转PDF] 无本地缓存，正在下载:", url);
         const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
         this.setData({ officeToPdfResultPath: filePath });
       }
 
-      // 打开文档
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+      const result = await smartSaveFile(filePath, { fileName: this.data.officeToPdfResultName || "转换结果.pdf" });
       wx.hideLoading();
+
+      if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
+      }
     } catch (error) {
       wx.hideLoading();
-      console.error("下载失败:", error);
-      wx.showModal({
-        title: "下载失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "保存失败", icon: "none" });
     }
   },
 
@@ -2986,106 +2941,64 @@ Page({
   },
 
   async previewPdfMergeResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.pdfMergeResultPath;
     const url = this.data.pdfMergeResultRemoteUrl;
+    const fileName = this.data.pdfMergeResultName || "合并结果.pdf";
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "预览链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在加载",
-      mask: true,
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
 
+    wx.showLoading({ title: "正在下载...", mask: true });
     try {
-      // 如果没有本地路径，先下载
-      if (!filePath && url) {
-        console.log("[PDF合并] 无本地缓存，正在下载:", url);
-        const downloadRes = await safeDownloadFile(url);
-        filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
-        this.setData({ pdfMergeResultPath: filePath });
+      const download = await downloadRemoteFile(url, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
       }
-
-      // 打开文档
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+    } catch (err) {
       wx.hideLoading();
-    } catch (error) {
-      wx.hideLoading();
-      console.error("预览失败:", error);
-      wx.showModal({
-        title: "预览失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
   async downloadPdfMergeResult() {
-    // 优先使用本地缓存路径
     let filePath = this.data.pdfMergeResultPath;
     const url = this.data.pdfMergeResultRemoteUrl;
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "下载链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "下载链接不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在打开",
-      mask: true,
-    });
+    wx.showLoading({ title: "正在保存", mask: true });
 
     try {
-      // 如果没有本地路径，先下载
       if (!filePath && url) {
-        console.log("[PDF合并] 无本地缓存，正在下载:", url);
         const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
-        // 更新本地路径缓存
         this.setData({ pdfMergeResultPath: filePath });
       }
 
-      // 打开文档（用户可以在文档预览中选择保存）
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+      const result = await smartSaveFile(filePath, { fileName: this.data.pdfMergeResultName || "合并结果.pdf" });
       wx.hideLoading();
+
+      if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
+      }
     } catch (error) {
       wx.hideLoading();
-      console.error("打开失败:", error);
-      wx.showModal({
-        title: "打开失败",
-        content: "请尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "保存失败", icon: "none" });
     }
   },
 
@@ -3108,103 +3021,58 @@ Page({
   async previewPdfSplitResult() {
     let filePath = this.data.pdfSplitResultPath;
     const url = this.data.pdfSplitResultRemoteUrl;
-
-    console.log("[PDF拆分] 预览开始", { filePath, url });
+    const fileName = this.data.pdfSplitResultName || "拆分结果.pdf";
 
     // 安全检查：如果 filePath 看起来像 URL，清除它并重新下载
     if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
-      console.warn("[PDF拆分] 发现错误：本地路径居然是 URL，需要重新下载", filePath);
       filePath = "";
     }
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "预览链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在加载",
-      mask: true,
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
 
+    wx.showLoading({ title: "正在下载...", mask: true });
     try {
-      if (!filePath && url) {
-        console.log("[PDF拆分] 无本地缓存，正在下载:", url);
-        const downloadRes = await safeDownloadFile(url);
-        filePath = downloadRes.tempFilePath;
-        console.log("[PDF拆分] 下载完成，本地路径:", filePath);
-        this.setData({ pdfSplitResultPath: filePath });
+      const download = await downloadRemoteFile(url, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
       }
-
-      console.log("[PDF拆分] 准备打开文档，本地路径:", filePath);
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: filePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+    } catch (err) {
       wx.hideLoading();
-    } catch (error) {
-      wx.hideLoading();
-      console.error("预览失败:", error);
-      wx.showModal({
-        title: "预览失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
   async previewPdfSplitAttachment(e) {
     const { url, name } = e.currentTarget.dataset;
-    console.log("[PDF拆分] 预览附件开始", { url, name });
-    
+
     if (!url) {
-      wx.showToast({
-        title: "预览链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在加载",
-      mask: true,
-    });
-
+    wx.showLoading({ title: "正在下载...", mask: true });
     try {
-      console.log("[PDF拆分] 开始下载附件:", url);
-      const downloadRes = await safeDownloadFile(url);
-
-      console.log("[PDF拆分] 附件下载完成，准备打开文档:", downloadRes.tempFilePath);
-      await new Promise((resolve, reject) => {
-        wx.openDocument({
-          filePath: downloadRes.tempFilePath,
-          fileType: 'pdf',
-          showMenu: true,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
+      const download = await downloadRemoteFile(url, { maxRetries: 2 });
       wx.hideLoading();
-    } catch (error) {
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, name || "拆分附件.pdf");
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
       wx.hideLoading();
-      console.error("预览失败:", error);
-      wx.showModal({
-        title: "预览失败",
-        content: "请检查网络连接或尝试复制链接在其他应用中打开",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "下载失败", icon: "none" });
     }
   },
 
@@ -3212,59 +3080,35 @@ Page({
     let filePath = this.data.pdfSplitResultPath;
     const url = this.data.pdfSplitResultRemoteUrl;
 
-    console.log("[PDF拆分] 下载开始", { filePath, url });
-
-    // 安全检查：如果 filePath 看起来像 URL，清除它并重新下载
     if (filePath && (filePath.startsWith("http://") || filePath.startsWith("https://"))) {
-      console.warn("[PDF拆分] 发现错误：本地路径居然是 URL，需要重新下载", filePath);
       filePath = "";
     }
 
     if (!filePath && !url) {
-      wx.showToast({
-        title: "下载链接不存在",
-        icon: "none",
-      });
+      wx.showToast({ title: "下载链接不存在", icon: "none" });
       return;
     }
 
-    wx.showLoading({
-      title: "正在保存",
-      mask: true,
-    });
+    wx.showLoading({ title: "正在保存", mask: true });
 
     try {
       if (!filePath && url) {
-        console.log("[PDF拆分] 无本地缓存，正在下载:", url);
         const downloadRes = await safeDownloadFile(url);
         filePath = downloadRes.tempFilePath;
-        console.log("[PDF拆分] 下载完成，本地路径:", filePath);
         this.setData({ pdfSplitResultPath: filePath });
       }
 
-      console.log("[PDF拆分] 准备保存文件:", filePath);
-      await new Promise((resolve, reject) => {
-        wx.saveFile({
-          tempFilePath: filePath,
-          success: resolve,
-          fail: reject,
-        });
-      });
-
-      wx.showToast({
-        title: "已保存到手机",
-        icon: "none",
-      });
+      const result = await smartSaveFile(filePath, { fileName: this.data.pdfSplitResultName || "拆分结果.pdf" });
       wx.hideLoading();
+
+      if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
+      }
     } catch (error) {
       wx.hideLoading();
-      console.error("保存失败:", error);
-      wx.showModal({
-        title: "保存失败",
-        content: "请检查网络连接或存储空间是否充足",
-        showCancel: false,
-        confirmText: "知道了",
-      });
+      wx.showToast({ title: "保存失败", icon: "none" });
     }
   },
 
@@ -3912,16 +3756,32 @@ Page({
     return result;
   },
 
-  previewPhotoIdResult() {
-    const current = this.data.photoIdResultPath || this.data.photoIdResultRemoteUrl;
-    if (!current) {
+  async previewPhotoIdResult() {
+    const filePath = this.data.photoIdResultPath;
+    const remoteUrl = this.data.photoIdResultRemoteUrl;
+
+    if (!filePath && !remoteUrl) {
       return;
     }
 
-    wx.previewImage({
-      current,
-      urls: [current],
-    });
+    if (filePath) {
+      shareFileToFriend(filePath, "证件照.png");
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, "证件照.png");
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
+    }
   },
 
   async savePhotoIdResult() {
@@ -5900,34 +5760,61 @@ Page({
   },
 
   async previewImageToPdfResult() {
-    const path = this.data.imageToPdfResultPath;
-    if (!path) {
-      wx.showToast({
-        title: "文件不存在",
-        icon: "none",
-      });
+    const filePath = this.data.imageToPdfResultPath;
+    const remoteUrl = this.data.imageToPdfResultRemoteUrl;
+    const fileName = "图片转PDF.pdf";
+
+    if (!filePath && !remoteUrl) {
+      wx.showToast({ title: "文件不存在", icon: "none" });
       return;
     }
-    wx.openDocument({
-      filePath: path,
-      fileType: "pdf",
-    });
+
+    if (filePath) {
+      shareFileToFriend(filePath, fileName);
+      return;
+    }
+
+    wx.showLoading({ title: "正在下载...", mask: true });
+    try {
+      const download = await downloadRemoteFile(remoteUrl, { maxRetries: 2 });
+      wx.hideLoading();
+      if (download.statusCode >= 200 && download.statusCode < 300) {
+        shareFileToFriend(download.tempFilePath, fileName);
+      } else {
+        wx.showToast({ title: "下载失败", icon: "none" });
+      }
+    } catch (err) {
+      wx.hideLoading();
+      wx.showToast({ title: "下载失败", icon: "none" });
+    }
   },
 
   async saveImageToPdfResult() {
-    const path = this.data.imageToPdfResultPath;
-    if (!path) {
-      wx.showToast({
-        title: "文件不存在",
-        icon: "none",
-      });
-      return;
+    let filePath = this.data.imageToPdfResultPath;
+
+    try {
+      if (!filePath && this.data.imageToPdfResultRemoteUrl) {
+        const download = await downloadRemoteFile(this.data.imageToPdfResultRemoteUrl, { maxRetries: 2 });
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+        }
+      }
+
+      if (!filePath) {
+        wx.showToast({ title: "文件不存在", icon: "none" });
+        return;
+      }
+
+      const result = await smartSaveFile(filePath, { fileName: "图片转PDF.pdf" });
+
+      if (result.method === "storage") {
+        wx.showToast({ title: "已保存到手机存储", icon: "none" });
+      } else {
+        wx.showToast({ title: "已打开文件，可通过菜单保存", icon: "none" });
+      }
+    } catch (error) {
+      wx.showToast({ title: "保存失败", icon: "none" });
     }
-    wx.openDocument({
-      filePath: path,
-      fileType: "pdf",
-      showMenu: true,
-    });
   },
 
   async copyImageToPdfUrl() {

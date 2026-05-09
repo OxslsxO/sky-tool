@@ -173,7 +173,7 @@ Page({
       return;
     }
 
-    const ext = (task.outputName || filePath || "").split(".").pop().toLowerCase();
+    const ext = (task.outputName || "").split(".").pop().toLowerCase() || (filePath || "").split(".").pop().toLowerCase();
     const isVideo = VIDEO_EXTENSIONS.includes(ext);
     const isImage = ["jpg", "jpeg", "png", "webp", "bmp", "gif"].includes(ext);
 

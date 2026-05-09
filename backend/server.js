@@ -2779,7 +2779,7 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
     let compressionNote = "当前文件未发现可进一步压缩的空间";
     
     // 添加文件大小检查
-    const MAX_COMPRESS_SIZE = 20 * 1024 * 1024; // 20MB
+    const MAX_COMPRESS_SIZE = 300 * 1024 * 1024;
     if (fileBytes.length > MAX_COMPRESS_SIZE) {
       console.log(`[compress] 文件过大 (${formatFileSize(fileBytes.length)})，直接返回原文件`);
       compressionNote = "文件过大，为避免处理超时已保留原文件";
@@ -3116,25 +3116,39 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
       }
       try {
         const tempInputPath = path.join(config.tempDir, `compress-input-${Date.now()}.${ext}`);
-        const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.${ext}`);
+        const tempOutputPath = path.join(config.tempDir, `compress-output-${Date.now()}.mp4`);
 
         fs.writeFileSync(tempInputPath, fileBytes);
 
         let crf = "28";
+        let preset = "medium";
+        let maxrate = "2M";
+        let bufSize = "4M";
         if (mode === "体积优先") {
-          crf = "32";
+          crf = "35";
+          preset = "fast";
+          maxrate = "1M";
+          bufSize = "2M";
         } else if (mode === "质量优先") {
           crf = "23";
+          preset = "slow";
+          maxrate = "4M";
+          bufSize = "8M";
         }
 
         const args = [
           "-y", "-probesize", "20M", "-analyzeduration", "2M", "-i", tempInputPath,
           "-c:v", "libx264",
-          "-preset", "ultrafast",
+          "-preset", preset,
           "-crf", crf,
-          "-threads", "4",
+          "-maxrate", maxrate,
+          "-bufsize", bufSize,
+          "-vf", "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
           "-c:a", "aac",
-          "-b:a", "128k",
+          "-b:a", "96k",
+          "-ac", "2",
+          "-movflags", "+faststart",
+          "-threads", "4",
           tempOutputPath
         ];
 
@@ -3155,11 +3169,12 @@ async function buildFileCompressResponse(req, { fileName, sizeBytes, fileBytes, 
           });
         });
 
-        const selected = selectSmallerOutput(fileBytes, fs.readFileSync(tempOutputPath));
+        const compressedBytes = fs.readFileSync(tempOutputPath);
+        const selected = selectSmallerOutput(fileBytes, compressedBytes);
         outputBytes = selected.bytes;
         compressed = selected.compressed;
-        compressionNote = compressed ? "已使用 FFmpeg 重新编码视频" : "视频重新编码后没有变小，已保留原文件";
-        outputExt = ext;
+        compressionNote = compressed ? "已使用 H.264 重新编码视频，降低分辨率和码率" : "视频重新编码后没有变小，已保留原文件";
+        outputExt = "mp4";
 
         try {
           fs.unlinkSync(tempInputPath);
