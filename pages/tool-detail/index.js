@@ -2416,13 +2416,28 @@ Page({
   },
 
   async getAudioConvertResultFilePath() {
+    console.log("[getAudioConvertResultFilePath] 开始获取文件路径");
     let filePath = this.data.audioConvertResultPath;
+    console.log("[getAudioConvertResultFilePath] 本地路径:", filePath);
+    console.log("[getAudioConvertResultFilePath] 远程 URL:", this.data.audioConvertResultRemoteUrl);
+    
     if (!filePath && this.data.audioConvertResultRemoteUrl) {
-      const download = await downloadRemoteFile(this.data.audioConvertResultRemoteUrl);
-      if (download.statusCode >= 200 && download.statusCode < 300) {
-        filePath = download.tempFilePath || "";
+      console.log("[getAudioConvertResultFilePath] 开始下载远程文件:", this.data.audioConvertResultRemoteUrl);
+      try {
+        const download = await downloadRemoteFile(this.data.audioConvertResultRemoteUrl);
+        console.log("[getAudioConvertResultFilePath] 下载响应状态:", download.statusCode);
+        if (download.statusCode >= 200 && download.statusCode < 300) {
+          filePath = download.tempFilePath || "";
+          console.log("[getAudioConvertResultFilePath] 下载成功，临时路径:", filePath);
+          // 缓存下载的文件路径
+          this.setData({ audioConvertResultPath: filePath });
+        }
+      } catch (downloadErr) {
+        console.error("[getAudioConvertResultFilePath] 下载失败:", downloadErr);
+        throw downloadErr;
       }
     }
+    console.log("[getAudioConvertResultFilePath] 返回文件路径:", filePath);
     return filePath;
   },
 
@@ -2518,17 +2533,24 @@ Page({
 
   async saveAudioConvertResult() {
     try {
+      console.log("[saveAudioConvertResult] 开始保存文件");
       const filePath = await this.getAudioConvertResultFilePath();
       if (!filePath) {
+        console.error("[saveAudioConvertResult] 文件路径为空");
         throw new Error("MEDIA_FILE_MISSING");
       }
+      console.log("[saveAudioConvertResult] 文件路径:", filePath);
 
       if (this.data.audioConvertResultKind === "video") {
+        console.log("[saveAudioConvertResult] 保存视频到相册");
         await new Promise((resolve, reject) => {
           wx.saveVideoToPhotosAlbum({
             filePath,
             success: resolve,
-            fail: reject,
+            fail: (err) => {
+              console.error("[saveAudioConvertResult] 保存视频失败:", err);
+              reject(err);
+            },
           });
         });
         wx.showToast({
@@ -2538,22 +2560,52 @@ Page({
         return;
       }
 
-      await new Promise((resolve, reject) => {
-        wx.saveFile({
-          tempFilePath: filePath,
-          success: resolve,
-          fail: reject,
+      console.log("[saveAudioConvertResult] 保存音频");
+      try {
+        await new Promise((resolve, reject) => {
+          wx.openDocument({
+            filePath: filePath,
+            fileType: this.data.audioConvertResultName.split('.').pop(),
+            showMenu: true,
+            success: resolve,
+            fail: (err) => {
+              console.error("[saveAudioConvertResult] 打开文档失败:", err);
+              reject(err);
+            },
+          });
         });
-      });
-
-      wx.showToast({
-        title: "已保存到手机",
-        icon: "none",
-      });
+      } catch (openErr) {
+        console.warn("[saveAudioConvertResult] 打开文档失败，尝试直接保存文件");
+        const saveRes = await new Promise((resolve, reject) => {
+          wx.saveFile({
+            tempFilePath: filePath,
+            success: resolve,
+            fail: (err) => {
+              console.error("[saveAudioConvertResult] 保存文件失败:", err);
+              reject(err);
+            },
+          });
+        });
+        console.log("[saveAudioConvertResult] 文件已保存到:", saveRes.savedFilePath);
+        wx.showToast({
+          title: "已保存到手机存储",
+          icon: "none",
+        });
+      }
     } catch (error) {
+      console.error("[saveAudioConvertResult] 保存失败:", error);
+      let errMsg = "保存失败，请重试";
+      if (error && error.errMsg) {
+        if (error.errMsg.indexOf("auth deny") > -1 || error.errMsg.indexOf("拒绝") > -1) {
+          errMsg = "请允许相册权限后重试";
+        } else if (error.errMsg.indexOf("cancel") > -1) {
+          errMsg = "保存已取消";
+        }
+      }
       wx.showToast({
-        title: "保存失败，请重试",
+        title: errMsg,
         icon: "none",
+        duration: 2000,
       });
     }
   },

@@ -4197,7 +4197,7 @@ function cleanupOldTempDirs() {
 }
 
 console.log(`📡 准备在 ${config.host}:${config.port} 监听...`);
-server.listen(config.port, config.host, (err) => {
+server.listen(config.port, config.host, async (err) => {
   if (err) {
     console.error("❌ 启动失败:", err);
     return process.exit(1);
@@ -4205,16 +4205,80 @@ server.listen(config.port, config.host, (err) => {
   
   const outputDeletedCount = storage.cleanupExpiredLocalOutputs();
   const tempDeletedCount = cleanupOldTempDirs();
+  
+  // 启动时立即执行一次七牛云清理
+  let qiniuCleanupResult = { deleted: 0 };
+  if (storage.cleanupExpiredQiniuObjects) {
+    try {
+      qiniuCleanupResult = await storage.cleanupExpiredQiniuObjects(7);
+    } catch (e) {
+      console.warn("[Qiniu Cleanup] 首次清理失败:", e.message);
+    }
+  }
+  
   console.log(
-    `✅ sky-toolbox-backend running at http://${config.host}:${config.port} (cleaned ${outputDeletedCount} outputs, ${tempDeletedCount} temp dirs)`
+    `✅ sky-toolbox-backend running at http://${config.host}:${config.port}`
   );
+  console.log(
+    `   - 清理了 ${outputDeletedCount} 个过期输出文件`
+  );
+  console.log(
+    `   - 清理了 ${tempDeletedCount} 个旧临时目录`
+  );
+  if (qiniuCleanupResult.deleted > 0) {
+    console.log(
+      `   - 清理了 ${qiniuCleanupResult.deleted} 个过期七牛云文件`
+    );
+  }
 
+  // 定时清理临时目录（每30分钟）
   setInterval(() => {
     const count = cleanupOldTempDirs();
     if (count > 0) {
       console.log(`[Temp Cleanup] 清理 ${count} 个旧临时目录`);
     }
   }, 30 * 60 * 1000);
+
+  // 定时清理七牛云过期文件（每天凌晨3点执行）
+  const runQiniuCleanup = async () => {
+    if (storage.cleanupExpiredQiniuObjects) {
+      try {
+        const result = await storage.cleanupExpiredQiniuObjects(7);
+        if (result.deleted > 0) {
+          console.log(`[Qiniu Cleanup] 清理了 ${result.deleted} 个过期文件`);
+        } else if (result.error) {
+          console.warn(`[Qiniu Cleanup] 清理失败: ${result.error}`);
+        }
+      } catch (e) {
+        console.error("[Qiniu Cleanup] 定时清理异常:", e);
+      }
+    }
+  };
+
+  // 计算距离下次凌晨3点的时间
+  const getNextCleanupTime = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(3, 0, 0, 0);
+    if (next <= now) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next - now;
+  };
+
+  // 设置定时任务
+  const scheduleQiniuCleanup = () => {
+    const delay = getNextCleanupTime();
+    console.log(`[Qiniu Cleanup] 下次清理将在 ${new Date(Date.now() + delay).toLocaleString()} 执行`);
+    
+    setTimeout(async () => {
+      await runQiniuCleanup();
+      // 之后每天执行一次
+      setInterval(runQiniuCleanup, 24 * 60 * 60 * 1000);
+    }, delay);
+  };
+
+  scheduleQiniuCleanup();
 });
 
 server.on("error", async (error) => {
