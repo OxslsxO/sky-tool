@@ -259,6 +259,12 @@
   border: none;
 }
 
+.wechat-login-btn--disabled {
+  background: linear-gradient(135deg, #d0d0d0 0%, #a0a0a0 100%);
+  box-shadow: 0 4rpx 12rpx rgba(160, 160, 160, 0.2);
+  opacity: 0.6;
+}
+
 .agree-area {
   display: flex;
   align-items: center;

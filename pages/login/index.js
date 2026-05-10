@@ -30,6 +30,7 @@ Page({
     showUserInfoStep: false,
     avatarUrl: '',
     nickname: '',
+    agreed: false,
   },
 
   onLoad() {
@@ -39,20 +40,23 @@ Page({
     }
   },
 
-  onChooseAvatar(e) {
-    wx.showModal({
-      title: '温馨提示',
-      content: '登录即表示您已阅读并同意《用户协议》和《隐私政策》',
-      confirmText: '同意',
-      cancelText: '取消',
-      success: (res) => {
-        if (res.confirm) {
-          const { avatarUrl } = e.detail;
-          this.setData({ loading: true });
-          this.loginWechat(avatarUrl || '', '微信用户');
-        }
-      }
+  toggleAgree() {
+    this.setData({
+      agreed: !this.data.agreed,
     });
+  },
+
+  onChooseAvatar(e) {
+    if (!this.data.agreed) {
+      wx.showToast({
+        title: '请先同意用户协议和隐私政策',
+        icon: 'none',
+      });
+      return;
+    }
+    const { avatarUrl } = e.detail;
+    this.setData({ loading: true });
+    this.loginWechat(avatarUrl || '', '微信用户');
   },
 
   goPrivacy() {

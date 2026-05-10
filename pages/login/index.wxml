@@ -13,23 +13,27 @@
       <text class="app-desc">温暖实用的多功能工具集</text>
     </view>
 
+    <view class="agree-area">
+      <view class="agree-checkbox {{agreed ? 'agree-checkbox--checked' : ''}}" bindtap="toggleAgree">
+        <text class="agree-checkmark" wx:if="{{agreed}}">✓</text>
+      </view>
+      <text class="agree-text">我已阅读并同意</text>
+      <text class="agree-link" bindtap="goAgreement">用户协议</text>
+      <text class="agree-text">和</text>
+      <text class="agree-link" bindtap="goPrivacy">隐私政策</text>
+    </view>
+
     <view class="action-area">
       <button
-        class="wechat-login-btn"
+        class="wechat-login-btn {{!agreed ? 'wechat-login-btn--disabled' : ''}}"
         open-type="chooseAvatar"
         bind:chooseavatar="onChooseAvatar"
         loading="{{loading}}"
+        disabled="{{!agreed}}"
       >
         <text class="btn-icon">💬</text>
         微信登录
       </button>
-    </view>
-
-    <view class="agree-area">
-      <text class="agree-text">登录即表示同意</text>
-      <text class="agree-link" bindtap="goAgreement">用户协议</text>
-      <text class="agree-text">和</text>
-      <text class="agree-link" bindtap="goPrivacy">隐私政策</text>
     </view>
 
     <view class="guest-area">
