@@ -48,20 +48,10 @@ Page({
       success: (res) => {
         if (res.confirm) {
           const { avatarUrl } = e.detail;
-          this.setData({
-            avatarUrl,
-            showUserInfoStep: true,
-            nickname: '微信用户',
-          });
-          this.onConfirmLogin();
+          this.setData({ loading: true });
+          this.loginWechat(avatarUrl || '', '微信用户');
         }
       }
-    });
-  },
-
-  onNicknameInput(e) {
-    this.setData({
-      nickname: e.detail.value,
     });
   },
 
@@ -75,24 +65,6 @@ Page({
     wx.navigateTo({
       url: '/pages/agreement/index',
     });
-  },
-
-  async onConfirmLogin() {
-    const { avatarUrl, nickname } = this.data;
-
-    this.setData({ loading: true });
-    try {
-      await this.loginWechat(avatarUrl || '', nickname || '微信用户');
-    } catch (err) {
-      console.error('❌ 登录失败:', err);
-      wx.showModal({
-        title: '登录失败',
-        content: err.message || '请重试',
-        showCancel: false
-      });
-    } finally {
-      this.setData({ loading: false });
-    }
   },
 
   goHomeAsGuest() {

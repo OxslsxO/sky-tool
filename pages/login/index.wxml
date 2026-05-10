@@ -13,28 +13,8 @@
       <text class="app-desc">温暖实用的多功能工具集</text>
     </view>
 
-    <view class="user-info-area" wx:if="{{showUserInfoStep}}">
-      <view class="avatar-preview">
-        <image wx:if="{{avatarUrl}}" class="avatar-preview-img" src="{{avatarUrl}}" mode="aspectFill" />
-        <view wx:else class="avatar-placeholder">
-          <text class="avatar-placeholder-icon">👤</text>
-        </view>
-      </view>
-      <view class="nickname-input-group">
-        <input
-          class="nickname-input"
-          type="nickname"
-          placeholder="请输入昵称"
-          value="{{nickname}}"
-          bindinput="onNicknameInput"
-          placeholder-class="nickname-placeholder"
-        />
-      </view>
-    </view>
-
     <view class="action-area">
       <button
-        wx:if="{{!showUserInfoStep}}"
         class="wechat-login-btn"
         open-type="chooseAvatar"
         bind:chooseavatar="onChooseAvatar"
@@ -42,14 +22,6 @@
       >
         <text class="btn-icon">💬</text>
         微信登录
-      </button>
-      <button
-        wx:else
-        class="wechat-login-btn wechat-login-btn--confirm"
-        bindtap="onConfirmLogin"
-        loading="{{loading}}"
-      >
-        确认登录
       </button>
     </view>
 
