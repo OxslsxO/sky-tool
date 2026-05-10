@@ -1,5 +1,5 @@
 const { getUserState } = require("./task-store");
-const { shouldForceLogin } = require("./auth-session");
+const { isWechatIdentity } = require("./auth-session");
 
 function buildLoginRedirectUrl() {
   return "/pages/login/index";
@@ -7,22 +7,17 @@ function buildLoginRedirectUrl() {
 
 function ensureWechatLogin(options = {}) {
   const getUser = options.getUser || getUserState;
-  const redirect =
-    options.redirect ||
-    ((url) => {
-      wx.reLaunch({ url });
-    });
   const user = getUser();
+  return isWechatIdentity(user);
+}
 
-  if (!shouldForceLogin(user)) {
-    return true;
-  }
-
-  redirect(buildLoginRedirectUrl());
-  return false;
+function isLoggedIn() {
+  const user = getUserState();
+  return isWechatIdentity(user);
 }
 
 module.exports = {
   buildLoginRedirectUrl,
   ensureWechatLogin,
+  isLoggedIn,
 };

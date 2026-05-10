@@ -63,10 +63,6 @@ Page({
   },
 
   onShow() {
-    if (!ensureWechatLogin()) {
-      return;
-    }
-
     this.updateGreeting();
     
     // 延迟刷新页面数据，避免阻塞

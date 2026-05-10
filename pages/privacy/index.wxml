@@ -1,0 +1,53 @@
+<view class="privacy-container">
+  <view class="privacy-content">
+    <view class="privacy-section">
+      <text class="privacy-title">隐私政策</text>
+      <text class="privacy-date">更新日期：2026年5月10日</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">一、引言</text>
+      <text class="privacy-text">欢迎使用万里工具箱！我们非常重视您的个人信息保护，本隐私政策将向您说明我们如何收集、使用、存储和保护您的个人信息。</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">二、信息收集</text>
+      <text class="privacy-text">1. 您主动提供的信息：昵称、头像等基本信息</text>
+      <text class="privacy-text">2. 我们自动收集的信息：设备信息、使用日志等</text>
+      <text class="privacy-text">3. 仅在您同意的情况下，我们才会收集上述信息</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">三、信息使用</text>
+      <text class="privacy-text">我们使用您的信息用于：</text>
+      <text class="privacy-text">1. 提供和改进我们的服务</text>
+      <text class="privacy-text">2. 维护服务的安全性</text>
+      <text class="privacy-text">3. 与您沟通服务相关事宜</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">四、信息存储</text>
+      <text class="privacy-text">我们将在中华人民共和国境内存储和处理您的个人信息，采取合理的安全措施保护您的信息安全。</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">五、信息共享</text>
+      <text class="privacy-text">除法律法规要求外，我们不会向第三方共享您的个人信息，除非获得您的明确同意。</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">六、您的权利</text>
+      <text class="privacy-text">您有权访问、更正、删除您的个人信息，以及撤回同意。如需行使上述权利，请通过小程序内的联系方式与我们联系。</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">七、未成年人保护</text>
+      <text class="privacy-text">我们非常重视未成年人的隐私保护。如果您是未成年人，请在监护人的陪同下阅读本政策。</text>
+    </view>
+
+    <view class="privacy-section">
+      <text class="privacy-section-title">八、联系我们</text>
+      <text class="privacy-text">如有任何问题，请通过微信：OxslsxO 与我们联系。</text>
+    </view>
+  </view>
+</view>

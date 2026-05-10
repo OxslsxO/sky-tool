@@ -1,0 +1,45 @@
+<view class="agreement-container">
+  <view class="agreement-content">
+    <view class="agreement-section">
+      <text class="agreement-title">用户协议</text>
+      <text class="agreement-date">更新日期：2026年5月10日</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">一、服务条款</text>
+      <text class="agreement-text">欢迎使用万里工具箱！本协议是您与万里工具箱之间关于使用本服务的法律协议。</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">二、服务说明</text>
+      <text class="agreement-text">万里工具箱是一个提供多种实用工具的小程序，包括但不限于证件照制作、PDF处理、图片处理等功能。</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">三、用户行为规范</text>
+      <text class="agreement-text">1. 您应遵守相关法律法规</text>
+      <text class="agreement-text">2. 不得利用本服务从事任何非法活动</text>
+      <text class="agreement-text">3. 不得干扰或破坏本服务的正常运行</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">四、知识产权</text>
+      <text class="agreement-text">万里工具箱及其相关内容的知识产权归我们所有，您仅享有使用本服务的权利。</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">五、免责声明</text>
+      <text class="agreement-text">我们将尽力提供稳定的服务，但不对服务的可用性、准确性做任何保证。</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">六、协议修改</text>
+      <text class="agreement-text">我们有权修改本协议，修改后的协议一经公布即生效。</text>
+    </view>
+
+    <view class="agreement-section">
+      <text class="agreement-section-title">七、联系我们</text>
+      <text class="agreement-text">如有任何问题，请通过微信：OxslsxO 与我们联系。</text>
+    </view>
+  </view>
+</view>

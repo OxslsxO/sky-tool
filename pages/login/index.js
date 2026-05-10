@@ -30,6 +30,7 @@ Page({
     showUserInfoStep: false,
     avatarUrl: '',
     nickname: '',
+    agreed: false,
   },
 
   onLoad() {
@@ -55,8 +56,34 @@ Page({
     });
   },
 
+  toggleAgree() {
+    this.setData({
+      agreed: !this.data.agreed,
+    });
+  },
+
+  goPrivacy() {
+    wx.navigateTo({
+      url: '/pages/privacy/index',
+    });
+  },
+
+  goAgreement() {
+    wx.navigateTo({
+      url: '/pages/agreement/index',
+    });
+  },
+
   async onConfirmLogin() {
-    const { avatarUrl, nickname } = this.data;
+    const { avatarUrl, nickname, agreed } = this.data;
+
+    if (!agreed) {
+      wx.showToast({
+        title: '请先同意用户协议和隐私政策',
+        icon: 'none',
+      });
+      return;
+    }
 
     if (!nickname || !nickname.trim()) {
       wx.showToast({
@@ -79,6 +106,12 @@ Page({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  goHomeAsGuest() {
+    wx.switchTab({
+      url: '/pages/home/index',
+    });
   },
 
   async loginWechat(avatarUrl, nickname) {

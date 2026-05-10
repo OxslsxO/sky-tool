@@ -53,8 +53,18 @@
       </button>
     </view>
 
-    <view class="bottom-tip">
-      <text class="tip-text">登录即表示同意用户协议和隐私政策</text>
+    <view class="agree-area">
+      <view class="agree-checkbox {{agreed ? 'agree-checkbox--checked' : ''}}" bindtap="toggleAgree">
+        <text class="agree-checkmark" wx:if="{{agreed}}">✓</text>
+      </view>
+      <text class="agree-text">我已阅读并同意</text>
+      <text class="agree-link" bindtap="goAgreement">用户协议</text>
+      <text class="agree-text">和</text>
+      <text class="agree-link" bindtap="goPrivacy">隐私政策</text>
+    </view>
+
+    <view class="guest-area">
+      <text class="guest-link" bindtap="goHomeAsGuest">先体验一下</text>
     </view>
   </view>
 </view>

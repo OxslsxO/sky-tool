@@ -1,7 +1,7 @@
 {
   "pages": [
-    "pages/login/index",
     "pages/home/index",
+    "pages/login/index",
     "pages/category/index",
     "pages/tasks/index",
     "pages/vip/index",
@@ -10,7 +10,9 @@
     "pages/service-config/index",
     "pages/profile-edit/index",
     "pages/tool-detail/index",
-    "pages/task-detail/index"
+    "pages/task-detail/index",
+    "pages/privacy/index",
+    "pages/agreement/index"
   ],
   "window": {
     "navigationBarTitleText": "万里工具箱",

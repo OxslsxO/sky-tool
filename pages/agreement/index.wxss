@@ -1,0 +1,45 @@
+.agreement-container {
+  min-height: 100vh;
+  background: #f7f3ea;
+  padding: 20rpx;
+}
+
+.agreement-content {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 40rpx 32rpx;
+}
+
+.agreement-section {
+  margin-bottom: 48rpx;
+}
+
+.agreement-title {
+  display: block;
+  font-size: 40rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 16rpx;
+}
+
+.agreement-date {
+  display: block;
+  font-size: 24rpx;
+  color: #999;
+}
+
+.agreement-section-title {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 20rpx;
+}
+
+.agreement-text {
+  display: block;
+  font-size: 28rpx;
+  line-height: 1.8;
+  color: #444;
+  margin-bottom: 12rpx;
+}

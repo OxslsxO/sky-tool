@@ -6,7 +6,7 @@ const {
   updateUserState,
   addPointsRecord,
 } = require("../../utils/task-store");
-const { ensureWechatLogin } = require("../../utils/page-auth");
+const { isLoggedIn } = require("../../utils/page-auth");
 
 const REDEEM_CODES = {
   "万里第一帅": {
@@ -25,13 +25,10 @@ Page({
     showRedeemModal: false,
     redeemInput: "",
     redeeming: false,
+    isLoggedIn: false,
   },
 
   onShow() {
-    if (!ensureWechatLogin()) {
-      return;
-    }
-
     this.refreshPage();
 
     if (typeof this.getTabBar === "function" && this.getTabBar()) {
@@ -49,6 +46,25 @@ Page({
       favorites: listFavoriteTools(),
       recents: getRecentTools(),
       taskCount: listTasks().length,
+      isLoggedIn: isLoggedIn(),
+    });
+  },
+
+  goLogin() {
+    wx.navigateTo({
+      url: '/pages/login/index',
+    });
+  },
+
+  goPrivacy() {
+    wx.navigateTo({
+      url: '/pages/privacy/index',
+    });
+  },
+
+  goAgreement() {
+    wx.navigateTo({
+      url: '/pages/agreement/index',
     });
   },
 

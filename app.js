@@ -26,21 +26,19 @@ App({
             this._tryCloudRestore(user);
           }, 2000);
         }
-
-        // 快速跳转到首页
-        wx.switchTab({
-          url: '/pages/home/index',
-        });
       } else {
-        console.log("❌ 未登录，跳转登录页");
-        wx.reLaunch({
-          url: '/pages/login/index',
-        });
+        console.log("👤 游客模式，初始化本地数据");
+        seedUserState();
       }
+
+      // 直接跳转到首页，允许游客访问
+      wx.switchTab({
+        url: '/pages/home/index',
+      });
     } catch (error) {
       console.error("❌ 应用启动异常:", error);
-      wx.reLaunch({
-        url: '/pages/login/index',
+      wx.switchTab({
+        url: '/pages/home/index',
       });
     }
   },

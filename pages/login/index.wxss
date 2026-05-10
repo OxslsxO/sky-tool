@@ -259,13 +259,55 @@
   border: none;
 }
 
-.bottom-tip {
-  text-align: center;
+.agree-area {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 32rpx;
 }
 
-.tip-text {
+.agree-checkbox {
+  width: 40rpx;
+  height: 40rpx;
+  border: 2rpx solid #d0c0b0;
+  border-radius: 8rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12rpx;
+  background: #fff;
+}
+
+.agree-checkbox--checked {
+  background: linear-gradient(135deg, #f4a460, #e07b39);
+  border-color: #e07b39;
+}
+
+.agree-checkmark {
   font-size: 24rpx;
-  color: #bcaaa4;
+  color: #fff;
+  font-weight: bold;
+}
+
+.agree-text {
+  font-size: 24rpx;
+  color: #8d6e63;
+}
+
+.agree-link {
+  font-size: 24rpx;
+  color: #e07b39;
+  text-decoration: underline;
+}
+
+.guest-area {
+  margin-top: 20rpx;
+}
+
+.guest-link {
+  font-size: 26rpx;
+  color: #a08070;
 }
 
 .user-info-area {
