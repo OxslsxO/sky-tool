@@ -36,8 +36,6 @@
       </button>
     </view>
 
-    <view class="guest-area">
-      <text class="guest-link" bindtap="goHomeAsGuest">先体验一下</text>
-    </view>
+
   </view>
 </view>
