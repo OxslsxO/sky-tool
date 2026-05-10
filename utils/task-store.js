@@ -381,6 +381,33 @@ function refreshStoredTasks() {
   return next;
 }
 
+function getTodayKey() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+}
+
+function getDailyFreeUsage() {
+  const todayKey = getTodayKey();
+  const data = readStorage(STORAGE_KEYS.dailyFreeUsage, { date: '', tools: {} });
+
+  if (data.date !== todayKey) {
+    const newData = {
+      date: todayKey,
+      tools: {},
+    };
+    writeStorage(STORAGE_KEYS.dailyFreeUsage, newData);
+    return newData;
+  }
+
+  return data;
+}
+
+function canUseFreeQuota(toolId) {
+  const dailyUsage = getDailyFreeUsage();
+  const toolUsage = dailyUsage.tools[toolId];
+  return !toolUsage || toolUsage.count < 1;
+}
+
 function getBillingPreview(tool) {
   // 积分要求为 0 的工具直接免费
   if (tool.points === 0) {
@@ -423,13 +450,15 @@ function getBillingPreview(tool) {
       needUpgrade: true,
     };
   } catch {
-    // 积分要求为 0 的工具直接免费
-    if (tool.points === 0) {
+    // 备用逻辑：检查免费次数
+    const hasFreeQuota = canUseFreeQuota(tool.id);
+    
+    if (hasFreeQuota) {
       return {
         usable: true,
         mode: 'free',
-        text: '免费使用',
-        costText: '免费',
+        text: '本次使用今日免费次数（每个工具每日限1次）',
+        costText: '今日有1次免费',
       };
     }
 
@@ -470,7 +499,7 @@ function commitUsage(tool) {
     }
 
     if (preview.mode === 'free') {
-      const dailyUsage = readStorage(STORAGE_KEYS.dailyFreeUsage, {});
+      const dailyUsage = getDailyFreeUsage();
       if (!dailyUsage.tools) {
         dailyUsage.tools = {};
       }
@@ -981,10 +1010,6 @@ function incrementPhotoIdUsage() {
   };
   writeStorage(STORAGE_KEYS.photoIdStats, nextStats);
   return nextStats;
-}
-
-function getDailyFreeUsage() {
-  return readStorage(STORAGE_KEYS.dailyFreeUsage, { date: '', tools: {} });
 }
 
 function setDailyFreeUsage(data) {
