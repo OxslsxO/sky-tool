@@ -5,6 +5,7 @@ function buildLoginRedirectUrl() {
   return "/pages/login/index";
 }
 
+// 保留登录检查，但只在特定场景使用
 function ensureWechatLogin(options = {}) {
   const getUser = options.getUser || getUserState;
   const user = getUser();

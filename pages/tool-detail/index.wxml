@@ -1,18 +1,28 @@
 <view class="container" wx:if="{{tool}}">
-  <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
-    <view class="hero-left">
-      <text class="hero-title">{{tool.name}}</text>
-      <text class="hero-cost">{{tool.points === 0 ? '免费' : (billing ? billing.costText : tool.points + ' 积分')}}</text>
-    </view>
-    <view class="hero-right" wx:if="{{userState}}">
-      <view class="user-info">
-        <text class="user-info__label">积分</text>
-        <text class="user-info__value">{{userState.points}}</text>
+  <!-- 未登录提示 -->
+  <view class="login-prompt" wx:if="{{!isLoggedIn}}">
+    <view class="login-prompt__icon">🔐</view>
+    <view class="login-prompt__title">登录后使用</view>
+    <view class="login-prompt__desc">此工具需要登录后才能使用</view>
+    <view class="login-prompt__button" bindtap="goToLogin">去登录</view>
+  </view>
+  
+  <!-- 已登录时显示工具内容 -->
+  <view wx:if="{{isLoggedIn}}">
+    <view class="hero direct-hero" style="background: {{tool.heroBackground}};">
+      <view class="hero-left">
+        <text class="hero-title">{{tool.name}}</text>
+        <text class="hero-cost">{{tool.points === 0 ? '免费' : (billing ? billing.costText : tool.points + ' 积分')}}</text>
+      </view>
+      <view class="hero-right" wx:if="{{userState}}">
+        <view class="user-info">
+          <text class="user-info__label">积分</text>
+          <text class="user-info__value">{{userState.points}}</text>
+        </view>
       </view>
     </view>
-  </view>
 
-  <view class="section" wx:if="{{visibleParams && visibleParams.length > 0}}">
+    <view class="section" wx:if="{{visibleParams && visibleParams.length > 0}}">
     <view class="section-head">
       <view>
         <text class="eyebrow">Setup</text>
@@ -846,41 +856,42 @@
     style="width: {{canvasWidth}}px; height: {{canvasHeight}}px;"
   ></canvas>
 
-  <view wx:if="{{showProcessingOverlay}}" class="processing-overlay">
-    <view class="processing-panel">
-      <view class="processing-stage">
-        <view class="processing-orbit">
-          <view class="processing-orbit__ring"></view>
-          <view class="processing-orbit__ring processing-orbit__ring--second"></view>
-          <view class="processing-orbit__core">
-            <view class="processing-core__bar processing-core__bar--one"></view>
-            <view class="processing-core__bar processing-core__bar--two"></view>
-            <view class="processing-core__bar processing-core__bar--three"></view>
+    <view wx:if="{{showProcessingOverlay}}" class="processing-overlay">
+      <view class="processing-panel">
+        <view class="processing-stage">
+          <view class="processing-orbit">
+            <view class="processing-orbit__ring"></view>
+            <view class="processing-orbit__ring processing-orbit__ring--second"></view>
+            <view class="processing-orbit__core">
+              <view class="processing-core__bar processing-core__bar--one"></view>
+              <view class="processing-core__bar processing-core__bar--two"></view>
+              <view class="processing-core__bar processing-core__bar--three"></view>
+            </view>
+            <view class="processing-chip processing-chip--one"></view>
+            <view class="processing-chip processing-chip--two"></view>
+            <view class="processing-chip processing-chip--three"></view>
           </view>
-          <view class="processing-chip processing-chip--one"></view>
-          <view class="processing-chip processing-chip--two"></view>
-          <view class="processing-chip processing-chip--three"></view>
         </view>
-      </view>
-      <text class="processing-title">{{processingTitle || '处理中'}}</text>
-      <text class="processing-status">{{processingStatus}}</text>
-      <view class="processing-progress-wrap">
-        <view class="processing-progress-track">
-          <view class="processing-progress-fill" style="width: {{processingDisplayProgress}}%;"></view>
-          <view class="processing-progress-spark" style="left: {{processingDisplayProgress}}%;"></view>
+        <text class="processing-title">{{processingTitle || '处理中'}}</text>
+        <text class="processing-status">{{processingStatus}}</text>
+        <view class="processing-progress-wrap">
+          <view class="processing-progress-track">
+            <view class="processing-progress-fill" style="width: {{processingDisplayProgress}}%;"></view>
+            <view class="processing-progress-spark" style="left: {{processingDisplayProgress}}%;"></view>
+          </view>
+          <view class="processing-progress-row">
+            <text class="processing-progress-label">进度</text>
+            <text class="processing-progress-text">{{processingDisplayProgressText}}%</text>
+          </view>
         </view>
-        <view class="processing-progress-row">
-          <text class="processing-progress-label">进度</text>
-          <text class="processing-progress-text">{{processingDisplayProgressText}}%</text>
-        </view>
-      </view>
-      <view class="processing-actions">
-        <view class="processing-btn-background" bindtap="minimizeToBackground">
-          <text class="processing-btn-background__icon">⬇</text>
-          <text class="processing-btn-background__text">后台运行</text>
+        <view class="processing-actions">
+          <view class="processing-btn-background" bindtap="minimizeToBackground">
+            <text class="processing-btn-background__icon">⬇</text>
+            <text class="processing-btn-background__text">后台运行</text>
+          </view>
         </view>
       </view>
     </view>
+    <bg-task-float />
   </view>
-  <bg-task-float />
 </view>

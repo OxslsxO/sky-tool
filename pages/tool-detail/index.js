@@ -42,7 +42,7 @@ const { getGroupUnits, convertValue } = require("../../utils/unit-converter");
 const { formatFileSize } = require("../../utils/format");
 const { getPreferredRemoteFileUrl } = require("../../utils/remote-file");
 const { hasBackendService } = require("../../services/backend-tools");
-const { ensureWechatLogin } = require("../../utils/page-auth");
+const { ensureWechatLogin, isLoggedIn } = require("../../utils/page-auth");
 const logger = require("../../utils/logger");
 const {
   requestJson,
@@ -715,13 +715,11 @@ Page({
     userState: null,
     selectedPayment: "points", // 默认选择积分支付
     unitConvertResult: "", // 单位换算实时结果
+    isLoggedIn: false, // 是否登录
   },
 
   onLoad(options) {
-    if (!ensureWechatLogin()) {
-      return;
-    }
-
+    // 不再强制重定向，而是在页面内显示登录提示
     logger.log("[tool-detail] onLoad", options);
     const tool = getToolById(options.id);
 
@@ -758,6 +756,7 @@ Page({
       backendPickerTitle: this.getBackendPickerTitle(tool.id),
       backendPickerButtonText: this.getBackendPickerButtonText(tool.id),
       userState: getUserState(),
+      isLoggedIn: isLoggedIn(),
       directPriceDisplay,
       ...viewState,
       ...(photoIdSession || {}),
@@ -799,6 +798,13 @@ Page({
       toolId: this.data.tool ? this.data.tool.id : "",
       photoIdResultReady: this.data.photoIdResultReady,
     });
+    
+    // 更新登录状态
+    this.setData({
+      isLoggedIn: isLoggedIn(),
+      userState: getUserState(),
+    });
+    
     const { tool, photoIdResultReady } = this.data;
     if (!tool || tool.id !== "photo-id" || photoIdResultReady) {
       return;
@@ -808,6 +814,13 @@ Page({
     if (photoIdSession && photoIdSession.photoIdResultReady) {
       this.setData(photoIdSession);
     }
+  },
+
+  // 跳转到登录页
+  goToLogin() {
+    wx.navigateTo({
+      url: '/pages/login/index',
+    });
   },
 
   onHide() {

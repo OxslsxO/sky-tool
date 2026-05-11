@@ -34,6 +34,12 @@
         <text class="btn-icon">💬</text>
         微信登录
       </button>
+      
+      <view class="skip-area">
+        <view class="skip-btn" bindtap="goHomeAsGuest">
+          <text class="skip-text">跳过，先体验</text>
+        </view>
+      </view>
     </view>
 
 

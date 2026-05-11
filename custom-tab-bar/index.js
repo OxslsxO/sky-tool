@@ -1,6 +1,3 @@
-const { isWechatIdentity } = require("../utils/auth-session");
-const { getUserState } = require("../utils/task-store");
-
 Component({
   data: {
     selected: 0,
@@ -52,12 +49,8 @@ Component({
     switchTab(e) {
       const data = e.currentTarget.dataset;
       const url = data.path;
-
-      if (!isWechatIdentity(getUserState())) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
-
+      
+      // 允许游客正常切换标签页，不强制登录
       wx.switchTab({
         url: url
       });

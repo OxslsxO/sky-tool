@@ -380,3 +380,30 @@
   background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
   box-shadow: 0 8rpx 24rpx rgba(76, 175, 80, 0.35);
 }
+
+.skip-area {
+  width: 100%;
+  margin-top: 40rpx;
+  display: flex;
+  justify-content: center;
+}
+
+.skip-btn {
+  padding: 20rpx 40rpx;
+  border-radius: 40rpx;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10rpx);
+  border: 2rpx solid rgba(224, 123, 57, 0.3);
+  transition: all 0.2s ease;
+}
+
+.skip-btn:active {
+  transform: scale(0.98);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.skip-text {
+  font-size: 28rpx;
+  color: #8d6e63;
+  font-weight: 500;
+}
