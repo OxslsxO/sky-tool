@@ -750,7 +750,10 @@ function buildTaskResult(task, tool) {
     "audio-convert": "音视频格式已转换，适合不同设备和场景使用。",
   };
 
-  return resultMap[tool.id] || task.resultDetail || task.resultText;
+  if (tool && tool.id && resultMap[tool.id]) {
+    return resultMap[tool.id];
+  }
+  return task.resultDetail || task.resultText || "处理完成";
 }
 
 function isRemotePath(pathname) {
