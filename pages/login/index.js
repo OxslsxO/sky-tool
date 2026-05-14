@@ -81,6 +81,12 @@ Page({
     console.log('🔄 开始微信登录...');
 
     try {
+      // 第一步：立即获取本地用户状态，检查是否已有登录信息
+      const existingUser = getUserState();
+      if (existingUser && existingUser.openid && existingUser.authMode === 'wechat') {
+        console.log('ℹ️ 发现本地已有登录信息，尝试快速登录');
+      }
+
       const loginRes = await new Promise((resolve, reject) => {
         wx.login({
           success: resolve,
@@ -96,7 +102,8 @@ Page({
         return;
       }
 
-      const result = await new Promise((resolve, reject) => {
+      // 先发送登录请求
+      const resultPromise = new Promise((resolve, reject) => {
         wx.request({
           url: buildServiceUrl("/api/auth/login"),
           method: "POST",
@@ -116,6 +123,12 @@ Page({
         });
       });
 
+      // 同时检查本地数据
+      const hasLocalData = this._hasLocalUserData();
+
+      // 等待登录响应
+      const result = await resultPromise;
+
       console.log('📥 后端登录响应:', result);
 
       if (result.statusCode === 200 && result.data.ok) {
@@ -125,28 +138,32 @@ Page({
         console.log('✅ 登录成功！用户信息:', user);
         console.log('🔑 真实 openid:', user.openid);
 
-        const hasLocalData = this._hasLocalUserData();
-
+        // 根据是否有本地数据选择登录策略
         if (hasLocalData) {
           await this._loginWithLocalData(userId, user, avatarUrl, nickname);
         } else {
           await this._loginWithCloudData(userId, user, avatarUrl, nickname);
         }
 
-        const currentTasks = getRawTasks();
-        if (currentTasks.length === 0) {
-          console.log('📝 本地没有任务数据，初始化演示数据...');
-          seedMockTasks();
-        }
+        // 异步检查是否需要初始化演示数据，不阻塞登录流程
+        setTimeout(() => {
+          const currentTasks = getRawTasks();
+          if (currentTasks.length === 0) {
+            console.log('📝 本地没有任务数据，初始化演示数据...');
+            seedMockTasks();
+          }
+        }, 0);
 
+        // 快速返回首页，缩短等待时间
         wx.showToast({
           title: '登录成功',
-          icon: 'success'
+          icon: 'success',
+          duration: 800
         });
 
         setTimeout(() => {
           this.goHome();
-        }, 1000);
+        }, 800);
       } else {
         throw new Error(result.data?.message || '登录失败');
       }
@@ -174,6 +191,7 @@ Page({
     const currentUser = getUserState();
     const isNewUser = !currentUser.openid;
 
+    // 立即更新用户状态，不等待云端数据
     updateUserState({
       userId: userId,
       openid: backendUser.openid,
@@ -196,55 +214,82 @@ Page({
       });
     }
 
-    let cloudDataApplied = false;
+    // 确保认证信息正确
+    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
 
+    // 异步拉取云端数据，不阻塞登录流程
+    this._asyncFetchCloudData(userId);
+  },
+
+  async _asyncFetchCloudData(userId) {
     try {
-      console.log('📡 从后端拉取用户状态...');
-      const stateResult = await fetchClientState({ userId });
+      console.log('📡 异步从后端拉取用户状态...');
+      const stateResult = await Promise.race([
+        fetchClientState({ userId }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+      ]);
 
       if (stateResult && stateResult.ok && stateResult.state) {
-        console.log('✅ 从后端拉取到用户状态，积分:', stateResult.state.user?.points);
+        console.log('✅ 从后端拉取到用户状态');
         applyRemoteState(stateResult.state, { cloudFirst: true });
-        cloudDataApplied = true;
+      } else {
+        throw new Error('invalid response');
       }
-    } catch (fetchErr) {
-      console.warn('⚠️ 拉取云端状态失败:', fetchErr);
-    }
-
-    if (!cloudDataApplied) {
+    } catch (err) {
+      console.warn('⚠️ 拉取云端状态失败，尝试同步:', err);
       try {
-        console.log('📤 尝试通过同步获取云端数据...');
-        const syncResult = await syncClientState({
-          ...getSyncSnapshot(),
-          userId,
-          preferRemote: true,
-        });
+        const syncResult = await Promise.race([
+          syncClientState({
+            ...getSyncSnapshot(),
+            userId,
+            preferRemote: true,
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ]);
 
         if (syncResult && syncResult.ok && syncResult.state) {
           console.log('✅ 从同步响应中恢复云端数据');
           applyRemoteState(syncResult.state, { cloudFirst: true });
         }
       } catch (syncErr) {
-        console.warn('⚠️ 同步获取云端数据失败:', syncErr);
+        console.warn('⚠️ 同步获取云端数据也失败:', syncErr);
       }
     }
-
-    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
   },
 
   async _loginWithLocalData(userId, backendUser, avatarUrl, nickname) {
     console.log('📦 本地有数据，合并云端数据...');
 
-    const localSnapshot = getSyncSnapshot();
+    // 立即更新用户状态，不等待云端数据
+    updateUserState({
+      userId: userId,
+      openid: backendUser.openid,
+      nickname: backendUser.nickname || nickname || '微信用户',
+      avatarUrl: backendUser.avatarUrl || backendUser.avatar || avatarUrl,
+      avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl,
+      phoneNumber: backendUser.phoneNumber || '',
+      authMode: 'wechat',
+      lastLoginAt: new Date().toISOString(),
+    });
 
+    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
+
+    // 异步同步数据到云端，不阻塞登录流程
+    this._asyncSyncLocalDataToCloud(userId, backendUser, avatarUrl, nickname);
+  },
+
+  async _asyncSyncLocalDataToCloud(userId, backendUser, avatarUrl, nickname) {
     let cloudDataApplied = false;
 
     try {
-      console.log('📡 先从后端拉取用户状态...');
-      const stateResult = await fetchClientState({ userId });
+      console.log('📡 异步从后端拉取用户状态...');
+      const stateResult = await Promise.race([
+        fetchClientState({ userId }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+      ]);
 
       if (stateResult && stateResult.ok && stateResult.state) {
-        console.log('✅ 从后端拉取到用户状态，云端积分:', stateResult.state.user?.points);
+        console.log('✅ 从后端拉取到用户状态');
         applyRemoteState(stateResult.state, { cloudFirst: true });
         cloudDataApplied = true;
       }
@@ -252,29 +297,17 @@ Page({
       console.warn('⚠️ 拉取云端状态失败:', fetchErr);
     }
 
-    if (!cloudDataApplied) {
-      updateUserState({
-        userId: userId,
-        openid: backendUser.openid,
-        nickname: backendUser.nickname || nickname || '微信用户',
-        avatarUrl: backendUser.avatarUrl || backendUser.avatar || avatarUrl,
-        avatar: backendUser.avatar || backendUser.avatarUrl || avatarUrl,
-        phoneNumber: backendUser.phoneNumber || '',
-        authMode: 'wechat',
-        lastLoginAt: new Date().toISOString(),
-      });
-    }
-
-    this._ensureAuthInfo(backendUser, avatarUrl, nickname);
-
     try {
-      console.log('📤 同步本地数据到云端...');
+      console.log('📤 异步同步本地数据到云端...');
       const currentSnapshot = getSyncSnapshot();
-      const syncResult = await syncClientState({
-        ...currentSnapshot,
-        userId,
-        preferRemote: false,
-      });
+      const syncResult = await Promise.race([
+        syncClientState({
+          ...currentSnapshot,
+          userId,
+          preferRemote: false,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+      ]);
 
       if (!cloudDataApplied && syncResult && syncResult.ok && syncResult.state) {
         console.log('✅ 从同步响应中恢复云端数据');

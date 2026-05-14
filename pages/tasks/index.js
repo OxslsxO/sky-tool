@@ -1,8 +1,10 @@
-const { getRawTasks, getTaskById, getTaskDashboard } = require("../../utils/task-store");
+const { getRawTasks, getTaskById, getTaskDashboard, cleanTasksForCurrentUser } = require("../../utils/task-store");
 const { getToolById } = require("../../data/mock");
 const { ensureWechatLogin } = require("../../utils/page-auth");
 
 function getTaskListForDisplay() {
+  // 清理不属于当前用户的任务
+  cleanTasksForCurrentUser();
   const rawTasks = getRawTasks();
   const now = Date.now();
   

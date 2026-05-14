@@ -294,8 +294,39 @@ function getRecentTools() {
   return getToolsByIds(getRecentToolIds());
 }
 
-function getRawTasks() {
+function getAllRawTasks() {
   return refreshStoredTasks();
+}
+
+// 清理不属于当前用户的任务
+function cleanTasksForCurrentUser() {
+  const allTasks = getAllRawTasks();
+  const user = getUserState();
+  const currentUserId = user.userId || user.openid || 'guest';
+  
+  // 只保留属于当前用户的任务，或者无 userId 的任务（向后兼容）
+  const filteredTasks = allTasks.filter(task => {
+    if (!task.userId) return true;
+    return task.userId === currentUserId;
+  });
+  
+  if (filteredTasks.length !== allTasks.length) {
+    console.log(`🧹 清理任务：从 ${allTasks.length} 个减少到 ${filteredTasks.length} 个`);
+    saveTasks(filteredTasks, { silent: true });
+  }
+  
+  return filteredTasks;
+}
+
+function getRawTasks() {
+  const allTasks = getAllRawTasks();
+  const user = getUserState();
+  const currentUserId = user.userId || user.openid || 'guest';
+  
+  return allTasks.filter(task => {
+    if (!task.userId) return true;
+    return task.userId === currentUserId;
+  });
 }
 
 function saveTasks(tasks, options = {}) {
@@ -314,12 +345,19 @@ function getTaskSortTime(task) {
   return Number(task && (task.updatedAt || task.createdAt)) || 0;
 }
 
-function mergeTaskLists(localTasks, remoteTasks) {
+function mergeTaskLists(localTasks, remoteTasks, currentUserId) {
   const taskMap = new Map();
 
   [].concat(localTasks || [], remoteTasks || []).forEach((task) => {
     if (!task || !task.id) {
       return;
+    }
+
+    // 过滤不属于当前用户的任务
+    if (currentUserId) {
+      if (task.userId && task.userId !== currentUserId) {
+        return;
+      }
     }
 
     const stampedTask = stampTask(task);
@@ -827,10 +865,15 @@ function getTaskById(taskId) {
 }
 
 function saveTaskEntry(task) {
-  const tasks = [task].concat(getRawTasks());
+  const user = getUserState();
+  const taskWithUserId = {
+    ...task,
+    userId: user.userId || user.openid || 'guest'
+  };
+  const tasks = [taskWithUserId].concat(getRawTasks());
   saveTasks(tasks.slice(0, 40));
   touchRecentTool(task.toolId);
-  const normalizedTask = normalizeTask(task);
+  const normalizedTask = normalizeTask(taskWithUserId);
   return normalizedTask;
 }
 
@@ -1022,7 +1065,7 @@ function setDailyFreeUsage(data) {
 function getSyncSnapshot() {
   return {
     user: getUserState(),
-    tasks: getRawTasks(),
+    tasks: getAllRawTasks(),
     favorites: getFavorites(),
     recentToolIds: getRecentToolIds(),
     pointsRecords: getPointsRecords(),
@@ -1153,6 +1196,7 @@ function applyRemoteState(state, options = {}) {
   const snapshot = state || {};
   const currentUser = readStorage(STORAGE_KEYS.user, null);
   const localHasRealData = currentUser && (currentUser.points > 0 || currentUser.authMode === 'wechat');
+  const currentUserId = currentUser && (currentUser.userId || currentUser.openid) || null;
   
   if (snapshot.user) {
     if (currentUser && localHasRealData && !cloudFirst) {
@@ -1185,7 +1229,15 @@ function applyRemoteState(state, options = {}) {
   }
   
   if (Array.isArray(snapshot.tasks) && snapshot.tasks.length > 0) {
-    saveTasks(mergeTaskLists(getRawTasks(), snapshot.tasks), { silent: true });
+    // 过滤云端任务，只保留属于当前用户的任务
+    const filteredRemoteTasks = snapshot.tasks.filter(task => {
+      if (!currentUserId) return true;
+      if (!task.userId) return false;
+      return task.userId === currentUserId;
+    });
+    
+    // 合并时使用 getAllRawTasks 避免重复过滤
+    saveTasks(mergeTaskLists(getAllRawTasks(), filteredRemoteTasks, currentUserId), { silent: true });
   }
 
   if (Array.isArray(snapshot.favorites) && snapshot.favorites.length > 0) {
@@ -1259,6 +1311,8 @@ module.exports = {
   getRecentToolIds,
   setRecentToolIds,
   getRawTasks,
+  getAllRawTasks,
+  cleanTasksForCurrentUser,
   hasDirtySyncState,
   getSyncDirtyStamp,
   clearSyncDirty,

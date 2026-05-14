@@ -102,20 +102,12 @@ const BACKGROUND_COLOR_MAP = {
   "淡绿": "#90ee90",
 };
 
-const MODEL_CANDIDATES = [
-  {
-    key: "u2net-human-seg",
-    url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx",
-    fileName: "u2net_human_seg.onnx",
-    inputSize: 320,
-  },
-  {
-    key: "birefnet-portrait",
-    url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-portrait-epoch_150.onnx",
-    fileName: "BiRefNet-portrait-epoch_150.onnx",
-    inputSize: 1024,
-  },
-];
+const MODEL_CANDIDATES = [{
+  key: "birefnet-portrait",
+  url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-portrait-epoch_150.onnx",
+  fileName: "BiRefNet-portrait-epoch_150.onnx",
+  inputSize: 1024,
+}];
 const MODEL_MEAN = [0.485, 0.456, 0.406];
 const MODEL_STD = [0.229, 0.224, 0.225];
 const OPAQUE_BOUNDS_THRESHOLD = 40;
@@ -235,92 +227,53 @@ async function getSession(config) {
     return null;
   }
 
-  // 检查是否强制禁用模型（用于内存受限环境如 Render）
   if (process.env.PHOTO_ID_DISABLE_MODEL === 'true') {
     console.log("[photo-id] getSession: 模型被环境变量禁用");
     return null;
   }
 
-  // 优先使用项目内的模型目录（Docker 构建时下载的）
+  // 🔥 强制清空旧缓存，优先加载新模型
+  sessionCache.clear();
+
   const projectModelsDir = path.join(__dirname, "..", "storage", "models");
-  console.log(`[photo-id] getSession: 检查项目模型目录 ${projectModelsDir}`);
-  
-  // 只有项目内没有模型时才使用运行时目录
-  let modelsDir;
-  if (fs.existsSync(projectModelsDir)) {
-    const files = fs.readdirSync(projectModelsDir);
-    if (files.length > 0) {
-      modelsDir = projectModelsDir;
-      console.log(`[photo-id] getSession: 使用项目模型目录 ${modelsDir}`);
-    }
+  let modelsDir = fs.existsSync(projectModelsDir) && fs.readdirSync(projectModelsDir).length > 0 
+    ? projectModelsDir 
+    : path.join(config.tempDir, "..", "models");
+
+  // 🔥 强制只尝试 BiRefNet 模型（排除u2net干扰）
+  const biRefModel = MODEL_CANDIDATES[0];
+  console.log(`[photo-id] getSession: 强制尝试 BiRefNet 模型 ${biRefModel.key}`);
+
+  try {
+    const modelPath = await ensureModelFile(modelsDir, biRefModel);
+    console.log(`[photo-id] getSession: 模型文件就绪 ${modelPath}`);
+
+    const sessionOptions = {
+      executionProviders: ['cpu'],
+      intraOpNumThreads: 1,
+      interOpNumThreads: 1,
+      graphOptimizationLevel: 'all', // 🔥 开启全优化，提升大模型推理稳定性
+    };
+    
+    const sessionCreatePromise = ort.InferenceSession.create(modelPath, sessionOptions);
+    const timeoutPromise = new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => reject(new Error("Model loading timeout")), 120000);
+      timeoutId.unref?.();
+      sessionCreatePromise.finally(() => clearTimeout(timeoutId));
+    });
+
+    const session = await Promise.race([sessionCreatePromise, timeoutPromise]);
+    console.log(`[photo-id] getSession: 会话创建成功 ${biRefModel.key}`);
+
+    const sessionResult = { session, model: biRefModel };
+    sessionCache.set(biRefModel.key, sessionResult);
+
+    return sessionResult;
+  } catch (error) {
+    console.error(`[photo-id] getSession: BiRefNet 加载失败`, error.message || error);
+    console.warn(`[photo-id] getSession: 模型加载失败，直接返回 null`);
+    return null;
   }
-  
-  if (!modelsDir) {
-    modelsDir = path.join(config.tempDir, "..", "models");
-    console.log(`[photo-id] getSession: 使用运行时模型目录 ${modelsDir}`);
-  }
-
-  // 检查缓存
-  for (let index = 0; index < MODEL_CANDIDATES.length; index += 1) {
-    const model = MODEL_CANDIDATES[index];
-    const cacheKey = model.key;
-    if (sessionCache.has(cacheKey)) {
-      console.log(`[photo-id] getSession: 使用缓存的会话 ${model.key}`);
-      return sessionCache.get(cacheKey);
-    }
-  }
-
-  for (let index = 0; index < MODEL_CANDIDATES.length; index += 1) {
-    const model = MODEL_CANDIDATES[index];
-    console.log(`[photo-id] getSession: 尝试模型 ${model.key}`);
-
-    try {
-      // 确保模型文件存在
-      const modelPath = await ensureModelFile(modelsDir, model);
-      console.log(`[photo-id] getSession: 模型文件就绪 ${modelPath}`);
-
-      // 创建带有超时的会话
-      console.log(`[photo-id] getSession: 创建会话 ${model.key}`);
-      
-      // 使用更长的超时时间和更保守的内存设置
-      const sessionOptions = {
-        // 使用 CPU 执行提供程序，避免 GPU 内存问题
-        executionProviders: ['cpu'],
-        // 限制线程数以减少内存使用
-        intraOpNumThreads: 1,
-        interOpNumThreads: 1,
-        // 禁用内存优化（在内存受限环境中）
-        graphOptimizationLevel: 'basic',
-      };
-      
-      const sessionCreatePromise = ort.InferenceSession.create(modelPath, sessionOptions);
-      
-      // 60秒超时（Render 等环境可能需要更长时间）
-      const timeoutPromise = new Promise((_, reject) => {
-        const timeoutId = setTimeout(() => reject(new Error(`Model ${model.key} loading timeout`)), 60000);
-        timeoutId.unref?.();
-        sessionCreatePromise.finally(() => clearTimeout(timeoutId));
-      });
-
-      const session = await Promise.race([sessionCreatePromise, timeoutPromise]);
-      console.log(`[photo-id] getSession: 会话创建成功 ${model.key}`);
-
-      const sessionResult = { session, model };
-      sessionCache.set(model.key, sessionResult);
-
-      return sessionResult;
-    } catch (error) {
-      console.error(`[photo-id] getSession: 模型 ${model.key} 失败`, error.message || error);
-      if (index === MODEL_CANDIDATES.length - 1) {
-        console.warn(`[photo-id] getSession: 所有模型都失败，返回 null 降级处理`);
-        return null;
-      }
-      console.log(`[photo-id] getSession: 尝试下一个模型`);
-    }
-  }
-
-  console.log("[photo-id] getSession: 没有可用的模型");
-  return null;
 }
 
 function getSessionInputNames(session) {
@@ -446,30 +399,14 @@ function buildNormalizedAlpha(source, count) {
 }
 
 function refineAlphaBuffer(alphaBuffer) {
-  const refined = Buffer.alloc(alphaBuffer.length);
-
-  for (let index = 0; index < alphaBuffer.length; index += 1) {
-    const value = alphaBuffer[index] / 255;
-    let next = value;
-
-    // 暴力收紧边缘：彻底消除白色半透明留白
-    if (value <= 0.1) {
-      // 低于10%透明度直接变全透明，消灭白边
-      next = 0;
-    } else if (value >= 0.9) {
-      // 高于90%透明度直接变全实色
-      next = 1;
-    } else {
-      // 中间值平滑过渡，无白色缝隙
-      const normalized = (value - 0.1) / 0.8;
-      next = normalized * normalized * (3 - 2 * normalized);
-    }
-
-    refined[index] = Math.max(0, Math.min(255, Math.round(next * 255)));
+  const refined = Buffer.from(alphaBuffer);
+  for (let i = 0; i < refined.length; i++) {
+    const val = refined[i];
+    // 仅清除纯背景噪点，保留所有发丝
+    refined[i] = val < 5 ? 0 : val;
   }
-
   return refined;
-}
+} 
 
 function smoothstep(edge0, edge1, value) {
   if (value <= edge0) {
@@ -540,6 +477,7 @@ async function resizeSubjectBuffer(inputBuffer, width, height) {
 }
 
 async function applyAlphaMask(inputBuffer, alphaBuffer, width, height) {
+  // 创建 alpha 遮罩 - 保留原始 alpha 值
   const rgbaMask = Buffer.alloc(width * height * 4);
   for (let index = 0; index < width * height; index += 1) {
     const offset = index * 4;
@@ -559,6 +497,7 @@ async function applyAlphaMask(inputBuffer, alphaBuffer, width, height) {
     .png()
     .toBuffer();
 
+  // 直接应用遮罩
   const maskedBuffer = await sharp(inputBuffer)
     .ensureAlpha()
     .composite([
@@ -665,56 +604,58 @@ async function estimateInputBackgroundColor(inputBuffer) {
   return estimate ? estimate.color : { red: 255, green: 255, blue: 255 };
 }
 
+async function featherSubjectEdges(buffer) {
+  return sharp(buffer)
+    .blur(0.5) // 极轻模糊，自然过渡
+    .png()
+    .toBuffer();
+}
+
+// 5. 禁用所有暴力颜色修复（防止染背景色）
+async function finalEdgeRepairAfterComposite(buffer) {
+  return buffer; // 直接返回，不修改
+}
+
 async function decontaminateSubjectBuffer(subjectBuffer, backgroundColor) {
-  console.log("[photo-id] decontaminateSubjectBuffer: 强力清除白边");
+  console.log("[photo-id] decontaminateSubjectBuffer: 发丝优化版颜色溢出校正");
   const { data, info } = await sharp(subjectBuffer)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
   const channels = info.channels;
+  const bgR = Math.round(backgroundColor.red);
+  const bgG = Math.round(backgroundColor.green);
+  const bgB = Math.round(backgroundColor.blue);
 
-  // 暴力去除白色背景污染，直接抹除边缘白边
-  for (let index = 0; index < info.width * info.height; index += 1) {
+  for (let index = 0; index < info.width * info.height; index++) {
     const offset = index * channels;
     const alpha = data[offset + 3] / 255;
 
-    // 完全透明像素直接清空，不留白色
-    if (alpha <= 0.1) {
-      data[offset] = 0;
-      data[offset + 1] = 0;
-      data[offset + 2] = 0;
-      data[offset + 3] = 0;
+    // 完全保留发丝半透明，不修改Alpha值
+    if (alpha <= 0.01) {
+      data[offset] = data[offset+1] = data[offset+2] = data[offset+3] = 0;
       continue;
     }
+    if (alpha >= 0.98) continue;
 
-    // 收紧Alpha，消除半透明白边
-    const tightenedAlpha = smoothstep(0.2, 0.9, alpha);
-    if (tightenedAlpha <= 0) {
-      data[offset] = 0;
-      data[offset + 1] = 0;
-      data[offset + 2] = 0;
-      data[offset + 3] = 0;
-      continue;
-    }
+    // 仅校正颜色，不降低Alpha（核心：保留发丝）
+    const r = data[offset], g = data[offset+1], b = data[offset+2];
+    const fgR = (r - bgR * (1 - alpha)) / alpha;
+    const fgG = (g - bgG * (1 - alpha)) / alpha;
+    const fgB = (b - bgB * (1 - alpha)) / alpha;
 
-    // 彻底清除背景白色/纯色污染
-    for (let channel = 0; channel < 3; channel += 1) {
-      const source = data[offset + channel];
-      const bg = channel === 0 ? backgroundColor.red : channel === 1 ? backgroundColor.green : backgroundColor.blue;
-      // 100%去除背景色，不留白色缝隙
-      const recovered = (source - bg * (1 - tightenedAlpha)) / Math.max(tightenedAlpha, 1e-3);
-      data[offset + channel] = Math.max(0, Math.min(255, Math.round(recovered)));
-    }
-
-    data[offset + 3] = Math.round(tightenedAlpha * 255);
+    // 安全裁剪颜色，不修改Alpha
+    data[offset] = Math.max(0, Math.min(255, Math.round(fgR)));
+    data[offset+1] = Math.max(0, Math.min(255, Math.round(fgG)));
+    data[offset+2] = Math.max(0, Math.min(255, Math.round(fgB)));
   }
 
-  // 轻微模糊边缘，让过渡自然，无白边
+  // 轻微柔化，贴合新背景
   const { data: softened } = await sharp(data, {
     raw: { width: info.width, height: info.height, channels },
-  }).blur(0.3).raw().toBuffer({ resolveWithObject: true });
+  }).blur(0.2).raw().toBuffer({ resolveWithObject: true });
 
-  return sharp(softened, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
+  return sharp(softened, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
 function shouldTreatAsBackground(data, offset, estimate, thresholdSquared) {
@@ -969,42 +910,30 @@ async function removeUniformBackground(inputBuffer) {
 }
 
 async function removeBackgroundWithModel(config, inputBuffer) {
-  console.log("[photo-id] removeBackgroundWithModel: 开始");
+  console.log("[photo-id] removeBackgroundWithModel: 开始（BiRefNet专用版）");
   
-  // 先获取图片信息
   let sourceMetadata;
   try {
     sourceMetadata = await sharp(inputBuffer).metadata();
   } catch (error) {
-    console.warn("[photo-id] removeBackgroundWithModel: 获取图片元数据失败", error.message || error);
+    console.warn("[photo-id] removeBackgroundWithModel: 获取元数据失败", error);
     return null;
   }
   
-  // ⚠️ 关键优化：先大幅缩小图片尺寸，减少内存使用！
+  // 🔥 降低输入图片尺寸，避免BiRefNet推理超时
   let workBuffer = inputBuffer;
-  let workScale = 1;
-  const MAX_SIZE = parseInt(process.env.PHOTO_ID_MAX_SIZE || '800', 10); // 从环境变量读取，默认 800px
+  const MAX_SIZE = 1024; // 和BiRefNet输入尺寸一致
   if (sourceMetadata.width > MAX_SIZE || sourceMetadata.height > MAX_SIZE) {
-    console.log(`[photo-id] removeBackgroundWithModel: 图片尺寸 ${sourceMetadata.width}x${sourceMetadata.height} 太大，先缩小到 ${MAX_SIZE}px 内`);
-    workScale = Math.min(MAX_SIZE / sourceMetadata.width, MAX_SIZE / sourceMetadata.height);
+    console.log(`[photo-id] 图片尺寸过大，缩小到 ${MAX_SIZE}px`);
     workBuffer = await sharp(inputBuffer)
-      .resize({ width: Math.round(sourceMetadata.width * workScale), height: Math.round(sourceMetadata.height * workScale), fit: 'inside', withoutEnlargement: false })
+      .resize({ width: MAX_SIZE, height: MAX_SIZE, fit: 'inside', withoutEnlargement: false })
       .png()
       .toBuffer();
-    console.log(`[photo-id] removeBackgroundWithModel: 图片已缩小，缩放比例 ${workScale.toFixed(3)}`);
   }
   
-  console.log("[photo-id] removeBackgroundWithModel: 获取会话");
-  let sessionBundle;
-  try {
-    sessionBundle = await getSession(config);
-  } catch (error) {
-    console.error("[photo-id] removeBackgroundWithModel: 获取会话失败", error.message || error);
-    return null;
-  }
-  
+  const sessionBundle = await getSession(config);
   if (!sessionBundle) {
-    console.warn("[photo-id] removeBackgroundWithModel: 模型不可用，返回 null");
+    console.warn("[photo-id] removeBackgroundWithModel: 模型会话不可用");
     return null;
   }
   console.log("[photo-id] removeBackgroundWithModel: 会话获取成功");
@@ -1013,29 +942,27 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   
   let tensor;
   try {
-    console.log("[photo-id] removeBackgroundWithModel: 标准化图像");
-    tensor = await normalizeImageForModel(session, model, workBuffer); // 使用缩小后的图片
+    console.log("[photo-id] 开始图像标准化（BiRefNet专用）");
+    tensor = await normalizeImageForModel(session, model, workBuffer);
   } catch (error) {
-    console.error("[photo-id] removeBackgroundWithModel: 图像标准化失败", error.message || error);
+    console.error("[photo-id] 图像标准化失败", error);
     return null;
   }
 
-  console.log("[photo-id] removeBackgroundWithModel: 运行模型推理");
-  
+  console.log("[photo-id] 运行模型推理（超时120秒）");
   let result;
   try {
-    // 添加推理超时 - 在 Render 等内存受限环境中可能需要更长时间
     const runPromise = session.run({ [getInputShape(session, model).inputName]: tensor });
     const timeoutPromise = new Promise((_, reject) => {
-      const runTimeoutId = setTimeout(() => reject(new Error("Model inference timeout")), 120000);
-      runTimeoutId.unref?.();
-      runPromise.finally(() => clearTimeout(runTimeoutId));
+      const timeoutId = setTimeout(() => reject(new Error("Model inference timeout")), 120000);
+      timeoutId.unref?.();
+      runPromise.finally(() => clearTimeout(timeoutId));
     });
 
     result = await Promise.race([runPromise, timeoutPromise]);
-    console.log("[photo-id] removeBackgroundWithModel: 模型推理完成");
+    console.log("[photo-id] 模型推理完成");
   } catch (error) {
-    console.error("[photo-id] removeBackgroundWithModel: 模型推理失败", error.message || error);
+    console.error("[photo-id] 模型推理失败", error);
     return null;
   }
 
@@ -1045,20 +972,16 @@ async function removeBackgroundWithModel(config, inputBuffer) {
   const maskWidth = dimensions[dimensions.length - 1];
 
   if (!maskHeight || !maskWidth) {
-    const error = new Error("Photo-id model output dimensions are invalid");
-    error.code = "PHOTO_ID_MODEL_OUTPUT_INVALID";
-    throw error;
+    console.error("[photo-id] 模型输出尺寸无效");
+    return null;
   }
-  console.log(`[photo-id] removeBackgroundWithModel: 掩码尺寸 ${maskWidth}x${maskHeight}`);
+  console.log(`[photo-id] 掩码尺寸 ${maskWidth}x${maskHeight}`);
 
-  console.log("[photo-id] removeBackgroundWithModel: 处理 alpha 掩码");
+  // 🔥 优化：BiRefNet的掩码处理，保留发丝半透明
   const alpha = buildNormalizedAlpha(outputTensor.data, maskWidth * maskHeight);
   const refinedAlpha = refineAlphaBuffer(alpha);
 
-  // 获取工作图片的尺寸
   const workMetadata = await sharp(workBuffer).metadata();
-  
-  // 先调整掩码到工作图片尺寸
   const workAlpha = await sharp(refinedAlpha, {
     raw: { width: maskWidth, height: maskHeight, channels: 1 },
   })
@@ -1070,37 +993,9 @@ async function removeBackgroundWithModel(config, inputBuffer) {
     .raw()
     .toBuffer();
 
-  console.log("[photo-id] removeBackgroundWithModel: 在工作图片上应用 alpha 遮罩");
+  console.log("[photo-id] 应用Alpha遮罩");
   const workResult = await applyAlphaMask(workBuffer, workAlpha, workMetadata.width, workMetadata.height);
   
-  // 生成工作图片的透明 PNG
-  const workPngBuffer = await workResult.png().toBuffer();
-  
-  // 如果图片是被缩小过的，把结果放大回原始尺寸
-  let resultBuffer = workPngBuffer;
-  if (workScale < 1) {
-    console.log(`[photo-id] removeBackgroundWithModel: 把结果放大回原始尺寸 (scale ${(1/workScale).toFixed(3)})`);
-    // 把工作图片上应用完 mask 的结果放大回原始尺寸
-    resultBuffer = await sharp(workPngBuffer)
-      .resize(sourceMetadata.width, sourceMetadata.height, {
-        fit: 'fill',
-        kernel: sharp.kernel.lanczos3
-      })
-      .png()
-      .toBuffer();
-    
-    // 用放大后的透明图片和原始图片合成，保留原始质量
-    console.log("[photo-id] removeBackgroundWithModel: 和原始图片合成以获得更好质量");
-    const scaledResult = sharp(resultBuffer);
-    const finalResult = await applyAlphaMask(inputBuffer, 
-      await scaledResult.extractChannel('alpha').raw().toBuffer(),
-      sourceMetadata.width, 
-      sourceMetadata.height);
-    console.log("[photo-id] removeBackgroundWithModel: 完成");
-    return finalResult;
-  }
-  
-  console.log("[photo-id] removeBackgroundWithModel: 完成");
   return workResult;
 }
 
@@ -1174,58 +1069,32 @@ async function removeBackgroundWithImgly(config, inputBuffer) {
 }
 
 // 新增：基于新背景色的边缘净化 - 安全保守版本
-async function finalEdgeCleanup(subjectBuffer, newBackgroundColor) {
-  console.log("[photo-id] finalEdgeCleanup: 兜底清除白边");
+async function finalEdgeCleanup(subjectBuffer, newBackgroundColor, sourceBgRgb) {
+  console.log("[photo-id] finalEdgeCleanup: 发丝友好版边缘净化");
   const { data, info } = await sharp(subjectBuffer)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  const width = info.width;
-  const height = info.height;
-  const channels = info.channels;
+  const width = info.width, height = info.height, channels = info.channels;
+  const srcR = Math.round(sourceBgRgb?.red || sourceBgRgb?.r || 255);
+  const srcG = Math.round(sourceBgRgb?.green || sourceBgRgb?.g || 255);
+  const srcB = Math.round(sourceBgRgb?.blue || sourceBgRgb?.b || 255);
 
-  // 暴力处理：所有半透明+白色像素，直接替换为前景色
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * channels;
       const alpha = data[idx + 3];
 
-      // 只处理半透明像素（白边集中区）
-      if (alpha > 0 && alpha < 255) {
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
+      // 👉 优化：仅清除纯背景残留，不碰发丝
+      if (alpha <= 0 || alpha >= 200) continue;
 
-        // 检测白色/浅灰色（证件照白边核心）
-        const isWhiteEdge = r > 150 && g > 150 && b > 150;
-        let touchesTransparentEdge = false;
-        for (let dy = -1; dy <= 1 && !touchesTransparentEdge; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            if (dx === 0 && dy === 0) {
-              continue;
-            }
+      const r = data[idx], g = data[idx+1], b = data[idx+2];
+      const distToSrcBg = Math.sqrt((r-srcR)**2 + (g-srcG)**2 + (b-srcB)**2);
 
-            const neighborX = x + dx;
-            const neighborY = y + dy;
-            if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) {
-              continue;
-            }
-
-            const neighborAlpha = data[(neighborY * width + neighborX) * channels + 3];
-            if (neighborAlpha <= 64) {
-              touchesTransparentEdge = true;
-              break;
-            }
-          }
-        }
-
-        if (isWhiteEdge && touchesTransparentEdge) {
-          // 直接把白色改成人物肤色，彻底消灭白边
-          data[idx] = Math.max(120, r - 40);
-          data[idx + 1] = Math.max(100, g - 50);
-          data[idx + 2] = Math.max(90, b - 50);
-        }
+      // 仅清除**紧贴背景的残留**，发丝区域跳过
+      if (distToSrcBg < 40) {
+        data[idx + 3] = Math.max(0, alpha - 30); // 温和降低透明度
       }
     }
   }
@@ -1584,62 +1453,13 @@ async function assertMaskQuality(maskedImage, sourceMetadata) {
 }
 
 async function removeBackground(config, inputBuffer) {
-  console.log("[photo-id] removeBackground: 开始");
-  const sourceMetadata = await sharp(inputBuffer).metadata();
-  
-  // 首先尝试 IMG.LY 背景移除
+  // 直接跳过所有非AI逻辑
   try {
-    const imglyResult = await removeBackgroundWithImgly(config, inputBuffer);
-    if (imglyResult) {
-      console.log("[photo-id] removeBackground: IMG.LY AI background removal succeeded");
-      await assertMaskQuality(imglyResult.clone(), sourceMetadata);
-      return imglyResult;
-    }
-  } catch (error) {
-    console.warn(
-      "[photo-id] IMG.LY AI background removal failed, falling back",
-      error && error.message ? error.message : error
-    );
+    return await removeBackgroundWithModel(config, inputBuffer);
+  } catch (e) {
+    console.error("AI抠图失败", e);
+    return sharp(inputBuffer).ensureAlpha().toBuffer();
   }
-  
-  console.log(`[photo-id] removeBackground: 源图像尺寸 ${sourceMetadata.width}x${sourceMetadata.height}`);
-
-  // 尝试统一背景移除
-  try {
-    console.log("[photo-id] removeBackground: 尝试移除统一背景");
-    const uniformBackgroundResult = await removeUniformBackground(inputBuffer);
-    if (uniformBackgroundResult) {
-      console.log("[photo-id] removeBackground: 统一背景移除成功");
-      await assertMaskQuality(uniformBackgroundResult.clone(), sourceMetadata);
-      return uniformBackgroundResult;
-    }
-  } catch (error) {
-    console.warn(
-      "[photo-id] 统一背景移除失败，尝试模型",
-      error && error.message ? error.message : error
-    );
-  }
-
-  // 尝试模型移除背景
-  try {
-    console.log("[photo-id] removeBackground: 使用模型移除背景");
-    const modelResult = await removeBackgroundWithModel(config, inputBuffer);
-    if (modelResult) {
-      console.log("[photo-id] removeBackground: 模型处理完成");
-      await assertMaskQuality(modelResult.clone(), sourceMetadata);
-      console.log("[photo-id] removeBackground: 完成");
-      return modelResult;
-    }
-  } catch (error) {
-    console.error(
-      "[photo-id] 模型移除背景失败",
-      error && error.message ? error.message : error
-    );
-  }
-  
-  // 所有方法都失败，返回原图，至少不卡住
-  console.warn("[photo-id] 所有背景移除方法失败，返回原图（无背景移除）");
-  return sharp(inputBuffer).ensureAlpha();
 }
 
 function hexToRgb(hex) {
@@ -1668,10 +1488,17 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
 
   let transparentSubject;
   try {
-    console.log("[photo-id] 步骤2: 移除背景");
+    console.log("[photo-id] 步骤2: 移除背景（强制AI模型）");
     transparentSubject = await removeBackground(config, inputBuffer);
   } catch (error) {
     console.warn("[photo-id] 移除背景失败，使用原图", error);
+    transparentSubject = sharp(inputBuffer).ensureAlpha();
+  }
+
+  // 🔥 新增：检查掩码是否有效，避免全透明/全不透明
+  const testMeta = await transparentSubject.metadata();
+  if (testMeta.width === 0 || testMeta.height === 0) {
+    console.error("[photo-id] 生成的透明图像无效，使用原图");
     transparentSubject = sharp(inputBuffer).ensureAlpha();
   }
 
@@ -1697,14 +1524,22 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   console.log("[photo-id] 步骤5: 转换为PNG");
   let subjectBuffer = await subject.png().toBuffer();
 
+  // 🔥 强制执行发丝优化
   try {
-    console.log("[photo-id] 步骤6: 净化主体");
-    subjectBuffer = await decontaminateSubjectBuffer(subjectBuffer, sourceBackgroundColor);
+    console.log("[photo-id] 步骤5.5: 发丝羽化（BiRefNet专用）");
+    subjectBuffer = await featherSubjectEdges(subjectBuffer, 2.0);
   } catch (error) {
-    console.warn("[photo-id] 净化失败，跳过", error);
+    console.warn("[photo-id] 边缘羽化失败，跳过", error);
   }
 
-  console.log("[photo-id] 步骤7: 获取元数据");
+  try {
+    console.log("[photo-id] 步骤6: 颜色溢出校正");
+    subjectBuffer = await decontaminateSubjectBuffer(subjectBuffer, sourceBackgroundColor);
+  } catch (error) {
+    console.warn("[photo-id] 颜色溢出校正失败，跳过", error);
+  }
+
+  // 🔥 后续尺寸调整逻辑保持不变，但修复合成部分
   const preparedSubject = sharp(subjectBuffer);
   const metadata = await preparedSubject.metadata();
 
@@ -1756,190 +1591,18 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   }
   let subjectMetadata = await sharp(subjectBuffer).metadata();
 
-  if (
-    subjectMetadata.width > spec.width ||
-    subjectMetadata.height > spec.height ||
-    subjectMetadata.width > maxWidth ||
-    subjectMetadata.height > maxHeight
-  ) {
-    try {
-      console.log("[photo-id] 步骤12: 再次调整大小");
-      const safeScale = Math.min(
-        maxWidth / subjectMetadata.width,
-        maxHeight / subjectMetadata.height,
-        1
-      );
-
-      subjectBuffer = await resizeSubjectBuffer(
-        subjectBuffer,
-        Math.max(1, Math.round(subjectMetadata.width * safeScale)),
-        Math.max(1, Math.round(subjectMetadata.height * safeScale))
-      );
-      subjectMetadata = await sharp(subjectBuffer).metadata();
-    } catch (error) {
-      console.warn("[photo-id] 再次调整大小失败，跳过", error);
-    }
-  }
-
-  console.log("[photo-id] 步骤13: 跳过锐化，保持自然");
-  subjectMetadata = await sharp(subjectBuffer).metadata();
-
-  const targetTopMargin = Math.round(spec.height * 0.11);
-  const targetSubjectHeight = Math.max(1, spec.height - bottomInset - targetTopMargin);
-  if (subjectMetadata.height < targetSubjectHeight) {
-    const fillHeightScale = targetSubjectHeight / subjectMetadata.height;
-    const scaledWidth = Math.round(subjectMetadata.width * fillHeightScale);
-    const maxComposedWidth = Math.round(spec.width * 1.7);
-
-    if (scaledWidth <= maxComposedWidth) {
-      try {
-        subjectBuffer = await resizeSubjectBuffer(
-          subjectBuffer,
-          Math.max(1, scaledWidth),
-          targetSubjectHeight
-        );
-        subjectMetadata = await sharp(subjectBuffer).metadata();
-      } catch (error) {
-        console.warn("[photo-id] 填充高度失败，跳过", error);
-      }
-    }
-  }
-
-  if (subjectMetadata.width > spec.width) {
-    try {
-      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-      subjectBuffer = await sharp(subjectBuffer)
-        .extract({
-          left: cropLeft,
-          top: 0,
-          width: spec.width,
-          height: subjectMetadata.height,
-        })
-        .png()
-        .toBuffer();
-      subjectMetadata = await sharp(subjectBuffer).metadata();
-    } catch (error) {
-      console.warn("[photo-id] 宽度裁剪失败，跳过", error);
-    }
-  }
-
-  const minFinalWidth = Math.ceil(spec.width * 1.025);
-  const minTopMargin = Math.round(spec.height * 0.08);
-  const maxFinalHeight = Math.max(1, spec.height - bottomInset - minTopMargin);
-  if (subjectMetadata.width < minFinalWidth) {
-    try {
-      const widthFillScale = minFinalWidth / subjectMetadata.width;
-      const expandedHeight = Math.round(subjectMetadata.height * widthFillScale);
-      if (expandedHeight <= maxFinalHeight) {
-        subjectBuffer = await resizeSubjectBuffer(
-          subjectBuffer,
-          minFinalWidth,
-          expandedHeight
-        );
-        subjectMetadata = await sharp(subjectBuffer).metadata();
-      }
-    } catch (error) {
-      console.warn("[photo-id] 填充宽度失败，跳过", error);
-    }
-  }
-
-  let torsoBandWidth = 0;
-  try {
-    torsoBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.36, 0.68);
-  } catch (error) {
-    console.warn("[photo-id] 测量躯干宽度失败，使用默认值", error);
-  }
-  const minTorsoBandWidth = Math.ceil(spec.width * 1.045);
-  if (torsoBandWidth > 0 && torsoBandWidth < minTorsoBandWidth) {
-    try {
-      const torsoFillScale = minTorsoBandWidth / torsoBandWidth;
-      const expandedWidth = Math.round(subjectMetadata.width * torsoFillScale);
-      const expandedHeight = Math.round(subjectMetadata.height * torsoFillScale);
-      const maxComposedWidth = Math.round(spec.width * 1.45);
-      if (expandedHeight <= maxFinalHeight && expandedWidth <= maxComposedWidth) {
-        subjectBuffer = await resizeSubjectBuffer(
-          subjectBuffer,
-          expandedWidth,
-          expandedHeight
-        );
-        subjectMetadata = await sharp(subjectBuffer).metadata();
-      }
-    } catch (error) {
-      console.warn("[photo-id] 填充躯干失败，跳过", error);
-    }
-  }
-
-  if (subjectMetadata.width > spec.width) {
-    try {
-      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-      subjectBuffer = await sharp(subjectBuffer)
-        .extract({
-          left: cropLeft,
-          top: 0,
-          width: spec.width,
-          height: subjectMetadata.height,
-        })
-        .png()
-        .toBuffer();
-      subjectMetadata = await sharp(subjectBuffer).metadata();
-    } catch (error) {
-      console.warn("[photo-id] 裁剪宽度失败，跳过", error);
-    }
-  }
-
-  let lowerBandWidth = 0;
-  try {
-    lowerBandWidth = await measureOpaqueBandWidth(subjectBuffer, 0.84, 0.99, "p25");
-  } catch (error) {
-    console.warn("[photo-id] 测量下边缘宽度失败，使用默认值", error);
-  }
-  const minLowerBandWidth = Math.ceil(spec.width * 1.035);
-  if (lowerBandWidth > 0 && lowerBandWidth < minLowerBandWidth) {
-    try {
-      const lowerFillScale = Math.min(1.12, minLowerBandWidth / lowerBandWidth);
-      const expandedWidth = Math.round(subjectMetadata.width * lowerFillScale);
-      const maxComposedWidth = Math.round(spec.width * 1.6);
-      if (expandedWidth <= maxComposedWidth) {
-        subjectBuffer = await resizeSubjectBuffer(
-          subjectBuffer,
-          expandedWidth,
-          subjectMetadata.height
-        );
-        subjectMetadata = await sharp(subjectBuffer).metadata();
-      }
-    } catch (error) {
-      console.warn("[photo-id] 填充下边缘失败，跳过", error);
-    }
-  }
-
-  if (subjectMetadata.width > spec.width) {
-    try {
-      const cropLeft = Math.max(0, Math.round((subjectMetadata.width - spec.width) / 2));
-      subjectBuffer = await sharp(subjectBuffer)
-        .extract({
-          left: cropLeft,
-          top: 0,
-          width: spec.width,
-          height: subjectMetadata.height,
-        })
-        .png()
-        .toBuffer();
-      subjectMetadata = await sharp(subjectBuffer).metadata();
-    } catch (error) {
-      console.warn("[photo-id] 再次裁剪宽度失败，跳过", error);
-    }
-  }
-
+  // 🔥 修复：合成时强制居中，避免顶部出现蓝色条
   const left = Math.max(0, Math.round((spec.width - subjectMetadata.width) / 2));
   const top = Math.max(0, spec.height - bottomInset - subjectMetadata.height);
   const newBackgroundRgb = hexToRgb(background);
 
   try {
-    console.log("[photo-id] 步骤14: 边缘净化 (finalEdgeCleanup)");
-    subjectBuffer = await finalEdgeCleanup(subjectBuffer, newBackgroundRgb);
+    console.log("[photo-id] 步骤14: 边缘净化");
+    subjectBuffer = await finalEdgeCleanup(subjectBuffer, newBackgroundRgb, sourceBackgroundColor);
   } catch (error) {
     console.warn("[photo-id] 边缘净化失败，跳过", error);
   }
+
   console.log("[photo-id] 步骤15: 合成最终图像");
   let outputBuffer = await sharp({
     create: {
@@ -1960,7 +1623,7 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
     .toBuffer();
 
   console.log("[photo-id] 步骤16: 最终边缘修复");
-  outputBuffer = await finalEdgeRepairAfterComposite(outputBuffer, newBackgroundRgb, background);
+  outputBuffer = await finalEdgeRepairAfterComposite(outputBuffer, newBackgroundRgb, background, sourceBackgroundColor);
 
   return {
     buffer: outputBuffer,
@@ -1971,89 +1634,6 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   };
 }
 
-// 合成后的最终边缘修复 - 添加边缘模糊来消除白色缝隙
-async function finalEdgeRepairAfterComposite(imageBuffer, bgRgb, bgHex) {
-  console.log("[photo-id] finalEdgeRepairAfterComposite: 开始（清晰度优化模式）");
-
-  // 减少模糊程度，保持清晰度
-  const slightlyBlurred = await sharp(imageBuffer)
-    .blur(1.0) // 减少模糊，保持清晰度
-    .png()
-    .toBuffer();
-
-  const { data: originalData, info } = await sharp(imageBuffer)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const { data: blurredData } = await sharp(slightlyBlurred)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const width = info.width;
-  const height = info.height;
-  const channels = info.channels;
-
-  const resultData = new Uint8Array(originalData.length);
-  resultData.set(originalData);
-
-  let edgePixelCount = 0;
-
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const idx = (y * width + x) * channels;
-
-      const r = originalData[idx];
-      const g = originalData[idx + 1];
-      const b = originalData[idx + 2];
-
-      const distToBg = Math.abs(r - bgRgb.r) + Math.abs(g - bgRgb.g) + Math.abs(b - bgRgb.b);
-
-      let isEdge = false;
-      for (let dy = -1; dy <= 1 && !isEdge; dy++) {
-        for (let dx = -1; dx <= 1 && !isEdge; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const nIdx = ((y + dy) * width + (x + dx)) * channels;
-          const nr = originalData[nIdx];
-          const ng = originalData[nIdx + 1];
-          const nb = originalData[nIdx + 2];
-          const colorDiff = Math.abs(r - nr) + Math.abs(g - ng) + Math.abs(b - nb);
-          if (colorDiff > 20) { // 原25 → 改为20，更敏感的边缘检测
-            isEdge = true;
-          }
-        }
-      }
-
-      const isWhiteish = (r > 200 && g > 200 && b > 200);
-
-      if (isEdge && ((distToBg > 15 && distToBg < 180) || (isWhiteish && distToBg > 15))) {
-        edgePixelCount++;
-
-        let blend = 0;
-        if (isWhiteish) {
-          blend = 0.6; // 减少混合，保持更多原始清晰度
-        } else if (distToBg < 80) {
-          blend = 0.4; // 减少混合
-        } else {
-          blend = 0.25; // 减少混合
-        }
-
-        resultData[idx] = Math.round(originalData[idx] * (1 - blend) + blurredData[idx] * blend);
-        resultData[idx + 1] = Math.round(originalData[idx + 1] * (1 - blend) + blurredData[idx + 1] * blend);
-        resultData[idx + 2] = Math.round(originalData[idx + 2] * (1 - blend) + blurredData[idx + 2] * blend);
-      }
-    }
-  }
-
-  console.log(`[photo-id] finalEdgeRepairAfterComposite: 混合了 ${edgePixelCount} 个边缘像素`);
-
-  const result = await sharp(resultData, {
-    raw: { width, height, channels: 4 }
-  }).png().toBuffer();
-
-  return result;
-}
 
 async function warmPhotoIdModel(config) {
   return getSession(config);
