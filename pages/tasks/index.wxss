@@ -108,3 +108,18 @@
 .empty-button {
   margin-top: 24rpx;
 }
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 28rpx 0 12rpx;
+}
+
+.load-more__text {
+  font-size: 24rpx;
+  color: #b0a090;
+}
+
+.load-more--end .load-more__text {
+  color: #ccc5bc;
+}

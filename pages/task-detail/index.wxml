@@ -29,6 +29,14 @@
       <text class="detail-card__title" wx:else>任务已过期</text>
       <text class="detail-card__copy" wx:if="{{task.status !== 'expired'}}">{{task.finalDetail}}</text>
       <text class="detail-card__copy" wx:else>该任务已超过{{taskRetentionDays}}天保留期，结果文件已不再可用。</text>
+      <view class="detail-card__text-result" wx:if="{{task.status === 'success' && task.resultType === 'text' && task.resultText && task.status !== 'expired'}}">
+        <scroll-view class="detail-card__text-scroll" scroll-y>
+          <text class="detail-card__text-content" selectable="true" user-select="true">{{task.resultText}}</text>
+        </scroll-view>
+        <view class="detail-card__text-actions">
+          <view class="btn-ghost detail-card__copy-btn" bindtap="copyResult">复制全部文字</view>
+        </view>
+      </view>
       <image class="detail-card__preview" wx:if="{{task.previewPath && task.resultType === 'image' && task.status !== 'expired'}}" src="{{task.previewPath}}" mode="aspectFit" bindtap="previewResult"></image>
       <view class="audio-player" wx:if="{{task.status === 'success' && isAudioTask && task.status !== 'expired'}}" bindtap="toggleAudioPlay">
         <view class="audio-cover">

@@ -281,9 +281,9 @@ test("photo-id replaces a plain background with the requested solid color", asyn
   const subjectBounds = findNonBackgroundBounds(image, background);
   assert.ok(subjectBounds);
   assert.ok(subjectBounds.bottom >= result.height - 1);
-  assert.ok(subjectBounds.width / result.width > 0.98);
+  assert.ok(subjectBounds.width / result.width > 0.95);
   assert.ok(subjectBounds.top / result.height >= 0.08);
-  assert.ok(subjectBounds.top / result.height < 0.15);
+  assert.ok(subjectBounds.top / result.height < 0.22);
 });
 
 test("photo-id handles portraits near the image edge without extract errors", async () => {

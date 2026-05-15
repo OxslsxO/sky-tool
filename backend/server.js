@@ -656,30 +656,55 @@ async function prepareOcrImageVariants(fileBuffer, layoutLabel) {
   const metadata = await sharp(fileBuffer).metadata();
   const sourceWidth = metadata.width || 0;
   const shouldUpscale = sourceWidth > 0 && sourceWidth < 1800;
-  const targetWidth = shouldUpscale ? 1800 : Math.min(sourceWidth || 2400, 2600);
+  const targetWidth = shouldUpscale ? 2400 : Math.min(sourceWidth || 2400, 3000);
 
-  const base = sharp(fileBuffer)
-    .rotate()
+  const rotated = sharp(fileBuffer).rotate();
+
+  const clean = await rotated
+    .clone()
     .resize({
       width: targetWidth,
       withoutEnlargement: !shouldUpscale,
     })
     .grayscale()
     .normalize()
-    .sharpen({ sigma: 0.8, m1: 0.7, m2: 1.6 });
+    .sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 })
+    .png()
+    .toBuffer();
+
+  const contrast = await rotated
+    .clone()
+    .resize({
+      width: targetWidth,
+      withoutEnlargement: !shouldUpscale,
+    })
+    .grayscale()
+    .normalize()
+    .linear(1.4, -(128 * 0.4))
+    .sharpen({ sigma: 0.8, m1: 0.7, m2: 1.6 })
+    .png()
+    .toBuffer();
 
   const variants = [
-    {
-      name: "clean",
-      buffer: await base.clone().png().toBuffer(),
-    },
+    { name: "clean", buffer: clean },
+    { name: "contrast", buffer: contrast },
   ];
 
   if (!String(layoutLabel || "").includes("手写")) {
-    variants.push({
-      name: "threshold",
-      buffer: await base.clone().threshold(178).png().toBuffer(),
-    });
+    const threshold = await rotated
+      .clone()
+      .resize({
+        width: targetWidth,
+        withoutEnlargement: !shouldUpscale,
+      })
+      .grayscale()
+      .normalize()
+      .threshold(160)
+      .sharpen({ sigma: 0.5 })
+      .png()
+      .toBuffer();
+
+    variants.push({ name: "threshold", buffer: threshold });
   }
 
   variants.push({
@@ -695,7 +720,138 @@ function scoreOcrResult(result) {
   const confidence = Number(result && result.data ? result.data.confidence : 0) || 0;
   const visibleLength = text.replace(/\s+/g, "").length;
   const cjkLength = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-  return confidence * 3 + visibleLength + cjkLength * 0.6;
+  const digitCount = (text.match(/\d/g) || []).length;
+  const punctCount = (text.match(/[，。、；：！？""''（）【】《》]/g) || []).length;
+  return confidence * 3 + visibleLength + cjkLength * 0.6 + digitCount * 0.3 + punctCount * 0.4;
+}
+
+function postProcessOcrText(text, language) {
+  if (!text) return text;
+
+  let result = text;
+
+  const OCR_CHAR_FIXES = {
+    "\u00B0": "°",
+    "\u00A0": " ",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201C": "\"",
+    "\u201D": "\"",
+    "\u00AB": "<<",
+    "\u00BB": ">>",
+    "\u2026": "…",
+    "\u2014": "——",
+    "\u2013": "-",
+  };
+
+  for (const [from, to] of Object.entries(OCR_CHAR_FIXES)) {
+    result = result.split(from).join(to);
+  }
+
+  if (language === "chi_sim" || language === "chi_sim+eng") {
+    const PHRASE_FIXES = [
+      ["鑫融", "套融"], ["鑫达", "套达"], ["鑫隆", "套隆"], ["鑫盛", "套盛"],
+      ["鑫源", "套源"], ["鑫发", "套发"], ["鑫华", "套华"], ["鑫通", "套通"],
+      ["鑫和", "套和"], ["鑫泰", "套泰"], ["鑫安", "套安"], ["鑫信", "套信"],
+      ["春蚕", "春蠢"], ["秋蚕", "秋蠢"], ["蚕丝", "蠢丝"], ["蚕食", "蠢食"],
+      ["蚕桑", "蠢桑"], ["蚕茧", "蠢茧"], ["家蚕", "家蠢"],
+      ["鸣叫", "呜叫"], ["鸣咽", "呜咽"], ["鸣笛", "呜笛"], ["鸣谢", "呜谢"],
+      ["鸣放", "呜放"], ["鸣禽", "呜禽"], ["共鸣", "共呜"], ["耳鸣", "耳呜"],
+      ["一鸣", "一呜"], ["鸣枪", "呜枪"],
+      ["幕布", "慕布"], ["幕帘", "慕帘"], ["开幕", "开慕"], ["闭幕", "闭慕"],
+      ["屏幕", "屏慕"], ["夜幕", "夜慕"], ["幕后", "慕后"], ["幕府", "慕府"],
+      ["落幕", "落慕"], ["序幕", "序慕"], ["帷幕", "帷慕"],
+      ["慕名", "幕名"], ["仰慕", "仰幕"], ["羡慕", "羡幕"], ["爱慕", "爱幕"],
+      ["倾慕", "倾幕"], ["思慕", "思幕"], ["景慕", "景幕"],
+      ["拔草", "拨草"], ["拔起", "拨起"], ["拔出", "拨出"], ["拔河", "拨河"],
+      ["海拔", "海拨"], ["拔尖", "拨尖"], ["选拔", "选拨"], ["提拔", "提拨"],
+      ["拔牙", "拨牙"], ["挺拔", "挺拨"],
+      ["拨动", "拔动"], ["拨打", "拔打"], ["拨号", "拔号"], ["拨款", "拔款"],
+      ["调拨", "调拔"], ["划拨", "划拔"], ["拨付", "拔付"], ["拨开", "拔开"],
+      ["拨通", "拔通"],
+      ["崇敬", "祟敬"], ["崇高", "祟高"], ["崇拜", "祟拜"], ["崇尚", "祟尚"],
+      ["推崇", "推祟"],
+      ["祟祟", "崇崇"], ["鬼祟", "鬼崇"], ["作祟", "作崇"],
+      ["折断", "拆断"], ["折旧", "拆旧"], ["折价", "拆价"], ["折扣", "拆扣"],
+      ["骨折", "骨拆"], ["曲折", "曲拆"], ["转折", "转拆"], ["折算", "拆算"],
+      ["折叠", "拆叠"],
+      ["拆除", "折除"], ["拆迁", "折迁"], ["拆解", "折解"],
+      ["拆毁", "折毁"], ["拆分", "折分"],
+      ["亨通", "享通"], ["大亨", "大享"],
+      ["享受", "亨受"], ["享有", "亨有"], ["享乐", "亨乐"], ["享用", "亨用"],
+      ["共享", "共亨"],
+      ["盲人", "育人"], ["盲目", "育目"], ["盲区", "育区"], ["色盲", "色育"],
+      ["文盲", "文育"], ["扫盲", "扫育"],
+      ["教育", "教盲"], ["培育", "培盲"], ["孕育", "孕盲"], ["育儿", "盲儿"],
+      ["发育", "发盲"], ["体育", "体盲"],
+      ["贷款", "货款"], ["信贷", "信货"], ["借贷", "借货"], ["房贷", "房货"],
+      ["车贷", "车货"], ["放贷", "放货"],
+      ["货物", "贷物"], ["货运", "贷运"], ["货车", "贷车"], ["货款", "贷款"],
+      ["交货", "交贷"], ["进货", "进贷"], ["发货", "发贷"], ["提货", "提贷"],
+      ["存货", "存贷"], ["百货", "百贷"],
+      ["冠冕", "寇冕"], ["冠军", "寇军"], ["夺冠", "夺寇"], ["桂冠", "桂寇"],
+      ["皇冠", "皇寇"], ["衣冠", "衣寇"],
+      ["敌寇", "敌冠"], ["倭寇", "倭冠"], ["寇贼", "冠贼"],
+      ["戊戌", "戍戌"], ["戊午", "戍午"],
+      ["戍边", "戊边"], ["戍守", "戊守"], ["卫戍", "卫戊"],
+      ["己知", "已知"], ["己经", "已经"],
+      ["曰报", "日报"], ["曰记", "日记"], ["曰历", "日历"], ["曰期", "日期"],
+      ["曰常", "日常"], ["今曰", "今日"], ["昨曰", "昨日"], ["明曰", "明日"],
+      ["子曰", "子日"],
+      ["末来", "未来"], ["末能", "未能"], ["末必", "未必"], ["末知", "未知"],
+      ["末经", "未经"], ["末曾", "未曾"],
+      ["周末", "周未"], ["月末", "月未"], ["年末", "年未"], ["期末", "期未"],
+      ["始末", "始未"], ["末尾", "未尾"], ["粉末", "粉未"],
+      ["兔费", "免费"], ["兔疫", "免疫"], ["兔除", "免除"], ["兔职", "免职"],
+      ["戊戍", "戊戌"], ["戍戍", "戊戌"],
+      ["赢利", "嬴利"], ["输赢", "输嬴"], ["赢家", "嬴家"],
+      ["嬴政", "赢政"],
+      ["凤城", "风城"], ["凤凰", "风凰"], ["凤梨", "风梨"],
+      ["凤凰", "凤皇"], ["龙凤", "龙风"],
+      ["风凤", "凤"],
+      ["录象", "录像"], ["录相", "录像"],
+      ["辩解", "辨解"], ["辩护", "辨护"], ["辩论", "辨论"], ["争辩", "争辨"],
+      ["辨别", "辩别"], ["辨认", "辩认"], ["辨析", "辩析"],
+      ["孤力", "孤立"],
+      ["刺骨", "剌骨"], ["刺激", "剌激"], ["刺杀", "剌杀"], ["刺绣", "剌绣"],
+      ["鱼刺", "鱼剌"],
+      ["剌激", "刺激"], ["剌耳", "刺耳"], ["剌眼", "刺眼"],
+      ["汆烫", "氽烫"], ["汆水", "氽水"],
+      ["氽丸", "汆丸"], ["氽汤", "汆汤"],
+      ["壶口", "壸口"], ["水壶", "水壸"], ["茶壶", "茶壸"], ["酒壶", "酒壸"],
+      ["喷壶", "喷壸"],
+      ["壸中", "壶中"],
+      ["寂寞", "寂莫"], ["莫非", "寞非"], ["莫大", "寞大"], ["莫如", "寞如"],
+      ["莫斯", "寞斯"], ["莫及", "寞及"],
+      ["犇跑", "奔跑"], ["犇腾", "奔腾"],
+      ["淼茫", "渺茫"],
+      ["焱焰", "火焰"],
+      ["赢取", "嬴取"],
+    ];
+
+    for (const [correct, misread] of PHRASE_FIXES) {
+      result = result.split(misread).join(correct);
+    }
+
+    const SURNAME_XIN = /[张王李赵刘陈杨黄吴周徐孙马朱胡郭何林罗高郑梁宋唐韩曹许邓萧冯程蔡彭潘袁于董余苏叶吕魏蒋田杜丁沈姜范江傅钟卢汪戴崔任陆廖姚方金邱邵孔白史崔康邱秦江]/;
+    result = result.replace(new RegExp("(" + SURNAME_XIN.source + ")套", "g"), "$1鑫");
+    result = result.replace(new RegExp("(" + SURNAME_XIN.source + ")蠢", "g"), "$1鑫");
+
+    result = result.replace(/鑫(?=[路街道里小区大厦广场楼盘])/, "套");
+
+    result = result.replace(/(\d)\s+(\d)/g, "$1$2");
+    result = result.replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, "$1$2");
+    result = result.replace(/([\u4e00-\u9fff])\s+([，。、；：！？）】」』…])/g, "$1$2");
+    result = result.replace(/([（【「『])\s+([\u4e00-\u9fff])/g, "$1$2");
+
+    result = result.replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, "$1$2");
+  }
+
+  result = result.replace(/\n{3,}/g, "\n\n");
+  result = result.replace(/[ \t]+$/gm, "");
+  result = result.replace(/^[ \t]+/gm, "");
+
+  return result;
 }
 
 let baiduOcrTokenCache = {
@@ -764,14 +920,15 @@ async function getBaiduOcrAccessToken() {
 }
 
 async function prepareBaiduOcrImage(fileBuffer) {
-  let width = 2200;
-  let quality = 92;
+  let width = 2400;
+  let quality = 94;
   let output = await sharp(fileBuffer)
     .rotate()
     .resize({
       width,
       withoutEnlargement: true,
     })
+    .sharpen({ sigma: 0.6, m1: 0.5, m2: 1.2 })
     .jpeg({
       quality,
       mozjpeg: true,
@@ -780,13 +937,14 @@ async function prepareBaiduOcrImage(fileBuffer) {
 
   while (output.length > 3.6 * 1024 * 1024 && width > 1000) {
     width = Math.round(width * 0.82);
-    quality = Math.max(76, quality - 6);
+    quality = Math.max(78, quality - 4);
     output = await sharp(fileBuffer)
       .rotate()
       .resize({
         width,
         withoutEnlargement: true,
       })
+      .sharpen({ sigma: 0.6, m1: 0.5, m2: 1.2 })
       .jpeg({
         quality,
         mozjpeg: true,
@@ -861,7 +1019,9 @@ async function recognizeTextFromImageWithBaidu(file, languageLabel, layoutLabel)
   }
 
   const lines = normalizeBaiduOcrLines(data);
-  const text = lines.join("\n");
+  const rawText = lines.join("\n");
+  const text = postProcessOcrText(rawText, language);
+  const processedLines = text.split("\n");
   const words = Array.isArray(data.words_result) ? data.words_result : [];
   const probabilities = words
     .map((item) => item && item.probability && Number(item.probability.average))
@@ -872,7 +1032,7 @@ async function recognizeTextFromImageWithBaidu(file, languageLabel, layoutLabel)
 
   return {
     text,
-    lines,
+    lines: processedLines,
     confidence,
     variant: "baidu",
     provider: "baidu",
@@ -931,7 +1091,8 @@ async function recognizeTextFromImage(file, languageLabel, layoutLabel) {
 
   const fileBuffer = file?.buffer ? file.buffer : decodeBase64File(file);
   const variants = await prepareOcrImageVariants(fileBuffer, layoutLabel);
-  const worker = await tesseractWorker.createWorker(normalizeOcrLanguage(languageLabel));
+  const language = normalizeOcrLanguage(languageLabel);
+  const worker = await tesseractWorker.createWorker(language);
 
   try {
     await worker.setParameters({
@@ -942,15 +1103,35 @@ async function recognizeTextFromImage(file, languageLabel, layoutLabel) {
     let best = null;
     let bestVariant = "";
 
-    for (const variant of variants) {
-      const result = await worker.recognize(variant.buffer);
-      if (!best || scoreOcrResult(result) > scoreOcrResult(best)) {
-        best = result;
-        bestVariant = variant.name;
+    const RECOGNIZE_TIMEOUT_MS = 60000;
+
+    for (let i = 0; i < variants.length; i++) {
+      const variant = variants[i];
+      try {
+        const result = await Promise.race([
+          worker.recognize(variant.buffer),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("recognize timeout")), RECOGNIZE_TIMEOUT_MS)
+          ),
+        ]);
+        if (!best || scoreOcrResult(result) > scoreOcrResult(best)) {
+          best = result;
+          bestVariant = variant.name;
+        }
+        if (best && best.data && Number(best.data.confidence || 0) > 85) {
+          break;
+        }
+      } catch (variantError) {
+        console.warn(`[OCR] 变体 ${variant.name} 识别失败:`, variantError.message);
       }
     }
 
-    const text = best && best.data && best.data.text ? best.data.text : "";
+    if (!best) {
+      throw new Error("所有图片变体识别均失败");
+    }
+
+    const rawText = best && best.data && best.data.text ? best.data.text : "";
+    const text = postProcessOcrText(rawText, language);
     const lines = normalizeOcrLines(best && best.data ? best.data.lines : [], text);
 
     return {
@@ -1507,13 +1688,18 @@ function savePendingOrdersToDisk(orderMap) {
         ...order,
       }))
     );
-    fs.writeFileSync(
+    fs.writeFile(
       PENDING_ORDERS_PATH,
       JSON.stringify({ orders }, null, 2),
-      "utf8"
+      "utf8",
+      (error) => {
+        if (error) {
+          console.error("[payment] failed to persist pending orders:", error && error.message ? error.message : error);
+        }
+      }
     );
   } catch (error) {
-    console.error("[payment] failed to persist pending orders:", error && error.message ? error.message : error);
+    console.error("[payment] failed to serialize pending orders:", error && error.message ? error.message : error);
   }
 }
 
@@ -1787,17 +1973,13 @@ async function createAsyncTask(req, res, taskType, taskData, processor, options 
 }
 
 app.post("/api/pay/create", async (req, res) => {
-  console.log(`[支付] 收到创建订单请求:`, req.body);
-  
   const { type, itemId, userId, openid, deviceId } = req.body || {};
 
   if (!type || !itemId) {
-    console.warn(`[支付] 缺少参数: type=${type}, itemId=${itemId}`);
     return res.status(400).json({ error: "MISSING_PARAMS", message: "缺少 type 或 itemId" });
   }
 
   if (!userId || !openid) {
-    console.warn(`[支付] 缺少 userId 或 openid: userId=${userId}, openid=${openid}`);
     return res.status(400).json({ error: "MISSING_USER_ID", message: "缺少 userId 或 openid" });
   }
 
@@ -1805,20 +1987,15 @@ app.post("/api/pay/create", async (req, res) => {
   const product = PRODUCTS[type]?.[itemId];
 
   if (!product) {
-    console.warn(`[支付] 无效商品: type=${type}, itemId=${itemId}`);
     return res.status(400).json({ error: "INVALID_PRODUCT", message: "无效的商品" });
   }
-
-  console.log(`[支付] 准备创建订单: orderId=${orderId}, product=${product.name}, price=${product.price}`);
 
   let payment = null;
 
   if (wechatPay) {
     try {
-      console.log(`[支付] 尝试使用微信支付创建订单 ${orderId}`);
-      
       const notifyUrl = `${process.env.PUBLIC_BASE_URL || "https://oxslsxo-sky-tool.hf.space"}/api/pay/notify`;
-      
+
       const params = {
         appid: process.env.WECHAT_APPID,
         mchid: process.env.WECHAT_MCH_ID,
@@ -1834,33 +2011,20 @@ app.post("/api/pay/create", async (req, res) => {
         },
       };
 
-      console.log(`[支付] 微信支付请求参数:`, { ...params, privateKey: '***' });
-      
       const result = await wechatPay.transactions_jsapi(params);
-
-      console.log(`[支付] 微信支付响应:`, result);
 
       if (result.status !== 200) {
         console.error("[支付] 预下单失败，状态码:", result.status);
         throw new Error(`创建订单失败: ${result.status}`);
       }
 
-      console.log(`[支付] 预下单成功:`, result.data);
-      
-      // wechatpay-node-v3 已经在 data 里返回了签好名的小程序支付参数
       payment = result.data;
-
-      console.log(`[支付] 返回小程序支付参数:`, payment);
     } catch (error) {
-      console.error("❌ 微信支付创建订单失败:", error && error.message ? error.message : error);
-      console.error("   完整错误:", error);
+      console.error("[支付] 微信支付创建订单失败:", error && error.message ? error.message : error);
     }
-  } else {
-    console.error("[payment] wechatPay is not initialized; cannot create a real order");
   }
 
   if (!payment) {
-    console.error("[payment] failed to create a real order; no usable payment payload returned");
     return res.status(503).json({
       error: "WECHAT_PAY_UNAVAILABLE",
       message: "WeChat Pay is unavailable. Check merchant config and backend logs.",
@@ -1879,10 +2043,16 @@ app.post("/api/pay/create", async (req, res) => {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  savePendingOrdersToDisk(pendingOrders);
 
-  console.log(`[支付] 返回订单: orderId=${orderId}`);
   res.json({ orderId, payment });
+
+  setImmediate(() => {
+    try {
+      savePendingOrdersToDisk(pendingOrders);
+    } catch (e) {
+      console.error("[支付] 异步持久化订单失败:", e.message);
+    }
+  });
 });
 
 app.post("/api/pay/verify", async (req, res) => {
@@ -1901,7 +2071,6 @@ app.post("/api/pay/verify", async (req, res) => {
   
   if (wechatPay) {
     try {
-      console.log(`[支付] 查询订单 ${orderId}`);
       const result = await wechatPay.query({ out_trade_no: orderId });
 
       if (result.status === 200 && (result.data.trade_state === "SUCCESS" || result.data.trade_state === "TRADE_SUCCESS")) {
@@ -1910,28 +2079,31 @@ app.post("/api/pay/verify", async (req, res) => {
         order.transactionId = result.data.transaction_id;
         order.updatedAt = Date.now();
         pendingOrders.set(orderId, order);
-        savePendingOrdersToDisk(pendingOrders);
-        console.log(`✅ 订单 ${orderId} 支付成功`);
+
         await persistPaidOrderToDatabase(orderId, order);
+
+        setImmediate(() => {
+          savePendingOrdersToDisk(pendingOrders);
+        });
       } else {
         order.updatedAt = Date.now();
         pendingOrders.set(orderId, order);
         savePendingOrdersToDisk(pendingOrders);
-        console.log(`[支付] 订单 ${orderId} 未支付:`, result.data);
       }
     } catch (error) {
       console.error("[支付] 查询订单失败:", error);
     }
   }
 
-  // 获取最新的用户状态信息
-  try {
-    const collections = await clientStateRepository.getCollections();
-    if (collections && order.userId) {
-      latestUser = await collections.users.findOne({ userId: order.userId });
+  if (order.status === "paid" && order.userId) {
+    try {
+      const collections = await clientStateRepository.getCollections();
+      if (collections) {
+        latestUser = await collections.users.findOne({ userId: order.userId });
+      }
+    } catch (e) {
+      console.warn("[支付] 获取用户状态失败", e);
     }
-  } catch (e) {
-    console.warn("[支付] 获取用户状态失败", e);
   }
 
   res.json({
@@ -1941,7 +2113,6 @@ app.post("/api/pay/verify", async (req, res) => {
     paid: order.status === "paid",
     type: order.type,
     itemId: order.itemId,
-    // 返回最新的用户状态给前端
     user: latestUser ? {
       userId: latestUser.userId,
       openid: latestUser.openid,
@@ -4699,6 +4870,11 @@ server.listen(config.port, config.host, async (err) => {
   if (qiniuCleanupResult.deleted > 0) {
     console.log(
       `   - 清理了 ${qiniuCleanupResult.deleted} 个过期七牛云文件`
+    );
+  }
+  if (qiniuCleanupResult.error) {
+    console.warn(
+      `   - 七牛云清理异常: ${qiniuCleanupResult.error}`
     );
   }
 

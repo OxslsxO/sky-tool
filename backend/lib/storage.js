@@ -263,7 +263,7 @@ function createStorage(config) {
   async function cleanupExpiredQiniuObjects(daysOld = 7) {
     if (!qiniuEnabled || !qiniuBucketManager) {
       console.warn('[storage] Qiniu not configured, skipping cleanup');
-      return { deleted: 0, error: 'Qiniu not configured' };
+      return { deleted: 0, skipped: 0, error: 'Qiniu not configured' };
     }
 
     const cutoffDate = new Date();
@@ -271,50 +271,88 @@ function createStorage(config) {
     console.log(`[storage] Starting Qiniu cleanup for files older than ${daysOld} days (before ${cutoffDate.toISOString()})`);
 
     let deletedCount = 0;
+    let skippedCount = 0;
     let marker = null;
     const prefixToCheck = qiniuOptions.prefix || '';
 
     try {
       do {
         const listResult = await new Promise((resolve, reject) => {
-          qiniuBucketManager.listPrefix(
-            qiniuOptions.bucket,
-            prefixToCheck,
-            marker,
-            null,
-            1000,
-            (err, respBody, respInfo) => {
-              if (err) {
-                reject(err);
-              } else {
-                resolve({ body: respBody, info: respInfo });
-              }
+          const options = {
+            prefix: prefixToCheck,
+            marker: marker,
+            limit: 1000,
+          };
+          qiniuBucketManager.listPrefix(qiniuOptions.bucket, options, (err, respBody, respInfo) => {
+            if (err) {
+              reject(err);
+              return;
             }
-          );
+            if (respInfo && respInfo.statusCode !== 200) {
+              reject(new Error(`listPrefix returned status ${respInfo.statusCode}: ${JSON.stringify(respBody)}`));
+              return;
+            }
+            resolve({ body: respBody, info: respInfo });
+          });
         });
 
-        const items = listResult.body.items || [];
+        const items = listResult.body && listResult.body.items ? listResult.body.items : [];
         if (items.length === 0) {
           break;
         }
 
+        const keysToDelete = [];
         for (const item of items) {
           const putTime = item.putTime ? new Date(item.putTime / 10000) : null;
           if (putTime && putTime < cutoffDate) {
+            keysToDelete.push(item.key);
+          } else {
+            skippedCount++;
+          }
+        }
+
+        if (keysToDelete.length > 0) {
+          const deleteOps = keysToDelete.map(key => qiniu.rs.deleteOp(qiniuOptions.bucket, key));
+          const batchSize = 50;
+          for (let i = 0; i < deleteOps.length; i += batchSize) {
+            const batch = deleteOps.slice(i, i + batchSize);
             try {
               await new Promise((resolve, reject) => {
-                qiniuBucketManager.delete(qiniuOptions.bucket, item.key, (err, respBody, respInfo) => {
+                qiniuBucketManager.batch(batch, (err, respBody, respInfo) => {
                   if (err) {
                     reject(err);
-                  } else {
-                    resolve({ body: respBody, info: respInfo });
+                    return;
                   }
+                  let batchDeleted = 0;
+                  if (Array.isArray(respBody)) {
+                    for (const item of respBody) {
+                      if (item.code === 200 || item.code === 612) {
+                        batchDeleted++;
+                      }
+                    }
+                  }
+                  deletedCount += batchDeleted;
+                  resolve();
                 });
               });
-              deletedCount++;
-              console.log(`[storage] Deleted expired Qiniu file: ${item.key} (uploaded: ${putTime.toISOString()})`);
-            } catch (deleteErr) {
-              console.error(`[storage] Failed to delete ${item.key}:`, deleteErr);
+            } catch (batchErr) {
+              console.warn(`[storage] Batch delete failed, falling back to single delete:`, batchErr.message);
+              for (const key of keysToDelete.slice(i, i + batchSize)) {
+                try {
+                  await new Promise((resolve, reject) => {
+                    qiniuBucketManager.delete(qiniuOptions.bucket, key, (err, respBody, respInfo) => {
+                      if (err) {
+                        reject(err);
+                      } else {
+                        resolve();
+                      }
+                    });
+                  });
+                  deletedCount++;
+                } catch (singleErr) {
+                  console.error(`[storage] Failed to delete ${key}:`, singleErr.message);
+                }
+              }
             }
           }
         }
@@ -322,11 +360,11 @@ function createStorage(config) {
         marker = listResult.body.marker;
       } while (marker);
 
-      console.log(`[storage] Qiniu cleanup completed. Deleted ${deletedCount} files.`);
-      return { deleted: deletedCount, success: true };
+      console.log(`[storage] Qiniu cleanup completed. Deleted ${deletedCount} files, skipped ${skippedCount} recent files.`);
+      return { deleted: deletedCount, skipped: skippedCount, success: true };
     } catch (error) {
-      console.error('[storage] Qiniu cleanup failed:', error);
-      return { deleted: deletedCount, error: error.message };
+      console.error('[storage] Qiniu cleanup failed:', error.message);
+      return { deleted: deletedCount, skipped: skippedCount, error: error.message };
     }
   }
 

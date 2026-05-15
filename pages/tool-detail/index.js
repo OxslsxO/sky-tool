@@ -1277,9 +1277,16 @@ Page({
   },
 
   handleTextInput(event) {
-    this.setData({
-      textInput: event.detail.value,
-    });
+    this._pendingTextInput = event.detail.value;
+  },
+
+  handleTextInputBlur() {
+    if (this._pendingTextInput !== undefined) {
+      this.setData({
+        textInput: this._pendingTextInput,
+      });
+      this._pendingTextInput = undefined;
+    }
   },
 
   handlePageRangeInput(event) {
@@ -1536,7 +1543,8 @@ Page({
 
     // 二维码生成需要文本
     if (toolId === "qr-maker") {
-      if (!qrText || !qrText.trim()) {
+      const textInput = this._pendingTextInput !== undefined ? this._pendingTextInput : this.data.textInput;
+      if (!textInput || !textInput.trim()) {
         return { valid: false, message: "请先输入要生成二维码的内容" };
       }
     }
@@ -5201,7 +5209,8 @@ Page({
   },
 
   async runQrMaker() {
-    const { tool, selections, textInput, qrLogoInput } = this.data;
+    const { tool, selections, qrLogoInput } = this.data;
+    const textInput = this._pendingTextInput !== undefined ? this._pendingTextInput : this.data.textInput;
     const content = (textInput || "").trim();
 
     if (!content) {

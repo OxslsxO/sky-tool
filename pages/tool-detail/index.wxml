@@ -133,6 +133,7 @@
             <view class="ocr-line__copy" data-text="{{item.text}}" bindtap="copyOcrLine">复制</view>
           </view>
         </scroll-view>
+        <text class="ocr-result__tip">识别结果受图片清晰度及文字复杂度影响，仅供参考</text>
       </view>
 
       <view class="image-to-pdf-container" wx:if="{{tool.id === 'image-to-pdf' && imageInputs.length}}">
@@ -718,7 +719,7 @@
     </view>
 
     <view class="card">
-      <textarea class="text-area" maxlength="-1" value="{{textInput}}" bindinput="handleTextInput" placeholder="输入链接、文本、联系方式等内容" />
+      <textarea class="text-area" maxlength="-1" auto-height bindinput="handleTextInput" bindblur="handleTextInputBlur" placeholder="输入链接、文本、联系方式等内容" />
       <view class="qr-logo-row">
         <view class="btn-ghost qr-logo-button" bindtap="chooseQrLogo">{{qrLogoInput ? '更换 Logo' : '上传 Logo'}}</view>
         <view class="btn-ghost qr-logo-button" wx:if="{{qrLogoInput}}" bindtap="removeQrLogo">移除</view>

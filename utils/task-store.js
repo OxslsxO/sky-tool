@@ -871,7 +871,7 @@ function saveTaskEntry(task) {
     userId: user.userId || user.openid || 'guest'
   };
   const tasks = [taskWithUserId].concat(getRawTasks());
-  saveTasks(tasks.slice(0, 40));
+  saveTasks(tasks.slice(0, 200));
   touchRecentTool(task.toolId);
   const normalizedTask = normalizeTask(taskWithUserId);
   return normalizedTask;

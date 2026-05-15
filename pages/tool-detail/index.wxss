@@ -393,6 +393,14 @@
   text-align: center;
 }
 
+.ocr-result__tip {
+  display: block;
+  font-size: 20rpx;
+  color: #b0a090;
+  text-align: center;
+  padding: 12rpx 0 4rpx;
+}
+
 .file-list {
   display: flex;
   flex-direction: column;
@@ -463,6 +471,7 @@
 .text-area {
   width: 100%;
   min-height: 260rpx;
+  max-height: 600rpx;
   padding: 22rpx 24rpx;
   border-radius: 20rpx 28rpx 20rpx 28rpx;
   background: #FFF9F6;

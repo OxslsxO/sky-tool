@@ -47,9 +47,15 @@
         </view>
       </view>
     </view>
+    <view class="load-more" wx:if="{{hasMore}}" bindtap="loadMore">
+      <text class="load-more__text">加载更多</text>
+    </view>
+    <view class="load-more load-more--end" wx:elif="{{visibleTasks.length > 20}}">
+      <text class="load-more__text">已显示全部</text>
+    </view>
   </view>
 
-  <view class="section" wx:else>
+  <view class="section" wx:elif="{{!visibleTasks.length}}">
     <view class="card empty-state">
       <text class="empty-title">这里还没有任务</text>
       <text class="empty-copy">先去首页试一个工具，任务创建后就会在这里自动出现。</text>

@@ -76,6 +76,9 @@ Page({
     visibleTasks: [],
     dashboard: {},
     refreshTimer: null,
+    pageSize: 20,
+    currentPage: 1,
+    hasMore: true,
   },
 
   onShow() {
@@ -83,6 +86,7 @@ Page({
       return;
     }
 
+    this.setData({ currentPage: 1, hasMore: true });
     this.refreshPage();
     this.startTimer();
     
@@ -101,9 +105,12 @@ Page({
     this.clearTimer();
   },
 
+  onReachBottom() {
+    this.loadMore();
+  },
+
   startTimer() {
     this.clearTimer();
-    // 延长刷新间隔，只在有处理中的任务时才刷新
     this.timer = setInterval(() => {
       const tasks = getTaskListForDisplay();
       const hasProcessingTasks = tasks.some(t => t.status === 'processing');
@@ -112,10 +119,10 @@ Page({
         this.setData({
           tasks,
           dashboard: getTaskDashboard(),
-          visibleTasks: this.filterTasks(tasks, this.data.filter),
         });
+        this.applyFilterAndPage();
       }
-    }, 3000); // 从1.2秒延长到3秒
+    }, 3000);
   },
 
   clearTimer() {
@@ -130,8 +137,27 @@ Page({
     this.setData({
       tasks,
       dashboard: getTaskDashboard(),
-      visibleTasks: this.filterTasks(tasks, this.data.filter),
+      currentPage: 1,
+      hasMore: true,
     });
+    this.applyFilterAndPage();
+  },
+
+  applyFilterAndPage() {
+    const { tasks, filter, pageSize, currentPage } = this.data;
+    const filtered = this.filterTasks(tasks, filter);
+    const end = currentPage * pageSize;
+    this.setData({
+      visibleTasks: filtered.slice(0, end),
+      hasMore: filtered.length > end,
+    });
+  },
+
+  loadMore() {
+    const { hasMore, currentPage } = this.data;
+    if (!hasMore) return;
+    this.setData({ currentPage: currentPage + 1 });
+    this.applyFilterAndPage();
   },
 
   filterTasks(tasks, filter) {
@@ -145,8 +171,10 @@ Page({
     const { filter } = event.currentTarget.dataset;
     this.setData({
       filter,
-      visibleTasks: this.filterTasks(this.data.tasks, filter),
+      currentPage: 1,
+      hasMore: true,
     });
+    this.applyFilterAndPage();
   },
 
   handleTaskTap(event) {

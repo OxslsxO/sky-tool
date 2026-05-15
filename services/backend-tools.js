@@ -12,8 +12,9 @@ function getMiniProgramEnvVersion() {
 }
 
 function getDefaultBaseUrl() {
-  //return "https://oxslsxo-sky-tool.hf.space";
-  return "http://127.0.0.1:3100";
+  return "https://oxslsxo-sky-tool.hf.space";
+  //return "http://127.0.0.1:3100";
+  //return "https://intercounty-distastefully-shanelle.ngrok-free.dev"
 }
 
 function shouldAllowManualServiceConfig() {

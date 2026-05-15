@@ -25,11 +25,7 @@ function normalizePaymentPayload(orderInfo) {
 function requestPayment(orderInfo) {
   const payment = normalizePaymentPayload(orderInfo);
 
-  console.log("[payment] requestPayment called with:", orderInfo);
-  console.log("[payment] normalized payment params:", payment);
-
   if (!payment.timeStamp || !payment.nonceStr || !payment.package || !payment.paySign) {
-    console.error("[payment] invalid requestPayment payload - missing required fields");
     return Promise.reject({
       code: "INVALID_PAYMENT_PARAMS",
       message: "支付参数不完整，请检查后端返回的 payment 字段",
@@ -43,12 +39,8 @@ function requestPayment(orderInfo) {
       package: payment.package,
       signType: payment.signType || "RSA",
       paySign: payment.paySign,
-      success: (res) => {
-        console.log("[payment] payment success:", res);
-        resolve(res);
-      },
+      success: (res) => resolve(res),
       fail: (err) => {
-        console.error("[payment] payment failed:", err);
         const errMsg = err.errMsg || "";
 
         if (errMsg.indexOf("cancel") > -1) {
@@ -69,7 +61,6 @@ function requestPayment(orderInfo) {
 
 async function createOrder(type, itemId) {
   const user = getUserState();
-  console.log("[payment] createOrder called:", { type, itemId, user });
 
   if (!isWechatIdentity(user)) {
     throw { code: "NOT_LOGGED_IN", message: "请先登录后再进行支付" };
@@ -91,33 +82,24 @@ async function createOrder(type, itemId) {
           openid: user.openid,
           deviceId: user.deviceId,
         },
-        success: (res) => {
-          console.log("[payment] createOrder API success response:", res);
-          resolve(res);
-        },
-        fail: (err) => {
-          console.error("[payment] createOrder API failed:", err);
-          reject(err);
-        },
+        success: (res) => resolve(res),
+        fail: (err) => reject(err),
       });
     });
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      console.log("[payment] createOrder successful, data:", response.data);
       return response.data;
     }
 
-    console.error("[payment] createOrder API returned error status:", response.statusCode);
     throw response.data || new Error(`CREATE_ORDER_FAILED_${response.statusCode}`);
   } catch (error) {
-    console.error("[payment] createOrder failed completely:", error);
+    console.error("[payment] createOrder failed:", error);
     throw error;
   }
 }
 
 async function verifyPayment(orderId) {
   const user = getUserState();
-  console.log("[payment] verifyPayment called for orderId:", orderId);
 
   try {
     const response = await new Promise((resolve, reject) => {
@@ -133,26 +115,18 @@ async function verifyPayment(orderId) {
           userId: user.userId,
           deviceId: user.deviceId,
         },
-        success: (res) => {
-          console.log("[payment] verifyPayment API success response:", res);
-          resolve(res);
-        },
-        fail: (err) => {
-          console.error("[payment] verifyPayment API failed:", err);
-          reject(err);
-        },
+        success: (res) => resolve(res),
+        fail: (err) => reject(err),
       });
     });
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      console.log("[payment] verifyPayment successful, data:", response.data);
       return response.data;
     }
 
-    console.error("[payment] verifyPayment API returned error status:", response.statusCode);
     throw response.data || new Error(`VERIFY_FAILED_${response.statusCode}`);
   } catch (error) {
-    console.error("[payment] verifyPayment failed completely:", error);
+    console.error("[payment] verifyPayment failed:", error);
     throw error;
   }
 }
@@ -217,18 +191,18 @@ function createLocalOrder(orderResult, payload) {
 }
 
 async function purchasePoints(packageItem) {
-  console.log("[payment] purchasePoints called with package:", packageItem);
-  let localOrder = null;
+  let localOrderId = null;
 
   try {
     const orderResult = await createOrder("points", packageItem.id);
-    console.log("[payment] order created:", orderResult);
     
     if (!orderResult.orderId || !orderResult.payment) {
       throw new Error("订单创建失败：缺少订单ID或支付参数");
     }
 
-    localOrder = createLocalOrder(orderResult, {
+    localOrderId = orderResult.orderId;
+
+    createLocalOrder(orderResult, {
       type: "points",
       itemId: packageItem.id,
       title: `${packageItem.points}积分`,
@@ -241,7 +215,6 @@ async function purchasePoints(packageItem) {
     if (verifyResult.success && isVerifiedPaidOrder(verifyResult)) {
       updateOrder(orderResult.orderId, { status: "paid", paidAt: Date.now() });
       
-      // 重要：后端已在后端增加了积分，前端只需要记录订单并使用后端返回的最新用户信息
       const totalPoints = packageItem.points + (packageItem.bonusPoints || 0);
       addOrder({
         type: "points",
@@ -253,17 +226,13 @@ async function purchasePoints(packageItem) {
         paidAt: Date.now(),
       });
       
-      // 直接使用后端返回的最新用户状态更新，确保积分准确
       if (verifyResult.user) {
         const { getUserState, updateUserState, addPointsRecord } = require("../utils/task-store");
-        const currentUser = getUserState();
-        // 更新用户状态，使用后端返回的积分
         updateUserState({
           ...verifyResult.user,
           updatedAt: new Date().toISOString()
         });
         
-        // 增加积分记录
         addPointsRecord({
           type: "recharge",
           title: `充值${packageItem.points}积分`,
@@ -271,8 +240,6 @@ async function purchasePoints(packageItem) {
           packageId: packageItem.id,
           price: packageItem.price,
         });
-        
-        console.log("[payment] 用户积分已从后端同步更新:", verifyResult.user.points);
       }
       
       return { success: true, message: `已充值${totalPoints}积分` };
@@ -280,17 +247,15 @@ async function purchasePoints(packageItem) {
 
     throw new Error(`PAYMENT_NOT_CONFIRMED:${JSON.stringify(verifyResult)}`);
   } catch (error) {
-    console.error("[payment] purchasePoints failed:", error);
-    
     if (error.code === "CANCEL") {
-      if (localOrder) {
-        updateOrder(localOrder.id, { status: "cancelled", cancelledAt: Date.now() });
+      if (localOrderId) {
+        updateOrder(localOrderId, { status: "cancelled", cancelledAt: Date.now() });
       }
       return { success: false, message: "已取消支付", cancelled: true, error };
     }
 
-    if (localOrder) {
-      updateOrder(localOrder.id, {
+    if (localOrderId) {
+      updateOrder(localOrderId, {
         status: "failed",
         failedAt: Date.now(),
         errorMessage: error.message || "",
@@ -302,22 +267,22 @@ async function purchasePoints(packageItem) {
 }
 
 async function purchaseTool(tool) {
-  console.log("[payment] purchaseTool called with tool:", tool);
-  let localOrder = null;
+  let localOrderId = null;
 
   try {
     const orderResult = await createOrder("tool", tool.id);
-    console.log("[payment] order created:", orderResult);
     
     if (!orderResult.orderId || !orderResult.payment) {
       throw new Error("订单创建失败：缺少订单ID或支付参数");
     }
 
-    localOrder = createLocalOrder(orderResult, {
+    localOrderId = orderResult.orderId;
+
+    createLocalOrder(orderResult, {
       type: "tool",
       itemId: tool.id,
       title: tool.name,
-      amount: (tool.points || 0) * 10, // 10积分=1元，对应后端price
+      amount: (tool.points || 0) * 10,
     });
 
     await requestPayment(orderResult.payment);
@@ -330,17 +295,15 @@ async function purchaseTool(tool) {
 
     throw new Error(`PAYMENT_NOT_CONFIRMED:${JSON.stringify(verifyResult)}`);
   } catch (error) {
-    console.error("[payment] purchaseTool failed:", error);
-    
     if (error.code === "CANCEL") {
-      if (localOrder) {
-        updateOrder(localOrder.id, { status: "cancelled", cancelledAt: Date.now() });
+      if (localOrderId) {
+        updateOrder(localOrderId, { status: "cancelled", cancelledAt: Date.now() });
       }
       return { success: false, message: "已取消支付", cancelled: true, error };
     }
 
-    if (localOrder) {
-      updateOrder(localOrder.id, {
+    if (localOrderId) {
+      updateOrder(localOrderId, {
         status: "failed",
         failedAt: Date.now(),
         errorMessage: error.message || "",
