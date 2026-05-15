@@ -145,16 +145,6 @@ Page({
           await this._loginWithCloudData(userId, user, avatarUrl, nickname);
         }
 
-        // 异步检查是否需要初始化演示数据，不阻塞登录流程
-        setTimeout(() => {
-          const currentTasks = getRawTasks();
-          if (currentTasks.length === 0) {
-            console.log('📝 本地没有任务数据，初始化演示数据...');
-            seedMockTasks();
-          }
-        }, 0);
-
-        // 快速返回首页，缩短等待时间
         wx.showToast({
           title: '登录成功',
           icon: 'success',
@@ -222,6 +212,7 @@ Page({
   },
 
   async _asyncFetchCloudData(userId) {
+    let cloudRestored = false;
     try {
       console.log('📡 异步从后端拉取用户状态...');
       const stateResult = await Promise.race([
@@ -232,6 +223,7 @@ Page({
       if (stateResult && stateResult.ok && stateResult.state) {
         console.log('✅ 从后端拉取到用户状态');
         applyRemoteState(stateResult.state, { cloudFirst: true });
+        cloudRestored = true;
       } else {
         throw new Error('invalid response');
       }
@@ -250,9 +242,18 @@ Page({
         if (syncResult && syncResult.ok && syncResult.state) {
           console.log('✅ 从同步响应中恢复云端数据');
           applyRemoteState(syncResult.state, { cloudFirst: true });
+          cloudRestored = true;
         }
       } catch (syncErr) {
         console.warn('⚠️ 同步获取云端数据也失败:', syncErr);
+      }
+    }
+
+    if (!cloudRestored) {
+      const currentTasks = getRawTasks();
+      if (currentTasks.length === 0) {
+        console.log('📝 云端恢复失败且本地无数据，初始化演示数据...');
+        seedMockTasks();
       }
     }
   },

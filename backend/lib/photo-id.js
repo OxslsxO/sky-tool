@@ -593,12 +593,10 @@ async function decontaminateSubjectBuffer(subjectBuffer, backgroundColor) {
     .toBuffer({ resolveWithObject: true });
   const channels = info.channels;
 
-  // 暴力去除白色背景污染，直接抹除边缘白边
   for (let index = 0; index < info.width * info.height; index += 1) {
     const offset = index * channels;
     const alpha = data[offset + 3] / 255;
 
-    // 完全透明像素直接清空，不留白色
     if (alpha <= 0.1) {
       data[offset] = 0;
       data[offset + 1] = 0;
@@ -607,7 +605,6 @@ async function decontaminateSubjectBuffer(subjectBuffer, backgroundColor) {
       continue;
     }
 
-    // 收紧Alpha，消除半透明白边
     const tightenedAlpha = smoothstep(0.2, 0.9, alpha);
     if (tightenedAlpha <= 0) {
       data[offset] = 0;
@@ -617,11 +614,9 @@ async function decontaminateSubjectBuffer(subjectBuffer, backgroundColor) {
       continue;
     }
 
-    // 彻底清除背景白色/纯色污染
     for (let channel = 0; channel < 3; channel += 1) {
       const source = data[offset + channel];
       const bg = channel === 0 ? backgroundColor.red : channel === 1 ? backgroundColor.green : backgroundColor.blue;
-      // 100%去除背景色，不留白色缝隙
       const recovered = (source - bg * (1 - tightenedAlpha)) / Math.max(tightenedAlpha, 1e-3);
       data[offset + channel] = Math.max(0, Math.min(255, Math.round(recovered)));
     }
@@ -629,12 +624,7 @@ async function decontaminateSubjectBuffer(subjectBuffer, backgroundColor) {
     data[offset + 3] = Math.round(tightenedAlpha * 255);
   }
 
-  // 轻微模糊边缘，让过渡自然，无白边
-  const { data: softened } = await sharp(data, {
-    raw: { width: info.width, height: info.height, channels },
-  }).blur(0.3).raw().toBuffer({ resolveWithObject: true });
-
-  return sharp(softened, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }
 
 function shouldTreatAsBackground(data, offset, estimate, thresholdSquared) {
@@ -1379,17 +1369,59 @@ function detectShoulderLine(profile) {
 async function buildPortraitCrop(subject) {
   console.log("[photo-id] buildPortraitCrop: 开始");
   try {
-    const subjectBuffer = await subject.png().toBuffer();
-    const materializedSubject = sharp(subjectBuffer);
-    const metadata = await materializedSubject.metadata();
-    const profile = await analyzePortraitRows(materializedSubject);
+    const { data: rawData, info: rawInfo } = await subject
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const mWidth = rawInfo.width;
+    const mHeight = rawInfo.height;
+    const mChannels = rawInfo.channels;
+
+    const rows = [];
+    for (let y = 0; y < mHeight; y += 1) {
+      let left = mWidth;
+      let right = -1;
+      for (let x = 0; x < mWidth; x += 1) {
+        const alpha = rawData[(y * mWidth + x) * mChannels + 3];
+        if (alpha <= OPAQUE_BOUNDS_THRESHOLD) continue;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+      rows.push({ y, left, right, width: right >= left ? right - left + 1 : 0 });
+    }
+
+    let top = rows.findIndex(row => row.width > 0);
+    let bottom = (() => {
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        if (rows[i].width > 0) return i;
+      }
+      return -1;
+    })();
+
+    if (top < 0 || bottom < top) {
+      top = 0;
+      bottom = mHeight - 1;
+    }
+
+    const smoothedWidths = rows.map((_, centerIndex) => {
+      let sum = 0, count = 0;
+      for (let swOffset = -4; swOffset <= 4; swOffset += 1) {
+        const idx = centerIndex + swOffset;
+        if (idx < 0 || idx >= rows.length) continue;
+        sum += rows[idx].width;
+        count += 1;
+      }
+      return count ? sum / count : rows[centerIndex].width;
+    });
+
+    const profile = { rows, smoothedWidths, top, bottom, height: bottom - top + 1 };
     const shoulderY = detectShoulderLine(profile);
     const headHeight = Math.max(1, shoulderY - profile.top + 1);
     const headSearchEnd = Math.min(profile.bottom, profile.top + Math.max(12, Math.round(profile.height * 0.22)));
     let headWidth = 0;
     let headCenterSum = 0;
     let headCenterWeight = 0;
-    let shoulderLeft = metadata.width;
+    let shoulderLeft = mWidth;
     let shoulderRight = -1;
 
     console.log(`[photo-id] 📐 裁切调试: profile.top=${profile.top}, profile.bottom=${profile.bottom}, profile.height=${profile.height}, shoulderY=${shoulderY}, headHeight=${headHeight}`);
@@ -1415,7 +1447,7 @@ async function buildPortraitCrop(subject) {
 
     if (shoulderRight < shoulderLeft) {
       shoulderLeft = profile.rows[shoulderY]?.left || 0;
-      shoulderRight = profile.rows[shoulderY]?.right || metadata.width - 1;
+      shoulderRight = profile.rows[shoulderY]?.right || mWidth - 1;
     }
 
     const shoulderCenter = (shoulderLeft + shoulderRight) / 2;
@@ -1423,11 +1455,11 @@ async function buildPortraitCrop(subject) {
     const portraitCenter = headCenter * 0.72 + shoulderCenter * 0.28;
     const shoulderWidth = Math.max(1, shoulderRight - shoulderLeft + 1);
 
-    const targetPortraitWidth = metadata.width;
+    const targetPortraitWidth = mWidth;
 
     const desiredBottom = Math.round(profile.top + headHeight * 4.0);
     const cropBottom = Math.min(
-      metadata.height - 1,
+      mHeight - 1,
       Math.max(
         shoulderY + Math.round(headHeight * 0.9),
         Math.min(profile.bottom, desiredBottom)
@@ -1440,16 +1472,17 @@ async function buildPortraitCrop(subject) {
     const targetTopPadding = Math.round(portraitHeight * 0.12);
     const cropTop = Math.max(0, profile.top - targetTopPadding);
     const cropLeft = Math.max(0, Math.round(portraitCenter - targetPortraitWidth / 2));
-    const safeCropLeft = Math.min(cropLeft, Math.max(0, metadata.width - targetPortraitWidth));
+    const safeCropLeft = Math.min(cropLeft, Math.max(0, mWidth - targetPortraitWidth));
 
-    console.log(`[photo-id] buildPortraitCrop: 头顶留白 ${targetTopPadding}px, 总高度 ${portraitHeight}px, 裁切区域: top=${cropTop}, bottom=${cropBottom}, left=${safeCropLeft}, width=${Math.max(1, Math.min(metadata.width, targetPortraitWidth))}`);
+    console.log(`[photo-id] buildPortraitCrop: 头顶留白 ${targetTopPadding}px, 总高度 ${portraitHeight}px, 裁切区域: top=${cropTop}, bottom=${cropBottom}, left=${safeCropLeft}, width=${Math.max(1, Math.min(mWidth, targetPortraitWidth))}`);
 
-    return materializedSubject.extract({
-      left: safeCropLeft,
-      top: cropTop,
-      width: Math.max(1, Math.min(metadata.width, targetPortraitWidth)),
-      height: Math.max(1, cropBottom - cropTop + 1),
-    });
+    return sharp(rawData, { raw: { width: mWidth, height: mHeight, channels: mChannels } })
+      .extract({
+        left: safeCropLeft,
+        top: cropTop,
+        width: Math.max(1, Math.min(mWidth, targetPortraitWidth)),
+        height: Math.max(1, cropBottom - cropTop + 1),
+      });
   } catch (error) {
     console.warn("[photo-id] buildPortraitCrop 复杂裁剪失败，使用简单居中裁剪", error);
     return subject;
@@ -1588,118 +1621,204 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
     subject = transparentSubject.extract(bounds);
   }
 
-  console.log("[photo-id] 步骤5: 转换为PNG");
-  let subjectBuffer = await subject.png().toBuffer();
-
-  try {
-    console.log("[photo-id] 步骤6: 净化主体");
-    subjectBuffer = await decontaminateSubjectBuffer(subjectBuffer, sourceBackgroundColor);
-  } catch (error) {
-    console.warn("[photo-id] 净化失败，跳过", error);
-  }
-
-  console.log("[photo-id] 步骤7: 获取元数据");
-  const preparedSubject = sharp(subjectBuffer);
-  const metadata = await preparedSubject.metadata();
-  console.log(`[photo-id] 📏 初始主体尺寸: width=${metadata.width}, height=${metadata.height}`);
+  console.log("[photo-id] 步骤5+6+7: 解码、净化并分析主体（合并优化）");
+  const { data: subjectRawData, info: subjectRawInfo } = await subject
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const sWidth = subjectRawInfo.width;
+  const sHeight = subjectRawInfo.height;
+  const sChannels = subjectRawInfo.channels;
+  const metadata = { width: sWidth, height: sHeight };
+  console.log(`[photo-id] 📏 初始主体尺寸: width=${sWidth}, height=${sHeight}`);
   console.log(`[photo-id] 📏 目标尺寸: width=${spec.width}, height=${spec.height}`);
 
-  const bottomInset = Math.max(0, spec.bottomInset || 0);
-
-  let trimBounds;
-  try {
-    console.log("[photo-id] 步骤7a: 查找裁剪边界");
-    trimBounds = await findOpaqueBounds(preparedSubject);
-    trimBounds.top = 0;
-    trimBounds.height = metadata.height;
-  } catch (error) {
-    console.warn("[photo-id] 查找裁剪边界失败，使用原图", error);
-    trimBounds = { left: 0, top: 0, width: metadata.width, height: metadata.height };
-  }
+  let trimBounds = { left: 0, top: 0, width: sWidth, height: sHeight };
+  let profile = null;
+  let shoulderY = 0;
 
   try {
-    console.log("[photo-id] 步骤7b: 裁剪左右透明边（保留顶部）");
-    subjectBuffer = await sharp(subjectBuffer).extract(trimBounds).png().toBuffer();
-  } catch (error) {
-    console.warn("[photo-id] 裁剪失败，跳过", error);
-  }
+    const profileRows = [];
+    for (let y = 0; y < sHeight; y += 1) {
+      let rowLeft = sWidth;
+      let rowRight = -1;
+      for (let x = 0; x < sWidth; x += 1) {
+        const offset = (y * sWidth + x) * sChannels;
+        const alpha = subjectRawData[offset + 3] / 255;
 
-  const trimmedMetadata = await sharp(subjectBuffer).metadata();
-  console.log(`[photo-id] 📏 裁切后尺寸: width=${trimmedMetadata.width}, height=${trimmedMetadata.height}`);
+        if (alpha <= 0.1) {
+          subjectRawData[offset] = 0; subjectRawData[offset + 1] = 0;
+          subjectRawData[offset + 2] = 0; subjectRawData[offset + 3] = 0;
+          continue;
+        }
 
-  let headHeight = Math.round(trimmedMetadata.height * 0.3);
-  let headTopInImage = 0;
-  let headCenterX = trimmedMetadata.width / 2;
-  try {
-    const profile = await analyzePortraitRows(sharp(subjectBuffer));
-    const shoulderY = detectShoulderLine(profile);
-    headHeight = Math.max(1, shoulderY - profile.top + 1);
-    headTopInImage = profile.top;
-    const headSearchEnd = Math.min(profile.bottom, profile.top + Math.max(12, Math.round(profile.height * 0.22)));
-    let hcxSum = 0;
-    let hcxWeight = 0;
-    for (let y = profile.top; y <= headSearchEnd; y += 1) {
+        const tightenedAlpha = smoothstep(0.2, 0.9, alpha);
+        if (tightenedAlpha <= 0) {
+          subjectRawData[offset] = 0; subjectRawData[offset + 1] = 0;
+          subjectRawData[offset + 2] = 0; subjectRawData[offset + 3] = 0;
+          continue;
+        }
+
+        for (let ch = 0; ch < 3; ch += 1) {
+          const source = subjectRawData[offset + ch];
+          const bg = ch === 0 ? sourceBackgroundColor.red : ch === 1 ? sourceBackgroundColor.green : sourceBackgroundColor.blue;
+          const recovered = (source - bg * (1 - tightenedAlpha)) / Math.max(tightenedAlpha, 1e-3);
+          subjectRawData[offset + ch] = Math.max(0, Math.min(255, Math.round(recovered)));
+        }
+        subjectRawData[offset + 3] = Math.round(tightenedAlpha * 255);
+
+        if (subjectRawData[offset + 3] > OPAQUE_BOUNDS_THRESHOLD) {
+          if (x < rowLeft) rowLeft = x;
+          if (x > rowRight) rowRight = x;
+        }
+      }
+      profileRows.push({ y, left: rowLeft, right: rowRight, width: rowRight >= rowLeft ? rowRight - rowLeft + 1 : 0 });
+    }
+
+    let top = profileRows.findIndex(row => row.width > 0);
+    let bottom = (() => {
+      for (let i = profileRows.length - 1; i >= 0; i -= 1) {
+        if (profileRows[i].width > 0) return i;
+      }
+      return -1;
+    })();
+
+    if (top < 0 || bottom < top) {
+      top = 0;
+      bottom = sHeight - 1;
+    }
+
+    const smoothedWidths = profileRows.map((_, centerIndex) => {
+      let sum = 0, count = 0;
+      for (let swOffset = -4; swOffset <= 4; swOffset += 1) {
+        const idx = centerIndex + swOffset;
+        if (idx < 0 || idx >= profileRows.length) continue;
+        sum += profileRows[idx].width;
+        count += 1;
+      }
+      return count ? sum / count : profileRows[centerIndex].width;
+    });
+
+    profile = { rows: profileRows, smoothedWidths, top, bottom, height: bottom - top + 1 };
+    shoulderY = detectShoulderLine(profile);
+
+    trimBounds = {
+      left: Math.max(0, profile.rows[profile.top]?.left || 0),
+      top: 0,
+      width: Math.max(1, sWidth - 2 * Math.max(0, profile.rows[profile.top]?.left || 0)),
+      height: sHeight,
+    };
+
+    let minLeft = sWidth;
+    let maxRight = 0;
+    for (let y = profile.top; y <= profile.bottom; y++) {
       const row = profile.rows[y];
       if (row && row.width > 0) {
-        hcxSum += ((row.left + row.right) / 2) * row.width;
-        hcxWeight += row.width;
+        minLeft = Math.min(minLeft, row.left);
+        maxRight = Math.max(maxRight, row.right);
       }
     }
-    if (hcxWeight > 0) {
-      headCenterX = hcxSum / hcxWeight;
-    }
-    console.log(`[photo-id] 📐 估计头高: ${headHeight}px, 头顶位置: ${headTopInImage}px, 头部中心X: ${headCenterX.toFixed(1)}px (shoulderY=${shoulderY})`);
+    trimBounds.left = Math.max(0, minLeft - 2);
+    trimBounds.width = Math.min(sWidth - trimBounds.left, maxRight - trimBounds.left + 3);
   } catch (error) {
-    console.warn("[photo-id] 估计头高失败，使用默认值", error);
+    console.warn("[photo-id] 净化/分析失败，跳过", error);
+  }
+
+  trimBounds.left = Math.max(0, Math.min(trimBounds.left, sWidth - 1));
+  trimBounds.top = Math.max(0, Math.min(trimBounds.top, sHeight - 1));
+  trimBounds.width = Math.max(1, Math.min(trimBounds.width, sWidth - trimBounds.left));
+  trimBounds.height = Math.max(1, Math.min(trimBounds.height, sHeight - trimBounds.top));
+
+  const trimmedWidth = trimBounds.width;
+  const trimmedHeight = trimBounds.height;
+  console.log(`[photo-id] 📏 裁切后尺寸: width=${trimmedWidth}, height=${trimmedHeight}`);
+
+  let headHeight = Math.round(trimmedHeight * 0.3);
+  let headTopInImage = 0;
+  let headCenterX = trimmedWidth / 2;
+  if (profile) {
+    try {
+      headHeight = Math.max(1, shoulderY - profile.top + 1);
+      headTopInImage = profile.top;
+      const headSearchEnd = Math.min(profile.bottom, profile.top + Math.max(12, Math.round(profile.height * 0.22)));
+      let hcxSum = 0;
+      let hcxWeight = 0;
+      for (let y = profile.top; y <= headSearchEnd; y += 1) {
+        const row = profile.rows[y];
+        if (row && row.width > 0) {
+          hcxSum += ((row.left + row.right) / 2) * row.width;
+          hcxWeight += row.width;
+        }
+      }
+      if (hcxWeight > 0) {
+        headCenterX = hcxSum / hcxWeight;
+      }
+      console.log(`[photo-id] 📐 估计头高: ${headHeight}px, 头顶位置: ${headTopInImage}px, 头部中心X: ${headCenterX.toFixed(1)}px (shoulderY=${shoulderY})`);
+    } catch (error) {
+      console.warn("[photo-id] 估计头高失败，使用默认值", error);
+    }
   }
 
   const targetHeadTopInCanvas = Math.round(spec.height * 0.15);
   const maxHeadRatio = 0.5;
   const targetHeadHeight = Math.round(spec.height * maxHeadRatio);
-  const scaleByWidth = spec.width / trimmedMetadata.width;
+  const scaleByWidth = spec.width / trimmedWidth;
   const maxScaleByHead = targetHeadHeight / headHeight;
-  const scaleByHeight = (spec.height - targetHeadTopInCanvas) / Math.max(1, trimmedMetadata.height - headTopInImage);
+  const scaleByHeight = (spec.height - targetHeadTopInCanvas) / Math.max(1, trimmedHeight - headTopInImage);
   const idealScale = Math.max(scaleByWidth, Math.min(scaleByWidth * 1.05, maxScaleByHead));
   const scale = Math.max(idealScale, scaleByHeight);
-  const targetWidth = Math.max(1, Math.round(trimmedMetadata.width * scale));
-  const targetHeight = Math.max(1, Math.round(trimmedMetadata.height * scale));
+  const targetWidth = Math.max(1, Math.round(trimmedWidth * scale));
+  const targetHeight = Math.max(1, Math.round(trimmedHeight * scale));
   const headTopScaled = Math.round(headTopInImage * scale);
   const headCenterXScaled = Math.round(headCenterX * scale);
 
   console.log(`[photo-id] 📐 缩放: scale=${scale.toFixed(3)}(width=${scaleByWidth.toFixed(3)},headCap=${maxScaleByHead.toFixed(3)},heightMin=${scaleByHeight.toFixed(3)}), target=${targetWidth}x${targetHeight}, 头高上限=${targetHeadHeight}px(${(maxHeadRatio * 100).toFixed(0)}%)`);
-  console.log("[photo-id] 步骤8: 调整主体大小");
-  let processedSubject = sharp(
-    await resizeSubjectBuffer(subjectBuffer, targetWidth, targetHeight)
-  );
+  console.log("[photo-id] 步骤8: 裁剪+调整主体大小并修图（合并管线）");
+  let processedPipeline = sharp(subjectRawData, {
+    raw: { width: sWidth, height: sHeight, channels: 4 },
+  })
+    .extract(trimBounds)
+    .ensureAlpha()
+    .resize(targetWidth, targetHeight, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      kernel: sharp.kernel.lanczos3,
+      fastShrinkOnLoad: false,
+    });
 
   if (retouch.sharpen) {
-    processedSubject = processedSubject.sharpen({ sigma: 0.8, m1: 0.5, m2: 1.2 });
+    processedPipeline = processedPipeline.sharpen({ sigma: 0.8, m1: 0.5, m2: 1.2 });
   }
 
   if (retouch.brightness !== 1 || retouch.saturation !== 1) {
-    processedSubject = processedSubject.modulate({
+    processedPipeline = processedPipeline.modulate({
       brightness: retouch.brightness,
       saturation: retouch.saturation,
     });
   }
 
   if (retouch.contrast && retouch.contrast !== 1) {
-    processedSubject = processedSubject.linear(retouch.contrast, -(128 * (retouch.contrast - 1)));
+    processedPipeline = processedPipeline.linear(retouch.contrast, -(128 * (retouch.contrast - 1)));
   }
 
-  console.log("[photo-id] 步骤9: 处理并转换为PNG");
-  subjectBuffer = await processedSubject.png().toBuffer();
-  let subjectMetadata = await sharp(subjectBuffer).metadata();
+  const { data: subjectResultBuf, info: subjectResultInfo } = await processedPipeline
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  let subjectBuffer = subjectResultBuf;
+  let subjectMetadata = { width: subjectResultInfo.width, height: subjectResultInfo.height };
+
+  let cropLeft = 0;
+  let cropTop = 0;
+  let cropWidth = subjectMetadata.width;
+  let cropHeight = subjectMetadata.height;
+  let needCrop = false;
 
   if (subjectMetadata.width > spec.width) {
     const idealCropLeft = Math.round(headCenterXScaled - spec.width / 2);
-    const cropLeft = Math.max(0, Math.min(idealCropLeft, subjectMetadata.width - spec.width));
+    cropLeft = Math.max(0, Math.min(idealCropLeft, subjectMetadata.width - spec.width));
+    cropWidth = spec.width;
+    needCrop = true;
     console.log(`[photo-id] 📐 水平裁切: headCenterXScaled=${headCenterXScaled}, idealCropLeft=${idealCropLeft}, cropLeft=${cropLeft}`);
-    subjectBuffer = await sharp(subjectBuffer)
-      .extract({ left: cropLeft, top: 0, width: spec.width, height: subjectMetadata.height })
-      .png()
-      .toBuffer();
-    subjectMetadata = await sharp(subjectBuffer).metadata();
   }
 
   const subjectTopInCanvas = targetHeadTopInCanvas - headTopScaled;
@@ -1713,14 +1832,19 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
   const maxVisibleHeight = Math.min(subjectMetadata.height - cropTopOffset, visibleTop);
 
   if (cropTopOffset > 0 || maxVisibleHeight < subjectMetadata.height) {
-    const extractTop = Math.max(0, cropTopOffset);
-    const extractHeight = Math.max(1, Math.min(maxVisibleHeight, subjectMetadata.height - extractTop));
-    console.log(`[photo-id] 📐 垂直裁切: cropTopOffset=${cropTopOffset}, extractTop=${extractTop}, extractHeight=${extractHeight}`);
+    cropTop = Math.max(0, cropTopOffset);
+    cropHeight = Math.max(1, Math.min(maxVisibleHeight, subjectMetadata.height - cropTop));
+    needCrop = true;
+    console.log(`[photo-id] 📐 垂直裁切: cropTopOffset=${cropTopOffset}, extractTop=${cropTop}, extractHeight=${cropHeight}`);
+  }
+
+  if (needCrop) {
     subjectBuffer = await sharp(subjectBuffer)
-      .extract({ left: 0, top: extractTop, width: subjectMetadata.width, height: extractHeight })
+      .extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
       .png()
       .toBuffer();
-    subjectMetadata = await sharp(subjectBuffer).metadata();
+    subjectMetadata.width = cropWidth;
+    subjectMetadata.height = cropHeight;
   }
 
   const left = Math.max(0, Math.round((spec.width - subjectMetadata.width) / 2));
@@ -1767,20 +1891,9 @@ async function buildPhotoIdImage(config, inputBuffer, options) {
 
 // 合成后的最终边缘修复 - 添加边缘模糊来消除白色缝隙
 async function finalEdgeRepairAfterComposite(imageBuffer, bgRgb, bgHex) {
-  console.log("[photo-id] finalEdgeRepairAfterComposite: 开始（清晰度优化模式）");
-
-  // 减少模糊程度，保持清晰度
-  const slightlyBlurred = await sharp(imageBuffer)
-    .blur(1.0) // 减少模糊，保持清晰度
-    .png()
-    .toBuffer();
+  console.log("[photo-id] finalEdgeRepairAfterComposite: 开始（单次解码优化）");
 
   const { data: originalData, info } = await sharp(imageBuffer)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const { data: blurredData } = await sharp(slightlyBlurred)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -1813,7 +1926,7 @@ async function finalEdgeRepairAfterComposite(imageBuffer, bgRgb, bgHex) {
           const ng = originalData[nIdx + 1];
           const nb = originalData[nIdx + 2];
           const colorDiff = Math.abs(r - nr) + Math.abs(g - ng) + Math.abs(b - nb);
-          if (colorDiff > 20) { // 原25 → 改为20，更敏感的边缘检测
+          if (colorDiff > 20) {
             isEdge = true;
           }
         }
@@ -1826,16 +1939,33 @@ async function finalEdgeRepairAfterComposite(imageBuffer, bgRgb, bgHex) {
 
         let blend = 0;
         if (isWhiteish) {
-          blend = 0.6; // 减少混合，保持更多原始清晰度
+          blend = 0.6;
         } else if (distToBg < 80) {
-          blend = 0.4; // 减少混合
+          blend = 0.4;
         } else {
-          blend = 0.25; // 减少混合
+          blend = 0.25;
         }
 
-        resultData[idx] = Math.round(originalData[idx] * (1 - blend) + blurredData[idx] * blend);
-        resultData[idx + 1] = Math.round(originalData[idx + 1] * (1 - blend) + blurredData[idx + 1] * blend);
-        resultData[idx + 2] = Math.round(originalData[idx + 2] * (1 - blend) + blurredData[idx + 2] * blend);
+        let blurR = 0, blurG = 0, blurB = 0, blurW = 0;
+        const gaussKernel = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+        let ki = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nIdx = ((y + dy) * width + (x + dx)) * channels;
+            const w = gaussKernel[ki++];
+            blurR += originalData[nIdx] * w;
+            blurG += originalData[nIdx + 1] * w;
+            blurB += originalData[nIdx + 2] * w;
+            blurW += w;
+          }
+        }
+        blurR = Math.round(blurR / blurW);
+        blurG = Math.round(blurG / blurW);
+        blurB = Math.round(blurB / blurW);
+
+        resultData[idx] = Math.round(r * (1 - blend) + blurR * blend);
+        resultData[idx + 1] = Math.round(g * (1 - blend) + blurG * blend);
+        resultData[idx + 2] = Math.round(b * (1 - blend) + blurB * blend);
       }
     }
   }

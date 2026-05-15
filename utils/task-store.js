@@ -910,10 +910,13 @@ function seedMockTasks() {
   }
 
   const now = Date.now();
+  const user = getUserState();
+  const currentUserId = user ? (user.userId || user.openid) : null;
   const seedTasks = [
     {
       id: "task_seed_1",
       toolId: "pdf-compress",
+      userId: currentUserId,
       selections: { mode: "均衡" },
       createdAt: now - 2 * 60 * 60 * 1000,
       status: "success",
@@ -935,6 +938,7 @@ function seedMockTasks() {
     {
       id: "task_seed_2",
       toolId: "ocr-text",
+      userId: currentUserId,
       selections: { language: "中英混合", layout: "正文优先" },
       createdAt: now - 90 * 1000,
       status: "processing",
@@ -956,6 +960,7 @@ function seedMockTasks() {
     {
       id: "task_seed_3",
       toolId: "photo-id",
+      userId: currentUserId,
       selections: { size: "考试报名", background: "蓝底", retouch: "自然" },
       createdAt: now - 4 * 60 * 60 * 1000,
       status: "success",
@@ -977,46 +982,57 @@ function seedMockTasks() {
   ];
 
   saveTasks(seedTasks);
-  writeStorage(STORAGE_KEYS.recent, ["photo-id", "universal-compress", "ocr-text"]);
-  writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "universal-compress"]);
+
+  const existingRecent = readStorage(STORAGE_KEYS.recent, []);
+  if (existingRecent.length === 0) {
+    writeStorage(STORAGE_KEYS.recent, ["photo-id", "universal-compress", "ocr-text"]);
+  }
+
+  const existingFavorites = readStorage(STORAGE_KEYS.favorites, []);
+  if (existingFavorites.length === 0) {
+    writeStorage(STORAGE_KEYS.favorites, ["photo-id", "pdf-merge", "universal-compress"]);
+  }
+
+  const existingPointsRecords = readStorage(STORAGE_KEYS.pointsRecords, []);
+  if (existingPointsRecords.length === 0) {
+    const initialPointsRecords = [
+      {
+        id: "points_initial_1",
+        type: "recharge",
+        title: "新用户注册奖励",
+        change: 50,
+        createdAt: now - 7 * 24 * 60 * 60 * 1000,
+      },
+      {
+        id: "points_initial_2",
+        type: "consume",
+        title: "PDF压缩",
+        change: -10,
+        createdAt: now - 2 * 60 * 60 * 1000,
+      },
+    ];
+    writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
+  }
   
-  // 初始化一些积分记录
-  const initialPointsRecords = [
-    {
-      id: "points_initial_1",
-      type: "recharge",
-      title: "新用户注册奖励",
-      change: 50,
-      createdAt: now - 7 * 24 * 60 * 60 * 1000,
-    },
-    {
-      id: "points_initial_2",
-      type: "consume",
-      title: "PDF压缩",
-      change: -10,
-      createdAt: now - 2 * 60 * 60 * 1000,
-    },
-  ];
-  writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
-  
-  // 确保用户有初始积分
   const currentUser = getUserState();
   if (currentUser && !currentUser.points) {
     updateUserState({
       points: 100,
     }, { silent: true });
     
-    // 添加新用户积分记录
-    const initialPointsRecords = [
-      {
-        id: makeLocalId("pr"),
-        type: "recharge",
-        title: "新用户注册奖励",
-        change: 100,
-        createdAt: Date.now(),
-      },
-    ];
-    writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
+    const existingRecords = readStorage(STORAGE_KEYS.pointsRecords, []);
+    if (existingRecords.length === 0) {
+      const initialPointsRecords = [
+        {
+          id: makeLocalId("pr"),
+          type: "recharge",
+          title: "新用户注册奖励",
+          change: 100,
+          createdAt: Date.now(),
+        },
+      ];
+      writeStorage(STORAGE_KEYS.pointsRecords, initialPointsRecords);
+    }
   }
 }
 
@@ -1232,7 +1248,7 @@ function applyRemoteState(state, options = {}) {
     // 过滤云端任务，只保留属于当前用户的任务
     const filteredRemoteTasks = snapshot.tasks.filter(task => {
       if (!currentUserId) return true;
-      if (!task.userId) return false;
+      if (!task.userId) return true;
       return task.userId === currentUserId;
     });
     
