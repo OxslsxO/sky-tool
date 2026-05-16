@@ -1,18 +1,17 @@
 const { seedUserState, getUserState } = require("./utils/task-store");
 const { isWechatIdentity } = require("./utils/auth-session");
-const { clearServiceConfig, hasBackendService } = require("./services/backend-tools");
+const { hasBackendService, warmUpBackend } = require("./services/backend-tools");
 
 App({
   globalData: {
     brandName: "万里工具箱",
+    backendReady: false,
   },
 
   onLaunch() {
     console.log("🚀 应用启动");
 
     try {
-      clearServiceConfig();
-
       const user = getUserState();
       const isLoggedIn = isWechatIdentity(user);
 
@@ -20,18 +19,14 @@ App({
         console.log("✅ 已登录，准备数据");
         seedUserState();
 
-        // 延迟云端恢复，不阻塞启动
-        if (hasBackendService() && user.userId) {
-          setTimeout(() => {
-            this._tryCloudRestore(user);
-          }, 2000);
+        if (hasBackendService()) {
+          this._warmUpAndRestore(user);
         }
       } else {
         console.log("👤 游客模式，初始化本地数据");
         seedUserState();
       }
 
-      // 直接跳转到首页，允许游客访问
       wx.switchTab({
         url: '/pages/home/index',
       });
@@ -41,6 +36,23 @@ App({
         url: '/pages/home/index',
       });
     }
+  },
+
+  _warmUpAndRestore(user) {
+    warmUpBackend()
+      .then((result) => {
+        if (result.ok) {
+          this.globalData.backendReady = true;
+          if (user.userId) {
+            this._tryCloudRestore(user);
+          }
+        } else {
+          console.warn("⚠️ 后端唤醒失败，部分功能可能不可用");
+        }
+      })
+      .catch((err) => {
+        console.warn("⚠️ 后端唤醒异常:", err);
+      });
   },
 
   _tryCloudRestore(user) {

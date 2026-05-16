@@ -118,9 +118,13 @@ async function requestJson(pathname, data, options = {}) {
     } catch (error) {
       lastError = error;
       const errMsg = error.errMsg || error.message || "";
-      const canRetry = isRetryableNetworkError(errMsg) && attempt < maxRetries;
+      const is403 = error.statusCode === 403;
+      const canRetry = (isRetryableNetworkError(errMsg) || is403) && attempt < maxRetries;
       if (!canRetry) {
         break;
+      }
+      if (is403) {
+        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
       }
     }
   }

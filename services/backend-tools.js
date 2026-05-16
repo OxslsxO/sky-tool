@@ -12,8 +12,8 @@ function getMiniProgramEnvVersion() {
 }
 
 function getDefaultBaseUrl() {
-  return "https://oxslsxo-sky-tool.hf.space";
-  //return "http://127.0.0.1:3100";
+  //return "https://oxslsxo-sky-tool.hf.space";
+  return "http://127.0.0.1:3100";
   //return "https://intercounty-distastefully-shanelle.ngrok-free.dev"
 }
 
@@ -120,11 +120,45 @@ function requestHealthCheck() {
           return;
         }
 
-        reject(response.data || new Error("HEALTH_CHECK_FAILED"));
+        var error = new Error("HEALTH_CHECK_FAILED:" + response.statusCode);
+        error.statusCode = response.statusCode;
+        reject(error);
       },
       fail: reject,
     });
   });
+}
+
+function warmUpBackend(options) {
+  var maxAttempts = (options && options.maxAttempts) || 6;
+  var baseDelay = (options && options.baseDelay) || 5000;
+  var attempt = 0;
+
+  function tryWake() {
+    attempt++;
+    return requestHealthCheck()
+      .then(function (res) {
+        console.log("[backend-tools] backend awake (attempt " + attempt + ")");
+        return { ok: true, attempt: attempt, data: res };
+      })
+      .catch(function (err) {
+        var is403 = err && err.statusCode === 403;
+        var isSleeping = is403 || (err && err.message && err.message.indexOf("403") > -1);
+        if (isSleeping && attempt < maxAttempts) {
+          var delay = baseDelay * attempt;
+          console.log("[backend-tools] backend sleeping, retry " + attempt + "/" + maxAttempts + " in " + delay + "ms");
+          return new Promise(function (r) { setTimeout(r, delay); }).then(tryWake);
+        }
+        console.warn("[backend-tools] warmUp failed after " + attempt + " attempts:", err);
+        return { ok: false, attempt: attempt, error: err };
+      });
+  }
+
+  if (!hasBackendService()) {
+    return Promise.resolve({ ok: false, attempt: 0, error: "BACKEND_NOT_CONFIGURED" });
+  }
+
+  return tryWake();
 }
 
 module.exports = {
@@ -137,4 +171,5 @@ module.exports = {
   buildServiceUrl,
   getServiceHeaders,
   requestHealthCheck,
+  warmUpBackend,
 };
